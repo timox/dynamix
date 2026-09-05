@@ -81,8 +81,14 @@ def check_tkinter():
         report(True, "Tkinter (GUI)", f"Tk {tkinter.TkVersion}")
         return True
     except Exception as exc:  # noqa: BLE001
-        report(False, "Tkinter (GUI)", f"{exc} - the GUI (gui.py) will not start; "
-               "on Windows re-run the Python installer and enable 'tcl/tk and IDLE'")
+        report(False, "Tkinter (GUI)", f"{exc} - the GUI (gui.py) will not start")
+        print(f"       Python used by this venv: {sys.base_prefix}")
+        if sys.platform.startswith("win"):
+            print("       Fix: Settings > Apps > Installed apps > Python 3.x > Modify > Modify,")
+            print("       tick 'tcl/tk and IDLE', finish, then run this script again (no need to recreate venv).")
+            print("       Conda users: conda install tk")
+        else:
+            print("       Fix: install the tk package of your distribution (e.g. apt install python3-tk)")
         return False
 
 
