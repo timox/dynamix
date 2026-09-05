@@ -112,7 +112,47 @@ python dj_tools.py --batch "C:\Musique\Set" --output-dir "C:\Musique\Notes"
 
 Mettez les chemins entre guillemets s'ils contiennent des espaces.
 
-## 6. Dépannage
+## 6. Enchaîner un set automatiquement avec Mixxx
+
+[Mixxx](https://mixxx.org) est gratuit et son **Auto DJ** enchaîne une playlist
+avec un fondu calé au tempo. DynaMix peut lui fournir, pour chaque morceau,
+les repères d'**intro** et d'**outro** qui pilotent ce fondu, ainsi que la
+playlist dans le bon ordre. Il n'y a alors plus rien à préparer.
+
+1. **Une seule fois dans Mixxx** : *Préférences → Bibliothèque*, ajoutez votre
+   dossier de musique et lancez un balayage, pour que Mixxx connaisse les
+   fichiers. Activez aussi la normalisation : *Préférences → Normalisation*,
+   cochez **ReplayGain** (analyse et application). Mixxx analysera les morceaux
+   et alignera leur volume à la lecture, sans modifier vos fichiers.
+2. **Fermez Mixxx.** Il garde sa base ouverte et écraserait les modifications.
+3. Dans DynaMix, onglet **Playlist Manager** : choisissez le dossier, créez
+   éventuellement une set list, puis cliquez sur **Plan Transitions**. Une
+   fenêtre affiche la feuille de transitions. Cliquez sur **Export to Mixxx**,
+   confirmez l'emplacement de `mixxxdb.sqlite` (détecté automatiquement dans
+   `%LOCALAPPDATA%\Mixxx`) et le nom de la playlist.
+
+   En ligne de commande, l'équivalent en une seule étape :
+
+   ```bat
+   python mixxx_export.py --playlist "C:\Musique\Set" --set-duration 60
+   ```
+
+   ou, pour garder l'ordre d'une playlist existante :
+
+   ```bat
+   python mixxx_export.py --m3u "C:\Musique\Set\Set.m3u"
+   ```
+
+4. Rouvrez Mixxx. Dans *Bibliothèque → Listes de lecture*, faites un clic droit
+   sur la playlist `DynaMix - ...` → **Ajouter à la file Auto DJ**. Dans le
+   panneau Auto DJ, choisissez le mode de transition **Intro + outro complets**
+   et cliquez sur **Activer Auto DJ**.
+
+Une sauvegarde horodatée de la base est créée à côté de `mixxxdb.sqlite` avant
+chaque export. Les morceaux absents de la bibliothèque Mixxx sont listés dans
+le rapport : ajoutez le dossier dans Mixxx, rebalayez, puis exportez à nouveau.
+
+## 7. Dépannage
 
 | Symptôme | Cause probable | Solution |
 | --- | --- | --- |

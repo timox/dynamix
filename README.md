@@ -115,6 +115,32 @@ python gui.py
 
 The GUI provides access to all DynaMix features through an intuitive interface.
 
+### Transition Planning and Mixxx Auto DJ
+
+Plan every transition of a set and push the result into [Mixxx](https://mixxx.org) so that
+its Auto DJ mixes the whole playlist by itself:
+
+```bash
+# Analyze a folder, build a set list, print the transition sheet, write cues + playlist into Mixxx
+python mixxx_export.py --playlist /path/to/music --set-duration 60
+
+# Keep the order of an existing playlist and save the sheet
+python mixxx_export.py --m3u my_set.m3u --sheet transitions.txt
+
+# Plan only (no Mixxx) / preview what would be written
+python mixxx_export.py --m3u my_set.m3u --no-mixxx
+python mixxx_export.py --m3u my_set.m3u --dry-run
+```
+
+For each track DynaMix computes a beat-aligned **intro** section (where it should start under
+the previous track, until its energy kicks in) and an **outro** section (where the previous
+track should start fading, until it must be gone). They are written as Mixxx intro/outro cues
+and a Mixxx playlist is created with the set order. In Mixxx, add that playlist to the Auto DJ
+queue and pick the **Full Intro + Outro** transition mode. The tracks must already be in the
+Mixxx library and Mixxx must be closed during the export; a backup of `mixxxdb.sqlite` is made
+first. The same is available in the GUI: Playlist Manager tab, **Plan Transitions**, then
+**Export to Mixxx**.
+
 ### Audio Effects Analysis
 
 Analyze audio effects and advanced characteristics:

@@ -5,7 +5,7 @@ A comprehensive GUI application for audio analysis and DJ tools
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 import os
 import threading
 from pathlib import Path
@@ -20,6 +20,8 @@ from playlist_manager import PlaylistManager
 from audio_effects import AudioEffects, TrackComparer
 from export_tools import ExportTools
 from mix_enhanced import EnhancedMixAnalyzer
+from transition_planner import TransitionPlanner
+from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 
 
 class DynaMixGUI:
@@ -167,6 +169,7 @@ class DynaMixGUI:
         energy_combo.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(options_frame, text="Create Set List", command=self.create_set_list).pack(side=tk.LEFT, padx=5)
+        ttk.Button(options_frame, text="Plan Transitions", command=self.plan_transitions).pack(side=tk.LEFT, padx=5)
         
         # Results
         results_frame = ttk.Frame(frame)
@@ -568,6 +571,119 @@ class DynaMixGUI:
         self.current_set_list = list(tracks)
         self.update_status(f"Playlist saved: {len(tracks)} tracks ({source}) -> {filename}")
         messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
+    
+    def _tracks_for_directory(self, directory):
+        """Tracks to work on, in order: set list, analyzed tracks, or a plain directory scan."""
+        manager = getattr(self, 'playlist_manager', None)
+        same_dir = manager is not None and os.path.normcase(os.path.abspath(manager.playlist_directory)) == \
+            os.path.normcase(os.path.abspath(directory))
+        if same_dir and getattr(self, 'current_set_list', None):
+            return list(self.current_set_list), "set list"
+        if same_dir and manager.tracks:
+            return list(manager.tracks), "analyzed tracks"
+        return PlaylistManager(directory).quick_playlist(), "directory scan"
+    
+    def plan_transitions(self):
+        """Compute intro/outro sections and the transition sheet for the current set"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        
+        tracks, source = self._tracks_for_directory(directory)
+        if len(tracks) < 2:
+            messagebox.showwarning("Warning", "At least two audio files are needed to plan transitions")
+            return
+        
+        def work():
+            try:
+                planner = TransitionPlanner(tracks)
+                planner.plan(progress_callback=lambda i, n, name: self.root.after(
+                    0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
+                self.transition_planner = planner
+                self.transition_source_dir = directory
+                self.root.after(0, self._show_transition_window, source)
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Transition planning failed: {str(e)}")
+                self.root.after(0, self.update_status, "Error during transition planning")
+        
+        self.update_status(f"Planning transitions for {len(tracks)} tracks ({source})...")
+        threading.Thread(target=work, daemon=True).start()
+    
+    def _show_transition_window(self, source: str):
+        """Display the transition sheet with save / Mixxx export actions"""
+        planner = self.transition_planner
+        title = f"DynaMix Transition Sheet - {os.path.basename(os.path.normpath(self.transition_source_dir))}"
+        
+        win = tk.Toplevel(self.root)
+        win.title("Transition Plan")
+        win.geometry("900x600")
+        
+        toolbar = ttk.Frame(win)
+        toolbar.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(toolbar, text=f"{len(planner.profiles)} tracks, {len(planner.transitions)} transitions ({source})").pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar, text="Save Sheet...", command=lambda: self.save_transition_sheet(title)).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(toolbar, text="Export to Mixxx...", command=lambda: self.export_to_mixxx(text)).pack(side=tk.RIGHT, padx=5)
+        
+        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        text.insert(tk.END, planner.to_text(title))
+        self.update_status(f"Transitions planned: {len(planner.transitions)} ({source})")
+    
+    def save_transition_sheet(self, title: str):
+        """Save the transition sheet as a text file"""
+        filename = filedialog.asksaveasfilename(
+            title="Save Transition Sheet",
+            initialdir=self.transition_source_dir,
+            initialfile="transitions.txt",
+            defaultextension=".txt",
+            filetypes=[("Text", "*.txt"), ("All files", "*.*")]
+        )
+        if filename:
+            self.transition_planner.save_text(filename, title)
+            self.update_status(f"Transition sheet saved: {filename}")
+    
+    def export_to_mixxx(self, log_widget=None):
+        """Write intro/outro cues and a playlist into the Mixxx database"""
+        planner = getattr(self, 'transition_planner', None)
+        if planner is None or not planner.profiles:
+            messagebox.showwarning("Warning", "Plan transitions first")
+            return
+        
+        detected = find_mixxx_db()
+        db_path = filedialog.askopenfilename(
+            title="Select the Mixxx database (mixxxdb.sqlite) - close Mixxx first",
+            initialdir=os.path.dirname(detected) if detected else None,
+            initialfile=os.path.basename(detected) if detected else "mixxxdb.sqlite",
+            filetypes=[("Mixxx database", "mixxxdb.sqlite"), ("SQLite", "*.sqlite"), ("All files", "*.*")]
+        )
+        if not db_path:
+            return
+        
+        default_name = f"DynaMix - {os.path.basename(os.path.normpath(self.transition_source_dir))}"
+        playlist_name = simpledialog.askstring("Mixxx playlist", "Name of the Mixxx playlist to create:",
+                                               initialvalue=default_name, parent=self.root)
+        if playlist_name is None:
+            return
+        
+        if not messagebox.askyesno("Export to Mixxx",
+                                   "Mixxx must be closed while exporting.\n"
+                                   "A backup of the database will be created first.\n\nContinue?"):
+            return
+        
+        try:
+            exporter = MixxxExporter(db_path)
+            report = exporter.export(planner.profiles, playlist_name=playlist_name.strip() or None)
+        except Exception as e:
+            messagebox.showerror("Error", f"Mixxx export failed: {str(e)}")
+            return
+        
+        summary = format_report(report)
+        if log_widget is not None:
+            log_widget.insert(tk.END, "\n\nMIXXX EXPORT\n" + "-" * 60 + "\n" + summary + "\n")
+            log_widget.see(tk.END)
+        self.update_status(f"Mixxx export: {report['cues_written']} cues written, {len(report['missing'])} tracks missing")
+        messagebox.showinfo("Export to Mixxx", summary)
     
     def create_set_list(self):
         """Create set list from analyzed playlist"""
