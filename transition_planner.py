@@ -21,7 +21,7 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
-from audio_utils import AudioAnalyzer
+from audio_utils import AudioAnalyzer, energy_compatibility_score, key_compatibility_score
 
 
 def compatibility_from_features(f1: Dict, f2: Dict) -> Dict:
@@ -34,19 +34,8 @@ def compatibility_from_features(f1: Dict, f2: Dict) -> Dict:
         'bpm_compatibility': max(0.0, 100.0 - bpm_diff * 2),
     }
 
-    key1 = str(f1.get('key') or '')
-    key2 = str(f2.get('key') or '')
-    if key1 and key1 == key2:
-        result['key_compatibility'] = 100.0
-    elif key1 and key2 and key1.split()[0] == key2.split()[0]:
-        result['key_compatibility'] = 80.0
-    else:
-        result['key_compatibility'] = 50.0
-
-    e1 = float(f1.get('avg_energy') or 0)
-    e2 = float(f2.get('avg_energy') or 0)
-    max_energy = max(e1, e2)
-    result['energy_compatibility'] = max(0.0, 100.0 - abs(e1 - e2) / max_energy * 100.0) if max_energy > 0 else 100.0
+    result['key_compatibility'] = key_compatibility_score(f1.get('key'), f2.get('key'))
+    result['energy_compatibility'] = energy_compatibility_score(f1, f2)
 
     result['overall_score'] = (
         result['bpm_compatibility'] * 0.4
@@ -138,10 +127,15 @@ class TransitionPlanner:
         bpm = float(track.get('bpm') or 0)
         key = track.get('key') or ''
         avg_energy = float(track.get('avg_energy') or 0)
+        energy_level = float(track.get('energy_level') or 0)
+        has_beat = bool(track.get('has_beat', True))
         if bpm <= 0:
             bpm, _ = analyzer.detect_bpm()
         if not key:
             key, _ = analyzer.detect_key()
+        if energy_level <= 0:
+            energy_level, components = analyzer.compute_energy_level(bpm=bpm)
+            has_beat = bool(components.get('beat_gate', 1.0) >= 0.5)
 
         times, rms = analyzer.analyze_energy_profile()
         if avg_energy <= 0:
@@ -192,6 +186,8 @@ class TransitionPlanner:
             'bpm': float(bpm),
             'key': key,
             'avg_energy': avg_energy,
+            'energy_level': energy_level,
+            'has_beat': has_beat,
             'mix_duration': mix_dur,
             'intro_start': float(intro_start),
             'intro_end': float(intro_end),
@@ -216,12 +212,14 @@ class TransitionPlanner:
             crossfade = min(a['outro_end'] - a['outro_start'], b['intro_end'] - b['intro_start'])
 
             notes = []
-            if compat['bpm_difference'] > 5:
+            if not (a.get('has_beat', True) and b.get('has_beat', True)):
+                notes.append("beatless track: free tempo, blend on the pad")
+            elif compat['bpm_difference'] > 5:
                 notes.append(f"sync tempo ({bpm_adjust:+.1f}%)")
             if compat['key_compatibility'] < 80:
                 notes.append("key clash: use EQ / short blend")
-            if compat['energy_compatibility'] < 60:
-                notes.append("energy jump")
+            if compat['energy_compatibility'] < 70:
+                notes.append(f"energy jump ({a['energy_level']:.1f} -> {b['energy_level']:.1f})")
             if not notes:
                 notes.append("smooth")
 
@@ -264,7 +262,7 @@ class TransitionPlanner:
         lines.append("-" * 60)
         for i, p in enumerate(self.profiles, 1):
             lines.append(f"{i:2d}. {p['filename']}")
-            lines.append(f"    {p['bpm']:.1f} BPM | {p['key'] or '-'} | {self._fmt(p['duration'])}")
+            lines.append(f"    {p['bpm']:.1f} BPM | {p['key'] or '-'} | energy {p['energy_level']:.1f}/10 | {self._fmt(p['duration'])}")
             lines.append(f"    intro {self._fmt(p['intro_start'])} -> {self._fmt(p['intro_end'])}"
                          f"   outro {self._fmt(p['outro_start'])} -> {self._fmt(p['outro_end'])}")
         lines.append("")

@@ -14,6 +14,7 @@
 - **Drop Detection:** Energy breakdown and build-up point identification
 
 ### Playlist Management
+- **Energy Level (1-10):** Perceived energy independent of mastering loudness, from tempo, percussive drive, rhythmic density, low end and brightness
 - **Playlist Analysis:** Analyze entire music collections
 - **Set List Generation:** Create optimal track sequences for DJ sets
 - **Energy Curve Optimization:** Build-up, wave, or custom energy patterns
@@ -114,6 +115,20 @@ python gui.py
 ```
 
 The GUI provides access to all DynaMix features through an intuitive interface.
+
+### Energy Level and Set Ordering
+
+Each track gets an **energy level from 1 to 10**. It is computed on the loudness-normalised
+body of the track, so a quiet master and a loud master of the same tune get the same level.
+The components are the tempo, the number of percussive events per second, the share of
+percussive energy, the share of low end and the brightness; the tempo and rhythm terms only
+count when the track actually has a beat, so pads and ambient pieces stay low.
+
+Set lists (`create_set_list`, `--playlist`, GUI "Create Set List") first pick tracks that cover
+the whole energy range of the folder for the requested duration, then place them along the
+chosen curve (`build`, `wave`, `peak_middle`, `constant`) while keeping neighbours within a few
+BPM and harmonically compatible (Camelot-wheel logic: same key, relative major/minor, fifth
+neighbours).
 
 ### Transition Planning and Mixxx Auto DJ
 

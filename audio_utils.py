@@ -181,6 +181,82 @@ class AudioAnalyzer:
         
         return filtered_drops
     
+    # Calibration of the perceived-energy components (typical club-music ranges).
+    # Each component is mapped through a sigmoid centred on `center` with the given
+    # `scale`, then combined with `weight`. The result is loudness independent.
+    ENERGY_COMPONENTS = {
+        #                  center  scale  weight
+        'tempo':          (124.0,  12.0,  0.25),   # BPM (only counts when there is a beat)
+        'onset_rate':     (3.5,    1.5,   0.25),   # percussive events per second
+        'percussive':     (0.30,   0.10,  0.25),   # share of percussive energy (HPSS)
+        'low_end':        (0.25,   0.10,  0.10),   # share of energy below 150 Hz (beat-gated)
+        'brightness':     (2500.0, 800.0, 0.15),   # spectral centroid in Hz
+    }
+    # Components that only make sense for rhythmic material are multiplied by a
+    # "beat gate" derived from the percussive share: ~0 for pads, ~1 for drums.
+    BEAT_GATED_COMPONENTS = ('tempo', 'onset_rate', 'low_end')
+
+    def compute_energy_level(self, bpm: float = None, excerpt_seconds: float = 120.0) -> Tuple[float, dict]:
+        """
+        Estimate the perceived energy of the track on a 1-10 scale, independent of
+        its mastering loudness (the signal is RMS-normalised first). The analysis
+        runs on the body of the track (middle part, up to `excerpt_seconds`) so that
+        quiet intros/outros do not dilute the result.
+        Returns: (energy_level, components)
+        """
+        if bpm is None:
+            bpm, _ = self.detect_bpm()
+
+        # Body excerpt, mono, loudness normalised
+        y = self.y if self.y.ndim == 1 else librosa.to_mono(self.y)
+        total = len(y)
+        excerpt = int(min(total, excerpt_seconds * self.sr))
+        start = max(0, (total - excerpt) // 2)
+        y = y[start:start + excerpt].astype(np.float32)
+        rms_total = float(np.sqrt(np.mean(y ** 2))) if len(y) else 0.0
+        if rms_total <= 1e-8:
+            return 1.0, {name: 0.0 for name in self.ENERGY_COMPONENTS}
+        y = y / rms_total
+
+        hop = 512
+        stft = np.abs(librosa.stft(y, n_fft=2048, hop_length=hop))
+        freqs = librosa.fft_frequencies(sr=self.sr, n_fft=2048)
+        power = stft ** 2
+        total_power = float(np.sum(power)) + 1e-12
+
+        # Percussive share via harmonic/percussive separation
+        harmonic, percussive = librosa.decompose.hpss(stft)
+        perc_power = float(np.sum(percussive ** 2))
+        perc_share = perc_power / (float(np.sum(harmonic ** 2)) + perc_power + 1e-12)
+
+        # Rhythmic activity: onsets per second, measured on the percussive part only
+        onset_env = librosa.onset.onset_strength(S=librosa.power_to_db(percussive ** 2 + 1e-10), sr=self.sr)
+        onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=self.sr, hop_length=hop)
+        duration = len(y) / self.sr
+        onset_rate = len(onsets) / duration if duration > 0 else 0.0
+
+        # Low-end share (kick/bass) and brightness
+        low_share = float(np.sum(power[freqs < 150.0, :])) / total_power
+        centroid = float(np.median(librosa.feature.spectral_centroid(S=stft, sr=self.sr)))
+
+        raw = {
+            'tempo': float(bpm or 0.0),
+            'onset_rate': float(onset_rate),
+            'percussive': perc_share,
+            'low_end': low_share,
+            'brightness': centroid,
+        }
+        beat_gate = 1.0 / (1.0 + np.exp(-(perc_share - 0.15) / 0.04))
+        raw['beat_gate'] = float(beat_gate)
+        score = 0.0
+        for name, (center, scale, weight) in self.ENERGY_COMPONENTS.items():
+            normalised = 1.0 / (1.0 + np.exp(-(raw[name] - center) / scale))
+            if name in self.BEAT_GATED_COMPONENTS:
+                normalised *= beat_gate
+            score += weight * normalised
+        level = float(np.clip(1.0 + 9.0 * score, 1.0, 10.0))
+        return round(level, 1), raw
+
     def get_audio_features(self) -> dict:
         """
         Get comprehensive audio features
@@ -201,6 +277,9 @@ class AudioAnalyzer:
         features['avg_energy'] = np.mean(rms)
         features['max_energy'] = np.max(rms)
         features['energy_std'] = np.std(rms)
+        features['energy_level'], features['energy_components'] = self.compute_energy_level(bpm=features['bpm'])
+        # Beatless material (pads, ambient) has no meaningful tempo to match
+        features['has_beat'] = bool(features['energy_components'].get('beat_gate', 1.0) >= 0.5)
         
         # Beat analysis
         beat_times, beat_strengths = self.analyze_beat_grid()
@@ -253,6 +332,63 @@ class AudioAnalyzer:
         plt.tight_layout()
         plt.show()
 
+_PITCH_CLASSES = {'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3, 'E': 4, 'F': 5, 'F#': 6, 'GB': 6,
+                  'G': 7, 'G#': 8, 'AB': 8, 'A': 9, 'A#': 10, 'BB': 10, 'B': 11}
+
+
+def parse_key(key: str):
+    """'A minor' / 'F# major' / 'Am' -> (pitch_class, is_major) or None."""
+    if not key:
+        return None
+    text = str(key).strip()
+    parts = text.split()
+    root = parts[0]
+    mode = parts[1].lower() if len(parts) > 1 else ''
+    if len(parts) == 1 and root.endswith('m') and root[:-1].upper() in _PITCH_CLASSES:
+        root, mode = root[:-1], 'minor'
+    pc = _PITCH_CLASSES.get(root.upper())
+    if pc is None:
+        return None
+    return pc, not mode.startswith('min')
+
+
+def key_compatibility_score(key1: str, key2: str) -> float:
+    """
+    Harmonic compatibility of two keys on a 0-100 scale (Camelot-wheel logic):
+    100 same key, 85 relative major/minor, 80 neighbouring fifth, 65 same mode
+    two steps away, 50 otherwise.
+    """
+    k1, k2 = parse_key(key1), parse_key(key2)
+    if k1 is None or k2 is None:
+        return 50.0
+    (pc1, major1), (pc2, major2) = k1, k2
+    if k1 == k2:
+        return 100.0
+    if major1 == major2:
+        dist = min((pc1 - pc2) % 12, (pc2 - pc1) % 12)
+        if dist in (5, 7):
+            return 80.0
+        if dist in (2, 10):
+            return 65.0
+        return 50.0
+    # relative keys: A minor <-> C major (minor root = major root + 9)
+    major_pc, minor_pc = (pc1, pc2) if major1 else (pc2, pc1)
+    if (major_pc + 9) % 12 == minor_pc:
+        return 85.0
+    return 50.0
+
+
+def energy_compatibility_score(f1: dict, f2: dict) -> float:
+    """Energy compatibility on a 0-100 scale, using energy_level (1-10) when available."""
+    l1, l2 = f1.get('energy_level'), f2.get('energy_level')
+    if l1 and l2:
+        return max(0.0, 100.0 - abs(float(l1) - float(l2)) / 9.0 * 100.0)
+    e1 = float(f1.get('avg_energy') or 0)
+    e2 = float(f2.get('avg_energy') or 0)
+    max_energy = max(e1, e2)
+    return max(0.0, 100.0 - abs(e1 - e2) / max_energy * 100.0) if max_energy > 0 else 100.0
+
+
 def analyze_track_compatibility(track1_path: str, track2_path: str) -> dict:
     """
     Analyze compatibility between two tracks for mixing
@@ -271,20 +407,11 @@ def analyze_track_compatibility(track1_path: str, track2_path: str) -> dict:
     compatibility['bpm_compatibility'] = max(0, 100 - (bpm_diff * 2))
     compatibility['bpm_difference'] = bpm_diff
     
-    # Key compatibility
-    key1, key2 = features1['key'], features2['key']
-    # Simple key compatibility (can be enhanced with music theory)
-    if key1 == key2:
-        compatibility['key_compatibility'] = 100
-    elif key1.split()[0] == key2.split()[0]:  # Same root note
-        compatibility['key_compatibility'] = 80
-    else:
-        compatibility['key_compatibility'] = 50
+    # Key compatibility (Camelot-wheel logic)
+    compatibility['key_compatibility'] = key_compatibility_score(features1['key'], features2['key'])
     
-    # Energy compatibility
-    energy_diff = abs(features1['avg_energy'] - features2['avg_energy'])
-    max_energy = max(features1['avg_energy'], features2['avg_energy'])
-    compatibility['energy_compatibility'] = max(0, 100 - (energy_diff / max_energy * 100))
+    # Energy compatibility (perceived energy level, loudness independent)
+    compatibility['energy_compatibility'] = energy_compatibility_score(features1, features2)
     
     # Overall compatibility score
     compatibility['overall_score'] = (

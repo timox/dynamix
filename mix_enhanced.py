@@ -67,7 +67,7 @@ class EnhancedMixAnalyzer:
         print(f"  • Duration: {track1['duration']:.1f}s")
         print(f"  • BPM: {track1['bpm']:.1f} (confidence: {track1['bpm_confidence']:.2f})")
         print(f"  • Key: {track1['key']} (confidence: {track1['key_confidence']:.2f})")
-        print(f"  • Avg Energy: {track1['avg_energy']:.4f}")
+        print(f"  • Energy Level: {track1.get('energy_level', 0):.1f}/10")
         print(f"  • Sections: {track1['section_count']}")
         print(f"  • Drops: {track1['drop_count']}")
         
@@ -75,7 +75,7 @@ class EnhancedMixAnalyzer:
         print(f"  • Duration: {track2['duration']:.1f}s")
         print(f"  • BPM: {track2['bpm']:.1f} (confidence: {track2['bpm_confidence']:.2f})")
         print(f"  • Key: {track2['key']} (confidence: {track2['key_confidence']:.2f})")
-        print(f"  • Avg Energy: {track2['avg_energy']:.4f}")
+        print(f"  • Energy Level: {track2.get('energy_level', 0):.1f}/10")
         print(f"  • Sections: {track2['section_count']}")
         print(f"  • Drops: {track2['drop_count']}")
         

@@ -180,7 +180,7 @@ class DynaMixGUI:
         table_frame.pack(fill=tk.BOTH, expand=True)
         
         # Treeview for playlist
-        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy")
+        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy (1-10)")
         self.playlist_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
         
         for col in columns:
@@ -350,6 +350,7 @@ class DynaMixGUI:
                 result_text += f"Duration: {features['duration']:.1f} seconds\n"
                 result_text += f"BPM: {features['bpm']:.1f} (confidence: {features['bpm_confidence']:.2f})\n"
                 result_text += f"Key: {features['key']} (confidence: {features['key_confidence']:.2f})\n"
+                result_text += f"Energy Level: {features.get('energy_level', 0):.1f}/10\n"
                 result_text += f"Average Energy: {features['avg_energy']:.4f}\n"
                 result_text += f"Max Energy: {features['max_energy']:.4f}\n"
                 result_text += f"Energy Std Dev: {features['energy_std']:.4f}\n"
@@ -479,20 +480,7 @@ class DynaMixGUI:
                 
                 df = manager.analyze_playlist(audio_files)
                 
-                # Clear and populate tree
-                for item in self.playlist_tree.get_children():
-                    self.playlist_tree.delete(item)
-                
-                for idx, row in df.iterrows():
-                    duration_min = row['duration'] / 60
-                    self.playlist_tree.insert("", tk.END, values=(
-                        idx + 1,
-                        row['filename'],
-                        f"{row['bpm']:.1f}",
-                        row['key'],
-                        f"{duration_min:.1f}",
-                        f"{row['avg_energy']:.4f}"
-                    ))
+                self._populate_playlist_tree(manager.tracks)
                 
                 self.playlist_manager = manager
                 self.update_status(f"Playlist analyzed: {len(df)} tracks")
@@ -510,14 +498,14 @@ class DynaMixGUI:
         for idx, track in enumerate(tracks):
             bpm = track.get('bpm', 0) or 0
             duration = track.get('duration', 0) or 0
-            energy = track.get('avg_energy', 0) or 0
+            energy = track.get('energy_level', 0) or 0
             self.playlist_tree.insert("", tk.END, values=(
                 idx + 1,
                 track.get('filename', ''),
                 f"{bpm:.1f}" if bpm else "-",
                 track.get('key') or "-",
                 f"{duration / 60:.1f}" if duration else "-",
-                f"{energy:.4f}" if energy else "-"
+                f"{energy:.1f}" if energy else "-"
             ))
     
     def create_playlist_from_directory(self):
@@ -700,20 +688,7 @@ class DynaMixGUI:
                 energy_curve=energy_curve
             )
             
-            # Clear and populate with set list
-            for item in self.playlist_tree.get_children():
-                self.playlist_tree.delete(item)
-            
-            for idx, track in enumerate(set_list):
-                duration_min = track['duration'] / 60
-                self.playlist_tree.insert("", tk.END, values=(
-                    idx + 1,
-                    track['filename'],
-                    f"{track['bpm']:.1f}",
-                    track['key'],
-                    f"{duration_min:.1f}",
-                    f"{track['avg_energy']:.4f}"
-                ))
+            self._populate_playlist_tree(set_list)
             
             self.current_set_list = set_list
             self.update_status(f"Set list created: {len(set_list)} tracks")

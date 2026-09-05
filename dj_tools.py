@@ -231,7 +231,7 @@ Track: {os.path.basename(self.file_path)}
 • BPM: {features['bpm']:.1f}
 • Key: {features['key']}
 • Duration: {features['duration']:.1f}s
-• Energy Level: {'High' if features['avg_energy'] > 0.1 else 'Medium' if features['avg_energy'] > 0.05 else 'Low'}
+• Energy Level: {features.get('energy_level', 0):.1f}/10 ({'High' if features.get('energy_level', 0) >= 7 else 'Medium' if features.get('energy_level', 0) >= 4 else 'Low'})
 
 🎯 TOP CUE POINTS:
 """
