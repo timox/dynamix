@@ -30,6 +30,8 @@ python gui.py
 - **Purpose**: Manage and analyze entire music collections
 - **Features**:
   - Scan directories for audio files
+  - Create a playlist file (M3U) from the selected directory in one click,
+    reusing the analyzed order or set list when available
   - Analyze entire playlists
   - Create optimized set lists
   - Configure energy curves and duration

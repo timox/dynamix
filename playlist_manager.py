@@ -36,6 +36,32 @@ class PlaylistManager:
                     
         return audio_files
     
+    def quick_playlist(self, directory: str = None) -> List[Dict]:
+        """
+        Build a playlist from the audio files of a directory without analyzing
+        them. Entries are sorted by file name and carry the same keys as
+        analyzed tracks (with neutral values) so every exporter accepts them.
+        Returns: List of track dictionaries
+        """
+        entries = []
+        for file_path in sorted(self.scan_directory(directory), key=lambda p: os.path.basename(p).lower()):
+            entries.append({
+                'file_path': file_path,
+                'filename': os.path.basename(file_path),
+                'duration': 0.0,
+                'bpm': 0.0,
+                'bpm_confidence': 0.0,
+                'key': '',
+                'key_confidence': 0.0,
+                'avg_energy': 0.0,
+                'max_energy': 0.0,
+                'energy_std': 0.0,
+                'beat_count': 0,
+                'section_count': 0,
+                'drop_count': 0,
+            })
+        return entries
+    
     def analyze_playlist(self, file_paths: List[str] = None) -> pd.DataFrame:
         """
         Analyze all tracks in playlist

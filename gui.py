@@ -150,6 +150,7 @@ class DynaMixGUI:
         ttk.Entry(dir_frame, textvariable=self.playlist_dir_var, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(dir_frame, text="Browse", command=self.browse_playlist_dir).pack(side=tk.LEFT, padx=5)
         ttk.Button(dir_frame, text="Analyze Playlist", command=self.analyze_playlist).pack(side=tk.LEFT, padx=5)
+        ttk.Button(dir_frame, text="Create Playlist", command=self.create_playlist_from_directory).pack(side=tk.LEFT, padx=5)
         
         # Options
         options_frame = ttk.LabelFrame(frame, text="Set List Options")
@@ -497,6 +498,76 @@ class DynaMixGUI:
                 self.update_status("Error during analysis")
         
         threading.Thread(target=analyze, daemon=True).start()
+    
+    def _populate_playlist_tree(self, tracks):
+        """Fill the playlist table with a list of track dictionaries"""
+        for item in self.playlist_tree.get_children():
+            self.playlist_tree.delete(item)
+        
+        for idx, track in enumerate(tracks):
+            bpm = track.get('bpm', 0) or 0
+            duration = track.get('duration', 0) or 0
+            energy = track.get('avg_energy', 0) or 0
+            self.playlist_tree.insert("", tk.END, values=(
+                idx + 1,
+                track.get('filename', ''),
+                f"{bpm:.1f}" if bpm else "-",
+                track.get('key') or "-",
+                f"{duration / 60:.1f}" if duration else "-",
+                f"{energy:.4f}" if energy else "-"
+            ))
+    
+    def create_playlist_from_directory(self):
+        """
+        Create a playlist file from the selected directory.
+        Uses the current set list or analyzed tracks when they belong to this
+        directory, otherwise simply lists the audio files found in it.
+        """
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        
+        tracks = None
+        source = "directory scan"
+        manager = getattr(self, 'playlist_manager', None)
+        same_dir = manager is not None and os.path.normcase(os.path.abspath(manager.playlist_directory)) == \
+            os.path.normcase(os.path.abspath(directory))
+        if same_dir and getattr(self, 'current_set_list', None):
+            tracks = self.current_set_list
+            source = "set list"
+        elif same_dir and manager.tracks:
+            tracks = manager.tracks
+            source = "analyzed tracks"
+        
+        if not tracks:
+            tracks = PlaylistManager(directory).quick_playlist()
+        
+        if not tracks:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        default_name = os.path.basename(os.path.normpath(directory)) or "playlist"
+        filename = filedialog.asksaveasfilename(
+            title="Save Playlist",
+            initialdir=directory,
+            initialfile=f"{default_name}.m3u",
+            defaultextension=".m3u",
+            filetypes=[("M3U playlist", "*.m3u"), ("M3U8 playlist (UTF-8)", "*.m3u8"), ("All files", "*.*")]
+        )
+        if not filename:
+            return
+        
+        try:
+            ExportTools.export_to_m3u(tracks, filename)
+        except Exception as e:
+            messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
+            return
+        
+        self._populate_playlist_tree(tracks)
+        self.current_set_list = list(tracks)
+        self.update_status(f"Playlist saved: {len(tracks)} tracks ({source}) -> {filename}")
+        messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
     
     def create_set_list(self):
         """Create set list from analyzed playlist"""
