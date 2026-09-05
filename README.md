@@ -45,6 +45,8 @@
 
 ## 🛠️ Installation
 
+> **Windows users:** see the step-by-step guide in [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) (French) or simply run `install_windows.bat`. After any install, `python check_install.py` verifies the setup.
+
 1. **Clone or Download the Repository:**
 
    ```bash

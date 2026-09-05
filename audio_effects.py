@@ -180,7 +180,7 @@ class AudioEffects:
         # Calculate attack times (time to reach peak from onset)
         attack_times = []
         for onset_frame in onsets:
-            onset_sample = librosa.frames_to_samples(onset_frame, sr=sr)
+            onset_sample = int(librosa.frames_to_samples(onset_frame))
             window = y[onset_sample:onset_sample + int(sr * 0.1)]  # 100ms window
             
             if len(window) > 0:

@@ -27,10 +27,12 @@ class DJTools:
         onset_env = librosa.onset.onset_strength(y=self.analyzer.y, sr=self.analyzer.sr)
         
         # Detect onsets
+        # ``onset_detect`` has no ``threshold`` argument; the peak-picking
+        # sensitivity is controlled through ``delta`` (higher = fewer onsets).
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_env, 
             sr=self.analyzer.sr,
-            threshold=sensitivity
+            delta=sensitivity
         )
         
         # Convert to time
@@ -401,7 +403,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="DJ Tools - Performance Analysis")
-    parser.add_argument("audio_file", help="Audio file to analyze")
+    parser.add_argument("audio_file", nargs="?", help="Audio file to analyze (not needed with --batch)")
     parser.add_argument("--export", help="Export DJ notes to file")
     parser.add_argument("--visualize", action="store_true", help="Show performance visualization")
     parser.add_argument("--batch", help="Batch analyze directory")
@@ -411,6 +413,8 @@ if __name__ == "__main__":
     
     if args.batch:
         batch_analyze_tracks(args.batch, args.output_dir)
+    elif not args.audio_file:
+        parser.error("audio_file is required unless --batch is used")
     else:
         dj_tools = DJTools(args.audio_file)
         

@@ -19,22 +19,31 @@ class AudioAnalyzer:
         Detect BPM using multiple methods and return the most reliable result
         Returns: (bpm, confidence)
         """
+        # librosa >= 0.10 returns tempo as a 1-element array and moved
+        # ``librosa.beat.tempo`` to ``librosa.feature.tempo``; handle both.
+        tempo_fn = getattr(librosa.feature, "tempo", None) or librosa.beat.tempo
+
         # Method 1: Using librosa's beat_track
         tempo, beats = librosa.beat.beat_track(y=self.y, sr=self.sr)
         
         # Method 2: Using onset detection
         onset_env = librosa.onset.onset_strength(y=self.y, sr=self.sr)
-        tempo_onset = librosa.beat.tempo(onset_envelope=onset_env, sr=self.sr)
+        tempo_onset = tempo_fn(onset_envelope=onset_env, sr=self.sr)
         
         # Method 3: Using dynamic programming
-        tempo_dp = librosa.beat.tempo(onset_envelope=onset_env, sr=self.sr, aggregate=None)
+        tempo_dp = tempo_fn(onset_envelope=onset_env, sr=self.sr, aggregate=None)
         
         # Return the most consistent result
-        tempos = [tempo, tempo_onset[0], np.median(tempo_dp)]
-        final_bpm = np.median(tempos)
+        tempos = np.array([
+            float(np.atleast_1d(tempo)[0]),
+            float(np.atleast_1d(tempo_onset)[0]),
+            float(np.median(tempo_dp)),
+        ])
+        final_bpm = float(np.median(tempos))
         
         # Calculate confidence based on consistency
-        confidence = 1.0 - (np.std(tempos) / np.mean(tempos))
+        mean_tempo = float(np.mean(tempos))
+        confidence = 1.0 - (float(np.std(tempos)) / mean_tempo) if mean_tempo > 0 else 0.0
         
         return final_bpm, confidence
     
@@ -43,20 +52,39 @@ class AudioAnalyzer:
         Detect musical key using chromagram analysis
         Returns: (key, confidence)
         """
-        # Extract chromagram
+        # Extract chromagram and average it over time
         chroma = librosa.feature.chroma_cqt(y=self.y, sr=self.sr)
+        chroma_avg = np.mean(chroma, axis=1)
         
-        # Get key using librosa's key detection
-        key_raw = librosa.feature.key_mode(chroma)
+        # Krumhansl-Schmuckler key profiles (librosa has no built-in key detector)
+        major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
+                                  2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
+                                  2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+        
+        def _corr(a: np.ndarray, b: np.ndarray) -> float:
+            if np.std(a) == 0 or np.std(b) == 0:
+                return 0.0
+            return float(np.corrcoef(a, b)[0, 1])
+        
+        # Correlate the chroma vector against every rotation of both profiles
+        scores = []  # (score, pitch_class, is_major)
+        for shift in range(12):
+            scores.append((_corr(chroma_avg, np.roll(major_profile, shift)), shift, True))
+            scores.append((_corr(chroma_avg, np.roll(minor_profile, shift)), shift, False))
+        scores.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_shift, is_major = scores[0]
+        second_score = scores[1][0]
         
         # Map to readable key names
         key_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        key = key_names[key_raw[0]]
-        mode = 'major' if key_raw[1] == 1 else 'minor'
+        key = key_names[best_shift]
+        mode = 'major' if is_major else 'minor'
         
-        # Calculate confidence
-        chroma_avg = np.mean(chroma, axis=1)
-        confidence = np.max(chroma_avg) / np.sum(chroma_avg)
+        # Confidence: how clearly the best candidate beats the runner-up (0..1)
+        confidence = float(np.clip((best_score - second_score) / max(abs(best_score), 1e-9), 0.0, 1.0))
+        if best_score <= 0:
+            confidence = 0.0
         
         return f"{key} {mode}", confidence
     
@@ -86,25 +114,31 @@ class AudioAnalyzer:
         """
         # Compute MFCC features
         mfcc = librosa.feature.mfcc(y=self.y, sr=self.sr, n_mfcc=13)
+        n_frames = mfcc.shape[1]
+        duration = librosa.get_duration(y=self.y, sr=self.sr)
         
-        # Compute similarity matrix
-        sim_matrix = librosa.segment.recurrence_matrix(mfcc, mode='affinity')
+        # Aim for roughly one section per 30 seconds, between 1 and 5 sections
+        n_sections = int(np.clip(round(duration / 30.0), 1, 5))
+        n_sections = max(1, min(n_sections, n_frames))
         
-        # Detect segments
-        segments = librosa.segment.detect_segments(sim_matrix)
+        if n_sections <= 1 or n_frames < 2:
+            return [('Intro', 0.0, float(duration))]
         
-        # Convert to time
-        segment_times = librosa.frames_to_time(segments, sr=self.sr)
+        # Agglomerative clustering of MFCC frames gives section boundaries
+        boundaries = librosa.segment.agglomerative(mfcc, n_sections)
+        boundary_times = librosa.frames_to_time(boundaries, sr=self.sr)
+        boundary_times = np.concatenate([boundary_times, [duration]])
         
         # Label sections (simplified)
         section_names = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro']
         sections = []
         
-        for i, (start, end) in enumerate(segment_times):
-            if i < len(section_names):
-                sections.append((section_names[i], start, end))
-            else:
-                sections.append((f'Section {i+1}', start, end))
+        for i in range(len(boundary_times) - 1):
+            start, end = float(boundary_times[i]), float(boundary_times[i + 1])
+            if end <= start:
+                continue
+            name = section_names[i] if i < len(section_names) else f'Section {i+1}'
+            sections.append((name, start, end))
         
         return sections
     
