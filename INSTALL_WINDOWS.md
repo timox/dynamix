@@ -96,7 +96,7 @@ venv\Scripts\activate
 Puis, par exemple :
 
 ```bat
-:: Interface graphique
+:: Interface graphique (ou double-cliquez sur run_gui.bat)
 python gui.py
 
 :: Analyse de transition entre deux morceaux
