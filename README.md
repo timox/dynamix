@@ -130,6 +130,32 @@ chosen curve (`build`, `wave`, `peak_middle`, `constant`) while keeping neighbou
 BPM and harmonically compatible (Camelot-wheel logic: same key, relative major/minor, fifth
 neighbours).
 
+### Mastering Check and Pre-master Pass
+
+Badly mastered collections make automatic transitions sound uneven even with ReplayGain, which
+only fixes the average level. `mastering.py` measures every track like a mastering engineer and
+can write corrected copies (the originals are never touched):
+
+```bash
+# Report: loudness (LUFS, ITU BS.1770), loudness range, true peak, clipping, DC offset,
+# tone balance, stereo phase (L/R correlation, bass phase, mono compatibility, comb filtering)
+python mastering.py check /path/to/music
+python mastering.py check my_set.m3u --json report.json
+
+# Corrected copies: loudness normalised to -14 LUFS, true-peak limited at -1 dBTP, DC removed,
+# polarity/bass phase repaired, optional tone matching to the set's median balance
+python mastering.py fix /path/to/music --out /path/to/music_premastered --tone
+python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac
+```
+
+Flags are set-relative where it matters ("darker than the rest of the set", "quieter than the
+rest of the set") so that the goal is a consistent set, not an abstract reference. Comb
+filtering cannot be repaired automatically (it needs the original stems); it is only reported.
+No FFmpeg needed: decoding and encoding go through soundfile/libsndfile (WAV, FLAC, OGG, MP3).
+In the GUI: Playlist Manager tab, **Mastering Report** and **Pre-master Set...**. The transition
+sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
+measurements, and can be saved as JSON.
+
 ### Transition Planning and Mixxx Auto DJ
 
 Plan every transition of a set and push the result into [Mixxx](https://mixxx.org) so that

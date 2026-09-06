@@ -186,12 +186,14 @@ class AudioAnalyzer:
     # `scale`, then combined with `weight`. The result is loudness independent.
     ENERGY_COMPONENTS = {
         #                  center  scale  weight
-        'tempo':          (124.0,  12.0,  0.25),   # BPM (only counts when there is a beat)
-        'onset_rate':     (3.5,    1.5,   0.25),   # percussive events per second
-        'percussive':     (0.30,   0.10,  0.25),   # share of percussive energy (HPSS)
-        'low_end':        (0.25,   0.10,  0.10),   # share of energy below 150 Hz (beat-gated)
-        'brightness':     (2500.0, 800.0, 0.15),   # spectral centroid in Hz
+        'tempo':          (124.0,  12.0,  0.28),   # BPM (only counts when there is a beat)
+        'onset_rate':     (3.5,    1.5,   0.28),   # percussive events per second
+        'percussive':     (0.30,   0.10,  0.29),   # share of percussive energy (HPSS)
+        'low_end':        (0.25,   0.10,  0.05),   # share of energy below 150 Hz (beat-gated)
+        'brightness':     (2500.0, 800.0, 0.10),   # spectral centroid in Hz
     }
+    # low_end and brightness carry little weight on purpose: they depend on the
+    # mastering (muddy or harsh masters would otherwise bias the level).
     # Components that only make sense for rhythmic material are multiplied by a
     # "beat gate" derived from the percussive share: ~0 for pads, ~1 for drums.
     BEAT_GATED_COMPONENTS = ('tempo', 'onset_rate', 'low_end')

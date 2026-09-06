@@ -71,6 +71,7 @@ setup(
         "dj_tools",
         "transition_planner",
         "mixxx_export",
+        "mastering",
         "gui",
         "examples"
     ],
@@ -124,6 +125,7 @@ setup(
             "dynamix-dj=dj_tools:main",
             "dynamix-examples=examples:main",
             "dynamix-mixxx=mixxx_export:main",
+            "dynamix-master=mastering:main",
             "dynamix-gui=gui:main",
         ],
     },

@@ -16,6 +16,7 @@ tempo adjustment, exit and entry times), which can be printed, saved as text
 or pushed to Mixxx (see mixxx_export.py) so that Auto DJ follows them.
 """
 
+import json
 import os
 from typing import Callable, Dict, List, Optional
 
@@ -49,7 +50,8 @@ class TransitionPlanner:
     """Compute intro/outro sections and a transition sheet for an ordered track list."""
 
     def __init__(self, tracks: List[Dict], mix_bars: int = 8,
-                 min_mix_seconds: float = 8.0, max_mix_seconds: float = 32.0):
+                 min_mix_seconds: float = 8.0, max_mix_seconds: float = 32.0,
+                 check_mastering: bool = True):
         """
         Args:
             tracks: ordered list of dicts with at least 'file_path'
@@ -60,6 +62,7 @@ class TransitionPlanner:
         self.mix_bars = mix_bars
         self.min_mix_seconds = min_mix_seconds
         self.max_mix_seconds = max_mix_seconds
+        self.check_mastering = check_mastering
         self.profiles: List[Dict] = []
         self.transitions: List[Dict] = []
 
@@ -179,10 +182,19 @@ class TransitionPlanner:
             outro_start = max(intro_end, duration - mix_dur)
             outro_end = duration
 
+        mastering = None
+        if self.check_mastering:
+            try:
+                from mastering import analyze_mastering
+                mastering = analyze_mastering(path)
+            except Exception as exc:  # keep planning even if the check fails
+                mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
+
         return {
             'file_path': path,
             'filename': os.path.basename(path),
             'duration': duration,
+            'mastering': mastering,
             'bpm': float(bpm),
             'key': key,
             'avg_energy': avg_energy,
@@ -220,6 +232,9 @@ class TransitionPlanner:
                 notes.append("key clash: use EQ / short blend")
             if compat['energy_compatibility'] < 70:
                 notes.append(f"energy jump ({a['energy_level']:.1f} -> {b['energy_level']:.1f})")
+            ma, mb = a.get('mastering') or {}, b.get('mastering') or {}
+            if ma.get('lufs') is not None and mb.get('lufs') is not None and abs(ma['lufs'] - mb['lufs']) > 3:
+                notes.append(f"loudness jump ({ma['lufs']:.0f} -> {mb['lufs']:.0f} LUFS): pre-master or trim gain")
             if not notes:
                 notes.append("smooth")
 
@@ -251,6 +266,30 @@ class TransitionPlanner:
         seconds = max(0.0, float(seconds))
         return f"{int(seconds // 60)}:{seconds % 60:05.2f}"
 
+    def track_summary(self, index: int, p: Dict) -> List[str]:
+        """One block per track: identity, energy, sections, mastering, what to watch."""
+        lines = [f"{index:2d}. {p['filename']}"]
+        beat = "" if p.get('has_beat', True) else " (no clear beat)"
+        lines.append(f"    {p['bpm']:.1f} BPM{beat} | {p['key'] or '-'} | energy {p['energy_level']:.1f}/10 | {self._fmt(p['duration'])}")
+        lines.append(f"    intro {self._fmt(p['intro_start'])} -> {self._fmt(p['intro_end'])}"
+                     f"   outro {self._fmt(p['outro_start'])} -> {self._fmt(p['outro_end'])}"
+                     f"   blend ~{p['mix_duration']:.0f}s")
+        m = p.get('mastering')
+        if m and m.get('lufs') is not None:
+            phase = m.get('phase', {})
+            stereo = (f"stereo corr {phase.get('correlation', 1.0):+.2f}, bass {phase.get('correlation_low', 1.0):+.2f}, "
+                      f"mono loss {phase.get('mono_loss_db', 0.0):+.1f} dB") if phase.get('stereo') else "mono file"
+            lines.append(f"    master: {m['lufs']:.1f} LUFS | range {m['loudness_range']:.1f} LU | "
+                         f"true peak {m['true_peak_db']:+.1f} dBTP | PLR {m['plr']:.1f} dB | tilt {m['tilt_db']:+.1f} dB | "
+                         f"score {m['score']:.0f}/100")
+            lines.append(f"    {stereo}")
+        if m and m.get('flags'):
+            for flag in m['flags']:
+                lines.append(f"    ! {flag}")
+        elif m:
+            lines.append("    mastering OK")
+        return lines
+
     def to_text(self, title: str = "DynaMix Transition Sheet") -> str:
         if not self.profiles:
             return "No tracks planned."
@@ -258,13 +297,20 @@ class TransitionPlanner:
         total = sum(p['duration'] for p in self.profiles)
         lines.append(f"{len(self.profiles)} tracks, {total / 60:.1f} minutes")
         lines.append("")
-        lines.append("TRACKS (intro / outro sections, beat-aligned)")
+        lines.append("TRACK BY TRACK")
         lines.append("-" * 60)
         for i, p in enumerate(self.profiles, 1):
-            lines.append(f"{i:2d}. {p['filename']}")
-            lines.append(f"    {p['bpm']:.1f} BPM | {p['key'] or '-'} | energy {p['energy_level']:.1f}/10 | {self._fmt(p['duration'])}")
-            lines.append(f"    intro {self._fmt(p['intro_start'])} -> {self._fmt(p['intro_end'])}"
-                         f"   outro {self._fmt(p['outro_start'])} -> {self._fmt(p['outro_end'])}")
+            lines.extend(self.track_summary(i, p))
+        masters = [p['mastering'] for p in self.profiles if p.get('mastering') and p['mastering'].get('lufs') is not None]
+        if masters:
+            lufs = [m['lufs'] for m in masters]
+            flagged = sum(1 for m in masters if m['flags'])
+            lines.append("")
+            lines.append(f"Set loudness: {min(lufs):.1f} to {max(lufs):.1f} LUFS ({max(lufs) - min(lufs):.1f} dB spread), "
+                         f"{flagged}/{len(masters)} tracks with mastering issues")
+            if max(lufs) - min(lufs) > 4 or flagged:
+                lines.append("Suggestion: run the pre-master pass (GUI 'Pre-master Set...' or "
+                             "'python mastering.py fix') and play the corrected folder in Mixxx.")
         lines.append("")
         lines.append("TRANSITIONS")
         lines.append("-" * 60)
@@ -276,6 +322,14 @@ class TransitionPlanner:
                          f"cue it at {self._fmt(t['entry_time'])}, blend ~{t['crossfade_seconds']:.0f}s")
             lines.append(f"    {'; '.join(t['notes'])}")
         return "\n".join(lines) + "\n"
+
+    def to_dict(self) -> Dict:
+        return {'tracks': self.profiles, 'transitions': self.transitions}
+
+    def save_json(self, output_path: str) -> str:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2, default=lambda o: float(o) if isinstance(o, np.generic) else str(o))
+        return output_path
 
     def save_text(self, output_path: str, title: str = "DynaMix Transition Sheet") -> str:
         with open(output_path, 'w', encoding='utf-8') as f:

@@ -112,7 +112,39 @@ python dj_tools.py --batch "C:\Musique\Set" --output-dir "C:\Musique\Notes"
 
 Mettez les chemins entre guillemets s'ils contiennent des espaces.
 
-## 6. Enchaîner un set automatiquement avec Mixxx
+## 6. Musiques mal masterisées : contrôle et pré-mastering
+
+Si vos fichiers ont des niveaux très différents, du clipping, un grave en
+opposition de phase ou une couleur sonore incohérente, ReplayGain ne suffira
+pas : il n'aligne que le volume moyen. DynaMix propose deux outils, dans
+l'onglet **Playlist Manager**, cadre *Mastering* :
+
+- **Mastering Report** : mesure chaque morceau (sonie en LUFS, plage de sonie,
+  crête vraie, clipping, offset DC, équilibre spectral, corrélation stéréo,
+  phase du grave, compatibilité mono, filtrage en peigne) et signale en clair
+  ce qui cloche, avec un score sur 100. Les écarts sont jugés par rapport au
+  reste du set.
+- **Pre-master Set...** : écrit des **copies corrigées** dans un autre dossier,
+  jamais les originaux : sonie ramenée à la cible choisie (par défaut
+  −14 LUFS), limiteur de crête à −1 dBTP, suppression de l'offset DC,
+  correction de polarité et mise en mono du grave si nécessaire, et
+  optionnellement un rapprochement doux de la couleur sonore vers la médiane
+  du set (case *Match tone*).
+
+Le filtrage en peigne, lui, n'est que signalé : il ne se répare pas sans les
+pistes d'origine.
+
+Ensuite, ajoutez le dossier corrigé dans la bibliothèque Mixxx et lancez
+**Plan Transitions** sur ce dossier. En ligne de commande :
+
+```bat
+python mastering.py check "C:\Musique\Set"
+python mastering.py fix "C:\Musique\Set" --out "C:\Musique\Set_premaster" --tone
+```
+
+Aucun logiciel supplémentaire n'est nécessaire, FFmpeg compris.
+
+## 7. Enchaîner un set automatiquement avec Mixxx
 
 [Mixxx](https://mixxx.org) est gratuit et son **Auto DJ** enchaîne une playlist
 avec un fondu calé au tempo. DynaMix peut lui fournir, pour chaque morceau,
@@ -152,7 +184,7 @@ Une sauvegarde horodatée de la base est créée à côté de `mixxxdb.sqlite` a
 chaque export. Les morceaux absents de la bibliothèque Mixxx sont listés dans
 le rapport : ajoutez le dossier dans Mixxx, rebalayez, puis exportez à nouveau.
 
-## 7. Dépannage
+## 8. Dépannage
 
 | Symptôme | Cause probable | Solution |
 | --- | --- | --- |

@@ -249,6 +249,8 @@ def main():
                         help="Energy curve for the set list (with --playlist)")
     parser.add_argument("--mix-bars", type=int, default=8, help="Crossfade length in bars (default 8)")
     parser.add_argument("--sheet", help="Save the transition sheet to this text file")
+    parser.add_argument("--json", help="Save the per-track analysis and transitions as JSON")
+    parser.add_argument("--no-mastering", action="store_true", help="Skip the mastering/phase check of each track")
     parser.add_argument("--db", help="Path to mixxxdb.sqlite (auto-detected by default)")
     parser.add_argument("--playlist-name", help="Name of the Mixxx playlist to create (default: DynaMix - <folder>)")
     parser.add_argument("--no-mixxx", action="store_true", help="Only plan and print the sheet, do not touch Mixxx")
@@ -271,13 +273,16 @@ def main():
         print("No tracks to plan.")
         sys.exit(1)
 
-    planner = TransitionPlanner(tracks, mix_bars=args.mix_bars)
+    planner = TransitionPlanner(tracks, mix_bars=args.mix_bars, check_mastering=not args.no_mastering)
     planner.plan(progress_callback=lambda i, n, name: print(f"Planning {i}/{n}: {name}"))
     print()
     print(planner.to_text())
     if args.sheet:
         planner.save_text(args.sheet)
         print(f"Transition sheet saved to {args.sheet}")
+    if args.json:
+        planner.save_json(args.json)
+        print(f"Transition data saved to {args.json}")
 
     if args.no_mixxx:
         return

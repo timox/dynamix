@@ -22,6 +22,7 @@ from export_tools import ExportTools
 from mix_enhanced import EnhancedMixAnalyzer
 from transition_planner import TransitionPlanner
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
+from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary
 
 
 class DynaMixGUI:
@@ -170,6 +171,19 @@ class DynaMixGUI:
         
         ttk.Button(options_frame, text="Create Set List", command=self.create_set_list).pack(side=tk.LEFT, padx=5)
         ttk.Button(options_frame, text="Plan Transitions", command=self.plan_transitions).pack(side=tk.LEFT, padx=5)
+        
+        # Mastering tools
+        master_frame = ttk.LabelFrame(frame, text="Mastering")
+        master_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Button(master_frame, text="Mastering Report", command=self.mastering_report).pack(side=tk.LEFT, padx=5)
+        ttk.Label(master_frame, text="Target loudness (LUFS):").pack(side=tk.LEFT, padx=5)
+        self.premaster_lufs_var = tk.DoubleVar(value=-14.0)
+        ttk.Spinbox(master_frame, from_=-24.0, to=-6.0, increment=0.5, textvariable=self.premaster_lufs_var, width=7).pack(side=tk.LEFT, padx=5)
+        self.premaster_tone_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(master_frame, text="Match tone", variable=self.premaster_tone_var).pack(side=tk.LEFT, padx=5)
+        self.premaster_phase_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(master_frame, text="Fix phase", variable=self.premaster_phase_var).pack(side=tk.LEFT, padx=5)
+        ttk.Button(master_frame, text="Pre-master Set...", command=self.premaster_set).pack(side=tk.LEFT, padx=5)
         
         # Results
         results_frame = ttk.Frame(frame)
@@ -598,6 +612,95 @@ class DynaMixGUI:
         self.update_status(f"Planning transitions for {len(tracks)} tracks ({source})...")
         threading.Thread(target=work, daemon=True).start()
     
+    def _show_text_window(self, title: str, text_content: str, save_name: str = "report.txt"):
+        """Simple scrollable text window with a save button"""
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry("900x600")
+        toolbar = ttk.Frame(win)
+        toolbar.pack(fill=tk.X, padx=10, pady=5)
+        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
+        
+        def save():
+            filename = filedialog.asksaveasfilename(title="Save", initialfile=save_name, defaultextension=".txt",
+                                                    filetypes=[("Text", "*.txt"), ("All files", "*.*")])
+            if filename:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(text.get("1.0", tk.END))
+                self.update_status(f"Saved: {filename}")
+        
+        ttk.Button(toolbar, text="Save...", command=save).pack(side=tk.RIGHT, padx=5)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        text.insert(tk.END, text_content)
+        return text
+    
+    def mastering_report(self):
+        """Measure loudness, peaks, clipping, tone and phase for the selected directory"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        tracks, source = self._tracks_for_directory(directory)
+        files = [t['file_path'] for t in tracks]
+        if not files:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        def work():
+            try:
+                reports = check_files(files, progress=lambda i, n, name: self.root.after(
+                    0, self.update_status, f"Mastering check {i}/{n}: {name}"))
+                self.mastering_reports = reports
+                summary = format_check_summary(reports)
+                self.root.after(0, self._show_text_window, "Mastering Report", summary, "mastering_report.txt")
+                flagged = sum(1 for r in reports if r.get('flags'))
+                self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Mastering check failed: {str(e)}")
+        
+        self.update_status(f"Checking mastering of {len(files)} tracks ({source})...")
+        threading.Thread(target=work, daemon=True).start()
+    
+    def premaster_set(self):
+        """Write loudness-normalised, phase-repaired copies of the tracks into another folder"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        tracks, source = self._tracks_for_directory(directory)
+        files = [t['file_path'] for t in tracks]
+        if not files:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        default_out = os.path.join(os.path.dirname(os.path.normpath(directory)),
+                                   os.path.basename(os.path.normpath(directory)) + "_premastered")
+        out_dir = filedialog.askdirectory(title="Choose the OUTPUT folder for the corrected copies (originals are not modified)",
+                                          initialdir=os.path.dirname(default_out), mustexist=False)
+        if not out_dir:
+            return
+        if os.path.normcase(os.path.abspath(out_dir)) == os.path.normcase(os.path.abspath(directory)):
+            messagebox.showerror("Error", "Choose a different folder: the originals must not be overwritten")
+            return
+        target_lufs = float(self.premaster_lufs_var.get())
+        tone = bool(self.premaster_tone_var.get())
+        phase = bool(self.premaster_phase_var.get())
+        
+        def work():
+            try:
+                results = premaster_files(files, out_dir, target_lufs=target_lufs, tone_match=tone, repair_phase=phase,
+                                          progress=lambda i, n, name: self.root.after(
+                                              0, self.update_status, f"Pre-mastering {i}/{n}: {name}"))
+                summary = format_premaster_summary(results, out_dir)
+                self.root.after(0, self._show_text_window, "Pre-master Pass", summary, "premaster_report.txt")
+                done = sum(1 for r in results if 'error' not in r)
+                self.root.after(0, self.update_status, f"Pre-master done: {done}/{len(results)} tracks written to {out_dir}")
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
+        
+        self.update_status(f"Pre-mastering {len(files)} tracks ({source}) to {out_dir}...")
+        threading.Thread(target=work, daemon=True).start()
+    
     def _show_transition_window(self, source: str):
         """Display the transition sheet with save / Mixxx export actions"""
         planner = self.transition_planner
@@ -611,6 +714,7 @@ class DynaMixGUI:
         toolbar.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(toolbar, text=f"{len(planner.profiles)} tracks, {len(planner.transitions)} transitions ({source})").pack(side=tk.LEFT, padx=5)
         ttk.Button(toolbar, text="Save Sheet...", command=lambda: self.save_transition_sheet(title)).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(toolbar, text="Save JSON...", command=self.save_transition_json).pack(side=tk.RIGHT, padx=5)
         ttk.Button(toolbar, text="Export to Mixxx...", command=lambda: self.export_to_mixxx(text)).pack(side=tk.RIGHT, padx=5)
         
         text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
@@ -630,6 +734,15 @@ class DynaMixGUI:
         if filename:
             self.transition_planner.save_text(filename, title)
             self.update_status(f"Transition sheet saved: {filename}")
+    
+    def save_transition_json(self):
+        """Save the per-track analysis and transitions as JSON"""
+        filename = filedialog.asksaveasfilename(
+            title="Save Transition Data", initialdir=self.transition_source_dir, initialfile="transitions.json",
+            defaultextension=".json", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if filename:
+            self.transition_planner.save_json(filename)
+            self.update_status(f"Transition data saved: {filename}")
     
     def export_to_mixxx(self, log_widget=None):
         """Write intro/outro cues and a playlist into the Mixxx database"""
