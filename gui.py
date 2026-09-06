@@ -5,7 +5,7 @@ A comprehensive GUI application for audio analysis and DJ tools
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 import os
 import threading
 from pathlib import Path
@@ -20,6 +20,9 @@ from playlist_manager import PlaylistManager
 from audio_effects import AudioEffects, TrackComparer
 from export_tools import ExportTools
 from mix_enhanced import EnhancedMixAnalyzer
+from transition_planner import TransitionPlanner
+from mixxx_export import MixxxExporter, find_mixxx_db, format_report
+from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary
 
 
 class DynaMixGUI:
@@ -150,6 +153,7 @@ class DynaMixGUI:
         ttk.Entry(dir_frame, textvariable=self.playlist_dir_var, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(dir_frame, text="Browse", command=self.browse_playlist_dir).pack(side=tk.LEFT, padx=5)
         ttk.Button(dir_frame, text="Analyze Playlist", command=self.analyze_playlist).pack(side=tk.LEFT, padx=5)
+        ttk.Button(dir_frame, text="Create Playlist", command=self.create_playlist_from_directory).pack(side=tk.LEFT, padx=5)
         
         # Options
         options_frame = ttk.LabelFrame(frame, text="Set List Options")
@@ -166,6 +170,20 @@ class DynaMixGUI:
         energy_combo.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(options_frame, text="Create Set List", command=self.create_set_list).pack(side=tk.LEFT, padx=5)
+        ttk.Button(options_frame, text="Plan Transitions", command=self.plan_transitions).pack(side=tk.LEFT, padx=5)
+        
+        # Mastering tools
+        master_frame = ttk.LabelFrame(frame, text="Mastering")
+        master_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Button(master_frame, text="Mastering Report", command=self.mastering_report).pack(side=tk.LEFT, padx=5)
+        ttk.Label(master_frame, text="Target loudness (LUFS):").pack(side=tk.LEFT, padx=5)
+        self.premaster_lufs_var = tk.DoubleVar(value=-14.0)
+        ttk.Spinbox(master_frame, from_=-24.0, to=-6.0, increment=0.5, textvariable=self.premaster_lufs_var, width=7).pack(side=tk.LEFT, padx=5)
+        self.premaster_tone_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(master_frame, text="Match tone", variable=self.premaster_tone_var).pack(side=tk.LEFT, padx=5)
+        self.premaster_phase_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(master_frame, text="Fix phase", variable=self.premaster_phase_var).pack(side=tk.LEFT, padx=5)
+        ttk.Button(master_frame, text="Pre-master Set...", command=self.premaster_set).pack(side=tk.LEFT, padx=5)
         
         # Results
         results_frame = ttk.Frame(frame)
@@ -176,7 +194,7 @@ class DynaMixGUI:
         table_frame.pack(fill=tk.BOTH, expand=True)
         
         # Treeview for playlist
-        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy")
+        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy (1-10)")
         self.playlist_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
         
         for col in columns:
@@ -346,6 +364,7 @@ class DynaMixGUI:
                 result_text += f"Duration: {features['duration']:.1f} seconds\n"
                 result_text += f"BPM: {features['bpm']:.1f} (confidence: {features['bpm_confidence']:.2f})\n"
                 result_text += f"Key: {features['key']} (confidence: {features['key_confidence']:.2f})\n"
+                result_text += f"Energy Level: {features.get('energy_level', 0):.1f}/10\n"
                 result_text += f"Average Energy: {features['avg_energy']:.4f}\n"
                 result_text += f"Max Energy: {features['max_energy']:.4f}\n"
                 result_text += f"Energy Std Dev: {features['energy_std']:.4f}\n"
@@ -475,20 +494,7 @@ class DynaMixGUI:
                 
                 df = manager.analyze_playlist(audio_files)
                 
-                # Clear and populate tree
-                for item in self.playlist_tree.get_children():
-                    self.playlist_tree.delete(item)
-                
-                for idx, row in df.iterrows():
-                    duration_min = row['duration'] / 60
-                    self.playlist_tree.insert("", tk.END, values=(
-                        idx + 1,
-                        row['filename'],
-                        f"{row['bpm']:.1f}",
-                        row['key'],
-                        f"{duration_min:.1f}",
-                        f"{row['avg_energy']:.4f}"
-                    ))
+                self._populate_playlist_tree(manager.tracks)
                 
                 self.playlist_manager = manager
                 self.update_status(f"Playlist analyzed: {len(df)} tracks")
@@ -497,6 +503,288 @@ class DynaMixGUI:
                 self.update_status("Error during analysis")
         
         threading.Thread(target=analyze, daemon=True).start()
+    
+    def _populate_playlist_tree(self, tracks):
+        """Fill the playlist table with a list of track dictionaries"""
+        for item in self.playlist_tree.get_children():
+            self.playlist_tree.delete(item)
+        
+        for idx, track in enumerate(tracks):
+            bpm = track.get('bpm', 0) or 0
+            duration = track.get('duration', 0) or 0
+            energy = track.get('energy_level', 0) or 0
+            self.playlist_tree.insert("", tk.END, values=(
+                idx + 1,
+                track.get('filename', ''),
+                f"{bpm:.1f}" if bpm else "-",
+                track.get('key') or "-",
+                f"{duration / 60:.1f}" if duration else "-",
+                f"{energy:.1f}" if energy else "-"
+            ))
+    
+    def create_playlist_from_directory(self):
+        """
+        Create a playlist file from the selected directory.
+        Uses the current set list or analyzed tracks when they belong to this
+        directory, otherwise simply lists the audio files found in it.
+        """
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        
+        tracks = None
+        source = "directory scan"
+        manager = getattr(self, 'playlist_manager', None)
+        same_dir = manager is not None and os.path.normcase(os.path.abspath(manager.playlist_directory)) == \
+            os.path.normcase(os.path.abspath(directory))
+        if same_dir and getattr(self, 'current_set_list', None):
+            tracks = self.current_set_list
+            source = "set list"
+        elif same_dir and manager.tracks:
+            tracks = manager.tracks
+            source = "analyzed tracks"
+        
+        if not tracks:
+            tracks = PlaylistManager(directory).quick_playlist()
+        
+        if not tracks:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        default_name = os.path.basename(os.path.normpath(directory)) or "playlist"
+        filename = filedialog.asksaveasfilename(
+            title="Save Playlist",
+            initialdir=directory,
+            initialfile=f"{default_name}.m3u",
+            defaultextension=".m3u",
+            filetypes=[("M3U playlist", "*.m3u"), ("M3U8 playlist (UTF-8)", "*.m3u8"), ("All files", "*.*")]
+        )
+        if not filename:
+            return
+        
+        try:
+            ExportTools.export_to_m3u(tracks, filename)
+        except Exception as e:
+            messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
+            return
+        
+        self._populate_playlist_tree(tracks)
+        self.current_set_list = list(tracks)
+        self.update_status(f"Playlist saved: {len(tracks)} tracks ({source}) -> {filename}")
+        messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
+    
+    def _tracks_for_directory(self, directory):
+        """Tracks to work on, in order: set list, analyzed tracks, or a plain directory scan."""
+        manager = getattr(self, 'playlist_manager', None)
+        same_dir = manager is not None and os.path.normcase(os.path.abspath(manager.playlist_directory)) == \
+            os.path.normcase(os.path.abspath(directory))
+        if same_dir and getattr(self, 'current_set_list', None):
+            return list(self.current_set_list), "set list"
+        if same_dir and manager.tracks:
+            return list(manager.tracks), "analyzed tracks"
+        return PlaylistManager(directory).quick_playlist(), "directory scan"
+    
+    def plan_transitions(self):
+        """Compute intro/outro sections and the transition sheet for the current set"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        
+        tracks, source = self._tracks_for_directory(directory)
+        if len(tracks) < 2:
+            messagebox.showwarning("Warning", "At least two audio files are needed to plan transitions")
+            return
+        
+        def work():
+            try:
+                planner = TransitionPlanner(tracks)
+                planner.plan(progress_callback=lambda i, n, name: self.root.after(
+                    0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
+                self.transition_planner = planner
+                self.transition_source_dir = directory
+                self.root.after(0, self._show_transition_window, source)
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Transition planning failed: {str(e)}")
+                self.root.after(0, self.update_status, "Error during transition planning")
+        
+        self.update_status(f"Planning transitions for {len(tracks)} tracks ({source})...")
+        threading.Thread(target=work, daemon=True).start()
+    
+    def _show_text_window(self, title: str, text_content: str, save_name: str = "report.txt"):
+        """Simple scrollable text window with a save button"""
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry("900x600")
+        toolbar = ttk.Frame(win)
+        toolbar.pack(fill=tk.X, padx=10, pady=5)
+        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
+        
+        def save():
+            filename = filedialog.asksaveasfilename(title="Save", initialfile=save_name, defaultextension=".txt",
+                                                    filetypes=[("Text", "*.txt"), ("All files", "*.*")])
+            if filename:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(text.get("1.0", tk.END))
+                self.update_status(f"Saved: {filename}")
+        
+        ttk.Button(toolbar, text="Save...", command=save).pack(side=tk.RIGHT, padx=5)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        text.insert(tk.END, text_content)
+        return text
+    
+    def mastering_report(self):
+        """Measure loudness, peaks, clipping, tone and phase for the selected directory"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        tracks, source = self._tracks_for_directory(directory)
+        files = [t['file_path'] for t in tracks]
+        if not files:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        def work():
+            try:
+                reports = check_files(files, progress=lambda i, n, name: self.root.after(
+                    0, self.update_status, f"Mastering check {i}/{n}: {name}"))
+                self.mastering_reports = reports
+                summary = format_check_summary(reports)
+                self.root.after(0, self._show_text_window, "Mastering Report", summary, "mastering_report.txt")
+                flagged = sum(1 for r in reports if r.get('flags'))
+                self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Mastering check failed: {str(e)}")
+        
+        self.update_status(f"Checking mastering of {len(files)} tracks ({source})...")
+        threading.Thread(target=work, daemon=True).start()
+    
+    def premaster_set(self):
+        """Write loudness-normalised, phase-repaired copies of the tracks into another folder"""
+        directory = self.playlist_dir_var.get()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showerror("Error", "Please select a valid directory")
+            return
+        tracks, source = self._tracks_for_directory(directory)
+        files = [t['file_path'] for t in tracks]
+        if not files:
+            messagebox.showwarning("Warning", "No audio files found in directory")
+            return
+        
+        default_out = os.path.join(os.path.dirname(os.path.normpath(directory)),
+                                   os.path.basename(os.path.normpath(directory)) + "_premastered")
+        out_dir = filedialog.askdirectory(title="Choose the OUTPUT folder for the corrected copies (originals are not modified)",
+                                          initialdir=os.path.dirname(default_out), mustexist=False)
+        if not out_dir:
+            return
+        if os.path.normcase(os.path.abspath(out_dir)) == os.path.normcase(os.path.abspath(directory)):
+            messagebox.showerror("Error", "Choose a different folder: the originals must not be overwritten")
+            return
+        target_lufs = float(self.premaster_lufs_var.get())
+        tone = bool(self.premaster_tone_var.get())
+        phase = bool(self.premaster_phase_var.get())
+        
+        def work():
+            try:
+                results = premaster_files(files, out_dir, target_lufs=target_lufs, tone_match=tone, repair_phase=phase,
+                                          progress=lambda i, n, name: self.root.after(
+                                              0, self.update_status, f"Pre-mastering {i}/{n}: {name}"))
+                summary = format_premaster_summary(results, out_dir)
+                self.root.after(0, self._show_text_window, "Pre-master Pass", summary, "premaster_report.txt")
+                done = sum(1 for r in results if 'error' not in r)
+                self.root.after(0, self.update_status, f"Pre-master done: {done}/{len(results)} tracks written to {out_dir}")
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
+        
+        self.update_status(f"Pre-mastering {len(files)} tracks ({source}) to {out_dir}...")
+        threading.Thread(target=work, daemon=True).start()
+    
+    def _show_transition_window(self, source: str):
+        """Display the transition sheet with save / Mixxx export actions"""
+        planner = self.transition_planner
+        title = f"DynaMix Transition Sheet - {os.path.basename(os.path.normpath(self.transition_source_dir))}"
+        
+        win = tk.Toplevel(self.root)
+        win.title("Transition Plan")
+        win.geometry("900x600")
+        
+        toolbar = ttk.Frame(win)
+        toolbar.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(toolbar, text=f"{len(planner.profiles)} tracks, {len(planner.transitions)} transitions ({source})").pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar, text="Save Sheet...", command=lambda: self.save_transition_sheet(title)).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(toolbar, text="Save JSON...", command=self.save_transition_json).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(toolbar, text="Export to Mixxx...", command=lambda: self.export_to_mixxx(text)).pack(side=tk.RIGHT, padx=5)
+        
+        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        text.insert(tk.END, planner.to_text(title))
+        self.update_status(f"Transitions planned: {len(planner.transitions)} ({source})")
+    
+    def save_transition_sheet(self, title: str):
+        """Save the transition sheet as a text file"""
+        filename = filedialog.asksaveasfilename(
+            title="Save Transition Sheet",
+            initialdir=self.transition_source_dir,
+            initialfile="transitions.txt",
+            defaultextension=".txt",
+            filetypes=[("Text", "*.txt"), ("All files", "*.*")]
+        )
+        if filename:
+            self.transition_planner.save_text(filename, title)
+            self.update_status(f"Transition sheet saved: {filename}")
+    
+    def save_transition_json(self):
+        """Save the per-track analysis and transitions as JSON"""
+        filename = filedialog.asksaveasfilename(
+            title="Save Transition Data", initialdir=self.transition_source_dir, initialfile="transitions.json",
+            defaultextension=".json", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if filename:
+            self.transition_planner.save_json(filename)
+            self.update_status(f"Transition data saved: {filename}")
+    
+    def export_to_mixxx(self, log_widget=None):
+        """Write intro/outro cues and a playlist into the Mixxx database"""
+        planner = getattr(self, 'transition_planner', None)
+        if planner is None or not planner.profiles:
+            messagebox.showwarning("Warning", "Plan transitions first")
+            return
+        
+        detected = find_mixxx_db()
+        db_path = filedialog.askopenfilename(
+            title="Select the Mixxx database (mixxxdb.sqlite) - close Mixxx first",
+            initialdir=os.path.dirname(detected) if detected else None,
+            initialfile=os.path.basename(detected) if detected else "mixxxdb.sqlite",
+            filetypes=[("Mixxx database", "mixxxdb.sqlite"), ("SQLite", "*.sqlite"), ("All files", "*.*")]
+        )
+        if not db_path:
+            return
+        
+        default_name = f"DynaMix - {os.path.basename(os.path.normpath(self.transition_source_dir))}"
+        playlist_name = simpledialog.askstring("Mixxx playlist", "Name of the Mixxx playlist to create:",
+                                               initialvalue=default_name, parent=self.root)
+        if playlist_name is None:
+            return
+        
+        if not messagebox.askyesno("Export to Mixxx",
+                                   "Mixxx must be closed while exporting.\n"
+                                   "A backup of the database will be created first.\n\nContinue?"):
+            return
+        
+        try:
+            exporter = MixxxExporter(db_path)
+            report = exporter.export(planner.profiles, playlist_name=playlist_name.strip() or None)
+        except Exception as e:
+            messagebox.showerror("Error", f"Mixxx export failed: {str(e)}")
+            return
+        
+        summary = format_report(report)
+        if log_widget is not None:
+            log_widget.insert(tk.END, "\n\nMIXXX EXPORT\n" + "-" * 60 + "\n" + summary + "\n")
+            log_widget.see(tk.END)
+        self.update_status(f"Mixxx export: {report['cues_written']} cues written, {len(report['missing'])} tracks missing")
+        messagebox.showinfo("Export to Mixxx", summary)
     
     def create_set_list(self):
         """Create set list from analyzed playlist"""
@@ -513,20 +801,7 @@ class DynaMixGUI:
                 energy_curve=energy_curve
             )
             
-            # Clear and populate with set list
-            for item in self.playlist_tree.get_children():
-                self.playlist_tree.delete(item)
-            
-            for idx, track in enumerate(set_list):
-                duration_min = track['duration'] / 60
-                self.playlist_tree.insert("", tk.END, values=(
-                    idx + 1,
-                    track['filename'],
-                    f"{track['bpm']:.1f}",
-                    track['key'],
-                    f"{duration_min:.1f}",
-                    f"{track['avg_energy']:.4f}"
-                ))
+            self._populate_playlist_tree(set_list)
             
             self.current_set_list = set_list
             self.update_status(f"Set list created: {len(set_list)} tracks")

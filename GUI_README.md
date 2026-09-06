@@ -30,8 +30,19 @@ python gui.py
 - **Purpose**: Manage and analyze entire music collections
 - **Features**:
   - Scan directories for audio files
+  - Create a playlist file (M3U) from the selected directory in one click,
+    reusing the analyzed order or set list when available
   - Analyze entire playlists
   - Create optimized set lists
+  - Mastering Report: loudness, true peak, clipping, DC, tone balance and
+    stereo phase (polarity, bass phase, mono compatibility, comb filtering)
+    for every track, with plain-language flags and a 0-100 score
+  - Pre-master Set: writes corrected copies of the tracks into another folder
+    (loudness normalised, true-peak limited, phase repaired, optional tone
+    matching); originals are never modified
+  - Plan transitions: beat-aligned intro/outro sections for every track and a
+    transition sheet (score, tempo change, exit/entry times) that can be saved
+    or exported into Mixxx as intro/outro cues plus a playlist for Auto DJ
   - Configure energy curves and duration
   - View playlist in table format
 

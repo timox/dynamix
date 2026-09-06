@@ -1,8 +1,9 @@
 import os
 import json
+import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
-from audio_utils import AudioAnalyzer, analyze_track_compatibility
+from audio_utils import AudioAnalyzer, key_compatibility_score, analyze_track_compatibility
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -36,6 +37,32 @@ class PlaylistManager:
                     
         return audio_files
     
+    def quick_playlist(self, directory: str = None) -> List[Dict]:
+        """
+        Build a playlist from the audio files of a directory without analyzing
+        them. Entries are sorted by file name and carry the same keys as
+        analyzed tracks (with neutral values) so every exporter accepts them.
+        Returns: List of track dictionaries
+        """
+        entries = []
+        for file_path in sorted(self.scan_directory(directory), key=lambda p: os.path.basename(p).lower()):
+            entries.append({
+                'file_path': file_path,
+                'filename': os.path.basename(file_path),
+                'duration': 0.0,
+                'bpm': 0.0,
+                'bpm_confidence': 0.0,
+                'key': '',
+                'key_confidence': 0.0,
+                'avg_energy': 0.0,
+                'max_energy': 0.0,
+                'energy_std': 0.0,
+                'beat_count': 0,
+                'section_count': 0,
+                'drop_count': 0,
+            })
+        return entries
+    
     def analyze_playlist(self, file_paths: List[str] = None) -> pd.DataFrame:
         """
         Analyze all tracks in playlist
@@ -62,6 +89,8 @@ class PlaylistManager:
                     'key': features['key'],
                     'key_confidence': features['key_confidence'],
                     'avg_energy': features['avg_energy'],
+                    'energy_level': features.get('energy_level', 0.0),
+                    'has_beat': features.get('has_beat', True),
                     'max_energy': features['max_energy'],
                     'energy_std': features['energy_std'],
                     'beat_count': features['beat_count'],
@@ -78,110 +107,109 @@ class PlaylistManager:
                 
         return pd.DataFrame(self.tracks)
     
+    @staticmethod
+    def _energy_value(track: Dict) -> float:
+        """Perceived energy level when available, raw RMS energy otherwise."""
+        level = track.get('energy_level')
+        if level:
+            return float(level)
+        return float(track.get('avg_energy') or 0.0)
+
+    @staticmethod
+    def _target_curve(values: List[float], curve: str) -> List[float]:
+        """Target energy for each slot of the set, drawn from the available values."""
+        n = len(values)
+        lo, hi = min(values), max(values)
+        if n == 1 or hi == lo:
+            return [values[0]] * n
+        if curve == 'wave':
+            # alternate low / high, easing towards the middle
+            ordered = sorted(values)
+            lows, highs = ordered, ordered[::-1]
+            targets = []
+            for i in range(n):
+                targets.append(lows[i // 2] if i % 2 == 0 else highs[i // 2])
+            return targets
+        if curve == 'peak_middle':
+            half = (n + 1) // 2
+            up = list(np.linspace(lo, hi, half))
+            down = list(np.linspace(hi, lo, n - half + 1))[1:]
+            return up + down
+        if curve == 'constant':
+            return [float(np.median(values))] * n
+        # default: 'build'
+        return list(np.linspace(lo, hi, n))
+
     def suggest_playlist_order(self, energy_curve: str = 'build', 
                              key_compatibility: bool = True,
                              bpm_transitions: bool = True) -> List[Dict]:
         """
-        Suggest optimal playlist order based on various criteria
+        Suggest a playing order that follows the requested energy curve while
+        keeping neighbouring tracks close in tempo and harmonically compatible.
         
         Args:
-            energy_curve: 'build' (low to high), 'wave' (alternating), 'custom'
-            key_compatibility: Consider musical key compatibility
-            bpm_transitions: Consider BPM transitions
+            energy_curve: 'build' (low to high), 'wave' (alternating),
+                          'peak_middle' (rise then fall), 'constant'
+            key_compatibility: penalise harmonic clashes between neighbours
+            bpm_transitions: penalise tempo jumps between neighbours
             
         Returns: List of track dictionaries in suggested order
         """
         if not self.tracks:
             raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
-            
-        df = pd.DataFrame(self.tracks)
-        
-        # Sort by energy for build curve
-        if energy_curve == 'build':
-            df_sorted = df.sort_values('avg_energy')
-        elif energy_curve == 'wave':
-            # Create alternating high/low energy pattern
-            df_high = df[df['avg_energy'] > df['avg_energy'].median()].sort_values('avg_energy', ascending=False)
-            df_low = df[df['avg_energy'] <= df['avg_energy'].median()].sort_values('avg_energy')
-            
-            # Interleave high and low energy tracks
-            min_len = min(len(df_high), len(df_low))
-            df_sorted = pd.concat([
-                df_high.iloc[:min_len].reset_index(drop=True),
-                df_low.iloc[:min_len].reset_index(drop=True)
-            ], axis=1).T.melt()['value'].dropna()
-        else:
-            df_sorted = df
-            
-        # Apply key compatibility if requested
-        if key_compatibility and len(df_sorted) > 1:
-            df_sorted = self._optimize_key_transitions(df_sorted)
-            
-        # Apply BPM transitions if requested
-        if bpm_transitions and len(df_sorted) > 1:
-            df_sorted = self._optimize_bpm_transitions(df_sorted)
-            
-        return df_sorted.to_dict('records')
-    
-    def _optimize_key_transitions(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Optimize playlist for smooth key transitions"""
-        # Simple key compatibility matrix
-        key_compatibility = {
-            'C': ['C', 'F', 'G', 'Am'],
-            'C#': ['C#', 'F#', 'G#', 'A#m'],
-            'D': ['D', 'G', 'A', 'Bm'],
-            'D#': ['D#', 'G#', 'A#', 'Cm'],
-            'E': ['E', 'A', 'B', 'C#m'],
-            'F': ['F', 'Bb', 'C', 'Dm'],
-            'F#': ['F#', 'B', 'C#', 'D#m'],
-            'G': ['G', 'C', 'D', 'Em'],
-            'G#': ['G#', 'C#', 'D#', 'Fm'],
-            'A': ['A', 'D', 'E', 'F#m'],
-            'A#': ['A#', 'D#', 'F', 'Gm'],
-            'B': ['B', 'E', 'F#', 'G#m']
-        }
-        
-        # Extract root notes
-        def get_root_note(key_str):
-            return key_str.split()[0]
-            
-        df['root_note'] = df['key'].apply(get_root_note)
-        
-        # Reorder for better key transitions
-        optimized_order = []
-        remaining_tracks = df.copy()
-        
-        # Start with first track
-        current_track = remaining_tracks.iloc[0]
-        optimized_order.append(current_track)
-        remaining_tracks = remaining_tracks.drop(current_track.name)
-        
-        while not remaining_tracks.empty:
-            current_key = current_track['root_note']
-            compatible_keys = key_compatibility.get(current_key, [current_key])
-            
-            # Find tracks with compatible keys
-            compatible_tracks = remaining_tracks[
-                remaining_tracks['root_note'].isin(compatible_keys)
-            ]
-            
-            if not compatible_tracks.empty:
-                # Choose the most compatible track
-                current_track = compatible_tracks.iloc[0]
-            else:
-                # If no compatible key, choose any track
-                current_track = remaining_tracks.iloc[0]
-                
-            optimized_order.append(current_track)
-            remaining_tracks = remaining_tracks.drop(current_track.name)
-            
-        return pd.DataFrame(optimized_order)
-    
-    def _optimize_bpm_transitions(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Optimize playlist for smooth BPM transitions"""
-        # Sort by BPM for gradual transitions
-        return df.sort_values('bpm')
-    
+
+        tracks = list(self.tracks)
+        if len(tracks) == 1:
+            return tracks
+        values = [self._energy_value(t) for t in tracks]
+        targets = self._target_curve(values, energy_curve)
+        span = (max(values) - min(values)) or 1.0
+
+        remaining = list(range(len(tracks)))
+        order: List[int] = []
+        previous = None
+        for target in targets:
+            best, best_cost = None, None
+            for idx in remaining:
+                track = tracks[idx]
+                # how far from the energy the curve asks for at this slot (0..1)
+                cost = abs(self._energy_value(track) - target) / span
+                if previous is not None:
+                    if bpm_transitions and previous.get('has_beat', True) and track.get('has_beat', True):
+                        bpm_a = float(previous.get('bpm') or 0)
+                        bpm_b = float(track.get('bpm') or 0)
+                        if bpm_a and bpm_b:
+                            jump = abs(bpm_b - bpm_a)
+                            cost += 0.03 * max(0.0, jump - 3.0)  # free within 3 BPM
+                    if key_compatibility:
+                        score = key_compatibility_score(previous.get('key', ''), track.get('key', ''))
+                        cost += (100.0 - score) / 100.0 * 0.5
+                elif bpm_transitions:
+                    cost += 0.001 * float(track.get('bpm') or 0)  # start with the slower one on ties
+                if best_cost is None or cost < best_cost:
+                    best, best_cost = idx, cost
+            order.append(best)
+            remaining.remove(best)
+            previous = tracks[best]
+
+        return [tracks[i] for i in order]
+
+    def _select_for_duration(self, target_seconds: float) -> List[Dict]:
+        """Pick a subset that fits the duration while covering the whole energy range."""
+        tracks = sorted(self.tracks, key=self._energy_value)
+        total = sum(float(t.get('duration') or 0) for t in tracks)
+        if total <= target_seconds or len(tracks) <= 1:
+            return tracks
+        avg = total / len(tracks)
+        count = max(1, min(len(tracks), int(target_seconds // max(avg, 1.0))))
+        # evenly spaced picks across the energy-sorted list keep low, mid and high tracks
+        picks = sorted(set(int(round(i)) for i in np.linspace(0, len(tracks) - 1, count)))
+        selected = [tracks[i] for i in picks]
+        # trim if the picked tracks are longer than average
+        while len(selected) > 1 and sum(float(t.get('duration') or 0) for t in selected) > target_seconds:
+            selected.pop(len(selected) // 2)
+        return selected
+
     def create_set_list(self, duration_minutes: int = 60, 
                        energy_curve: str = 'build') -> List[Dict]:
         """
@@ -197,18 +225,16 @@ class PlaylistManager:
             raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
             
         target_duration = duration_minutes * 60  # Convert to seconds
-        suggested_order = self.suggest_playlist_order(energy_curve=energy_curve)
         
-        set_list = []
-        current_duration = 0
-        
-        for track in suggested_order:
-            if current_duration + track['duration'] <= target_duration:
-                set_list.append(track)
-                current_duration += track['duration']
-            else:
-                break
-                
+        # Choose the tracks first (so the whole energy range is represented),
+        # then order the selection along the requested curve.
+        selected = self._select_for_duration(target_duration)
+        all_tracks = self.tracks
+        try:
+            self.tracks = selected
+            set_list = self.suggest_playlist_order(energy_curve=energy_curve)
+        finally:
+            self.tracks = all_tracks
         return set_list
     
     def analyze_playlist_compatibility(self) -> pd.DataFrame:
@@ -322,60 +348,19 @@ def create_energy_based_set(playlist_manager: PlaylistManager,
                            target_duration: int = 60,
                            energy_profile: str = 'peak_middle') -> List[Dict]:
     """
-    Create a set list with specific energy profile
+    Create a set list with a specific energy profile
     
     Args:
-        playlist_manager: Initialized playlist manager
+        playlist_manager: Initialized playlist manager (analyzed tracks)
         target_duration: Set duration in minutes
-        energy_profile: 'peak_middle', 'build_up', 'wave', 'constant'
+        energy_profile: 'peak_middle', 'build_up' (or 'build'), 'wave', 'constant'
         
     Returns: List of tracks for the set
     """
     if not playlist_manager.tracks:
         raise ValueError("No tracks analyzed")
-        
-    df = pd.DataFrame(playlist_manager.tracks)
-    target_seconds = target_duration * 60
     
-    if energy_profile == 'peak_middle':
-        # Sort by energy, peak in middle
-        df_sorted = df.sort_values('avg_energy')
-        n_tracks = len(df_sorted)
-        mid_point = n_tracks // 2
-        
-        # Reorder: low -> high -> low
-        first_half = df_sorted.iloc[:mid_point]
-        second_half = df_sorted.iloc[mid_point:].sort_values('avg_energy', ascending=False)
-        
-        set_tracks = pd.concat([first_half, second_half])
-        
-    elif energy_profile == 'build_up':
-        # Gradual energy increase
-        set_tracks = df.sort_values('avg_energy')
-        
-    elif energy_profile == 'wave':
-        # Alternating high/low energy
-        high_energy = df[df['avg_energy'] > df['avg_energy'].median()].sort_values('avg_energy', ascending=False)
-        low_energy = df[df['avg_energy'] <= df['avg_energy'].median()].sort_values('avg_energy')
-        
-        min_len = min(len(high_energy), len(low_energy))
-        set_tracks = pd.concat([
-            high_energy.iloc[:min_len].reset_index(drop=True),
-            low_energy.iloc[:min_len].reset_index(drop=True)
-        ], axis=1).T.melt()['value'].dropna()
-        
-    else:  # constant
-        set_tracks = df
-        
-    # Select tracks to fit duration
-    selected_tracks = []
-    current_duration = 0
-    
-    for _, track in set_tracks.iterrows():
-        if current_duration + track['duration'] <= target_seconds:
-            selected_tracks.append(track.to_dict())
-            current_duration += track['duration']
-        else:
-            break
-            
-    return selected_tracks 
+    curve = {'build_up': 'build'}.get(energy_profile, energy_profile)
+    ordering = PlaylistManager.__new__(PlaylistManager)
+    ordering.tracks = list(playlist_manager.tracks)
+    return ordering.create_set_list(duration_minutes=target_duration, energy_curve=curve)

@@ -216,6 +216,7 @@ set_lists/
 *.xml
 *.nml
 *_export.*
+!mixxx_export.py
 playlist_*.m3u
 playlist_*.xml
 playlist_*.nml

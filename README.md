@@ -14,6 +14,7 @@
 - **Drop Detection:** Energy breakdown and build-up point identification
 
 ### Playlist Management
+- **Energy Level (1-10):** Perceived energy independent of mastering loudness, from tempo, percussive drive, rhythmic density, low end and brightness
 - **Playlist Analysis:** Analyze entire music collections
 - **Set List Generation:** Create optimal track sequences for DJ sets
 - **Energy Curve Optimization:** Build-up, wave, or custom energy patterns
@@ -44,6 +45,8 @@
 - **FFmpeg** or **AVbin** (if required) to support MP3 file decoding
 
 ## 🛠️ Installation
+
+> **Windows users:** see the step-by-step guide in [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) (French) or simply run `install_windows.bat`. After any install, `python check_install.py` verifies the setup.
 
 1. **Clone or Download the Repository:**
 
@@ -112,6 +115,72 @@ python gui.py
 ```
 
 The GUI provides access to all DynaMix features through an intuitive interface.
+
+### Energy Level and Set Ordering
+
+Each track gets an **energy level from 1 to 10**. It is computed on the loudness-normalised
+body of the track, so a quiet master and a loud master of the same tune get the same level.
+The components are the tempo, the number of percussive events per second, the share of
+percussive energy, the share of low end and the brightness; the tempo and rhythm terms only
+count when the track actually has a beat, so pads and ambient pieces stay low.
+
+Set lists (`create_set_list`, `--playlist`, GUI "Create Set List") first pick tracks that cover
+the whole energy range of the folder for the requested duration, then place them along the
+chosen curve (`build`, `wave`, `peak_middle`, `constant`) while keeping neighbours within a few
+BPM and harmonically compatible (Camelot-wheel logic: same key, relative major/minor, fifth
+neighbours).
+
+### Mastering Check and Pre-master Pass
+
+Badly mastered collections make automatic transitions sound uneven even with ReplayGain, which
+only fixes the average level. `mastering.py` measures every track like a mastering engineer and
+can write corrected copies (the originals are never touched):
+
+```bash
+# Report: loudness (LUFS, ITU BS.1770), loudness range, true peak, clipping, DC offset,
+# tone balance, stereo phase (L/R correlation, bass phase, mono compatibility, comb filtering)
+python mastering.py check /path/to/music
+python mastering.py check my_set.m3u --json report.json
+
+# Corrected copies: loudness normalised to -14 LUFS, true-peak limited at -1 dBTP, DC removed,
+# polarity/bass phase repaired, optional tone matching to the set's median balance
+python mastering.py fix /path/to/music --out /path/to/music_premastered --tone
+python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac
+```
+
+Flags are set-relative where it matters ("darker than the rest of the set", "quieter than the
+rest of the set") so that the goal is a consistent set, not an abstract reference. Comb
+filtering cannot be repaired automatically (it needs the original stems); it is only reported.
+No FFmpeg needed: decoding and encoding go through soundfile/libsndfile (WAV, FLAC, OGG, MP3).
+In the GUI: Playlist Manager tab, **Mastering Report** and **Pre-master Set...**. The transition
+sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
+measurements, and can be saved as JSON.
+
+### Transition Planning and Mixxx Auto DJ
+
+Plan every transition of a set and push the result into [Mixxx](https://mixxx.org) so that
+its Auto DJ mixes the whole playlist by itself:
+
+```bash
+# Analyze a folder, build a set list, print the transition sheet, write cues + playlist into Mixxx
+python mixxx_export.py --playlist /path/to/music --set-duration 60
+
+# Keep the order of an existing playlist and save the sheet
+python mixxx_export.py --m3u my_set.m3u --sheet transitions.txt
+
+# Plan only (no Mixxx) / preview what would be written
+python mixxx_export.py --m3u my_set.m3u --no-mixxx
+python mixxx_export.py --m3u my_set.m3u --dry-run
+```
+
+For each track DynaMix computes a beat-aligned **intro** section (where it should start under
+the previous track, until its energy kicks in) and an **outro** section (where the previous
+track should start fading, until it must be gone). They are written as Mixxx intro/outro cues
+and a Mixxx playlist is created with the set order. In Mixxx, add that playlist to the Auto DJ
+queue and pick the **Full Intro + Outro** transition mode. The tracks must already be in the
+Mixxx library and Mixxx must be closed during the export; a backup of `mixxxdb.sqlite` is made
+first. The same is available in the GUI: Playlist Manager tab, **Plan Transitions**, then
+**Export to Mixxx**.
 
 ### Audio Effects Analysis
 
