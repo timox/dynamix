@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
 from audio_utils import AudioAnalyzer, key_compatibility_score, analyze_track_compatibility
+from analysis_store import get_store
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -15,6 +16,7 @@ class PlaylistManager:
         self.playlist_directory = playlist_directory
         self.tracks = []
         self.analysis_cache = {}
+        self.last_run = {'cached': 0, 'analyzed': 0, 'failed': 0}
         
     def scan_directory(self, directory: str = None) -> List[str]:
         """
@@ -63,47 +65,68 @@ class PlaylistManager:
             })
         return entries
     
-    def analyze_playlist(self, file_paths: List[str] = None) -> pd.DataFrame:
+    @staticmethod
+    def track_record(file_path: str, features: Dict) -> Dict:
+        """Flat track record (what tables, set lists and exports use) from analyzer features."""
+        return {
+            'file_path': file_path,
+            'filename': os.path.basename(file_path),
+            'duration': features['duration'],
+            'bpm': features['bpm'],
+            'bpm_confidence': features['bpm_confidence'],
+            'key': features['key'],
+            'key_confidence': features['key_confidence'],
+            'avg_energy': features['avg_energy'],
+            'energy_level': features.get('energy_level', 0.0),
+            'has_beat': features.get('has_beat', True),
+            'max_energy': features['max_energy'],
+            'energy_std': features['energy_std'],
+            'beat_count': features['beat_count'],
+            'section_count': features['section_count'],
+            'drop_count': features['drop_count'],
+        }
+
+    def analyze_playlist(self, file_paths: List[str] = None, progress_callback=None,
+                         use_cache: bool = True) -> pd.DataFrame:
         """
-        Analyze all tracks in playlist
+        Analyze all tracks in playlist. Results are cached per file (analysis_store),
+        so only new or changed files are actually decoded.
+
+        Args:
+            file_paths: files to analyse (default: scan the playlist directory)
+            progress_callback: fn(index, total, filename, status) with status 'cached'|'analyzed'|'failed'
+            use_cache: set False to force re-analysis
         Returns: DataFrame with track analysis
         """
         if file_paths is None:
             file_paths = self.scan_directory()
             
         self.tracks = []
+        self.last_run = {'cached': 0, 'analyzed': 0, 'failed': 0}
+        store = get_store() if use_cache else None
         
         for i, file_path in enumerate(file_paths):
-            print(f"Analyzing track {i+1}/{len(file_paths)}: {os.path.basename(file_path)}")
-            
+            features = store.get(file_path, 'features') if store else None
+            status = 'cached'
             try:
-                analyzer = AudioAnalyzer(file_path)
-                features = analyzer.get_audio_features()
+                if features is None:
+                    status = 'analyzed'
+                    print(f"Analyzing track {i+1}/{len(file_paths)}: {os.path.basename(file_path)}")
+                    analyzer = AudioAnalyzer(file_path)
+                    features = analyzer.get_audio_features()
+                    if store:
+                        store.put(file_path, 'features', features)
                 
-                track_info = {
-                    'file_path': file_path,
-                    'filename': os.path.basename(file_path),
-                    'duration': features['duration'],
-                    'bpm': features['bpm'],
-                    'bpm_confidence': features['bpm_confidence'],
-                    'key': features['key'],
-                    'key_confidence': features['key_confidence'],
-                    'avg_energy': features['avg_energy'],
-                    'energy_level': features.get('energy_level', 0.0),
-                    'has_beat': features.get('has_beat', True),
-                    'max_energy': features['max_energy'],
-                    'energy_std': features['energy_std'],
-                    'beat_count': features['beat_count'],
-                    'section_count': features['section_count'],
-                    'drop_count': features['drop_count']
-                }
-                
-                self.tracks.append(track_info)
+                self.tracks.append(self.track_record(file_path, features))
                 self.analysis_cache[file_path] = features
+                self.last_run[status] += 1
                 
             except Exception as e:
                 print(f"Error analyzing {file_path}: {e}")
-                continue
+                status = 'failed'
+                self.last_run['failed'] += 1
+            if progress_callback:
+                progress_callback(i + 1, len(file_paths), os.path.basename(file_path), status)
                 
         return pd.DataFrame(self.tracks)
     

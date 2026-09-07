@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional
 import numpy as np
 
 from audio_utils import AudioAnalyzer, energy_compatibility_score, key_compatibility_score
+from analysis_store import get_store
 
 
 def compatibility_from_features(f1: Dict, f2: Dict) -> Dict:
@@ -120,8 +121,25 @@ class TransitionPlanner:
             i -= 1
         return i if (n - i) >= min_run else None
 
-    def profile_track(self, track: Dict) -> Dict:
-        """Load one track and compute its intro/outro sections."""
+    def _cache_kind(self) -> str:
+        return f"profile:{self.mix_bars}:{self.min_mix_seconds:g}:{self.max_mix_seconds:g}:{int(self.check_mastering)}"
+
+    def profile_track(self, track: Dict, use_cache: bool = True) -> Dict:
+        """Load one track and compute its intro/outro sections (cached per file)."""
+        path = track['file_path']
+        store = get_store() if use_cache else None
+        if store:
+            cached = store.get(path, self._cache_kind())
+            if cached is not None:
+                cached['from_cache'] = True
+                return cached
+        profile = self._compute_profile(track)
+        if store:
+            store.put(path, self._cache_kind(), profile)
+        profile['from_cache'] = False
+        return profile
+
+    def _compute_profile(self, track: Dict) -> Dict:
         path = track['file_path']
         analyzer = AudioAnalyzer(path)
         duration = float(analyzer.duration)
@@ -185,16 +203,23 @@ class TransitionPlanner:
         mastering = None
         if self.check_mastering:
             try:
-                from mastering import analyze_mastering
-                mastering = analyze_mastering(path)
+                from mastering import analyze_mastering_cached
+                mastering = analyze_mastering_cached(path)
             except Exception as exc:  # keep planning even if the check fails
                 mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
+
+        # coarse energy envelope (about 2 points per second) for the charts
+        step = max(1, len(rms) // max(1, int(duration * 2)))
+        envelope_t = [float(v) for v in times[::step]]
+        envelope = [float(v) for v in rms[::step]]
 
         return {
             'file_path': path,
             'filename': os.path.basename(path),
             'duration': duration,
             'mastering': mastering,
+            'envelope_times': envelope_t,
+            'envelope': envelope,
             'bpm': float(bpm),
             'key': key,
             'avg_energy': avg_energy,

@@ -520,6 +520,18 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
     return {'input': path, 'output': output_path, 'before': before, 'after': after, 'actions': actions}
 
 
+def analyze_mastering_cached(path: str) -> Dict:
+    """analyze_mastering() through the per-file analysis cache."""
+    from analysis_store import get_store
+    store = get_store()
+    cached = store.get(path, 'mastering')
+    if cached is not None:
+        return cached
+    report = analyze_mastering(path)
+    store.put(path, 'mastering', report)
+    return report
+
+
 def collect_files(target: str) -> List[str]:
     """Directory -> audio files (sorted); .m3u -> its entries; file -> [file]."""
     if os.path.isdir(target):
@@ -562,11 +574,12 @@ def check_files(files: List[str], progress=None, relative: bool = True) -> List[
         if progress:
             progress(i + 1, len(files), os.path.basename(path))
         try:
-            reports.append(analyze_mastering(path))
+            reports.append(analyze_mastering_cached(path))
         except Exception as exc:  # unreadable file: keep going
             reports.append({'file_path': path, 'filename': os.path.basename(path), 'error': str(exc),
                             'flags': [f"could not analyze: {exc}"], 'score': 0.0, 'lufs': None,
                             'loudness_range': 0.0, 'true_peak_db': 0.0, 'plr': 0.0, 'tilt_db': 0.0})
+    reports = [dict(r, flags=list(r.get('flags', []))) for r in reports]
     if relative:
         add_set_relative_flags(reports)
     return reports
