@@ -50,7 +50,12 @@ python gui.py
   remove it); the library never disappears. Select a row to open it in the
   Track tab.
 - **Overview**: set energy curve against the target, tempo, and the set map
-- **Track**: energy envelope with intro/outro, loudness figures, tone balance
+- **Track**: energy envelope with intro/outro, loudness figures, stereo
+  phase and bass width, tone balance, then the band tracking chart (band
+  envelopes over time, low-mid masking map, resonance spectrum with EQ
+  suggestions and, when needed, "mix revision recommended")
+- **Band Analysis** button: the same diagnostics as a text report for the
+  whole set, with the list of tracks that need a mix revision
 - **Pre-master**: loudness and true peak before -> after, actions per track
 - **Project summary** button: text summary of the project and its steps
 

@@ -189,6 +189,29 @@ In the GUI: Set Builder tab, **Mastering Report** and **Pre-master Set** (copies
 sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
 measurements, and can be saved as JSON.
 
+### Band Analysis: signal tracking per band, low-mid masking, resonances
+
+Mixing by bands is about giving each frequency region room to breathe, and the 200-500 Hz
+region is where most elements pile up. `band_analysis.py` measures, per track:
+
+- **band envelopes over time** (RMS per band, attack 10 ms, release a quarter beat) and how
+  strongly each band pulses at the beat rate: a 200-500 Hz band that stays full while the low end
+  pumps calls for sidechain or dynamic EQ on the low mids;
+- **low-mid masking**: how far 200-500 Hz exceeds its neighbours (60-120 Hz and 0.5-2 kHz) over
+  time, with the share of time it builds up (masking between elements, not a fixed-EQ problem);
+- **resonances**: narrow peaks between 100 and 800 Hz that persist over the track, with
+  frequency, prominence and Q, turned into EQ cut suggestions.
+
+These are mix-stage diagnostics: when they fire, the report says **mix revision recommended**,
+because a pre-master pass levels a set but cannot un-mask a low-mid build-up. The verdict shows
+in the Tracks tables, the track-by-track sheet and the Band Analysis report; the Track tab draws
+the band tracking, the masking map and the resonance spectrum.
+
+```bash
+python mastering.py bands /path/to/music        # or a project folder, an .m3u, files
+python mastering.py bands set.m3u --json bands.json
+```
+
 ### Transition Planning and Mixxx Auto DJ
 
 Plan every transition of a set and push the result into [Mixxx](https://mixxx.org) so that

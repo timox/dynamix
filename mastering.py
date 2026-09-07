@@ -158,6 +158,11 @@ def true_peak_db(x: np.ndarray, fs: float, oversample: int = 4) -> float:
 
 
 # ============================================================ analysis
+# Bass width bands (Hz) and the side/mid ratio (dB) under which a band counts as mono
+BASS_WIDTH_BANDS = [('20-40', 20, 40), ('40-60', 40, 60), ('60-90', 60, 90), ('90-120', 90, 120),
+                    ('120-150', 120, 150), ('150-200', 150, 200), ('200-300', 200, 300)]
+MONO_BASS_THRESHOLD_DB = -20.0
+
 BANDS = [('sub', 20, 60), ('low', 60, 250), ('low_mid', 250, 800), ('mid', 800, 2500),
          ('high_mid', 2500, 6000), ('high', 6000, 20000)]
 
@@ -179,14 +184,14 @@ def spectral_balance(x: np.ndarray, fs: float) -> Dict[str, float]:
     return balance
 
 
-def _bandpass(x: np.ndarray, fs: float, lo: Optional[float], hi: Optional[float]) -> np.ndarray:
+def _bandpass(x: np.ndarray, fs: float, lo: Optional[float], hi: Optional[float], order: int = 4) -> np.ndarray:
     nyq = fs / 2
     if lo and hi:
-        sos = signal.butter(4, [lo / nyq, min(hi, nyq * 0.99) / nyq], btype='band', output='sos')
+        sos = signal.butter(order, [lo / nyq, min(hi, nyq * 0.99) / nyq], btype='band', output='sos')
     elif lo:
-        sos = signal.butter(4, lo / nyq, btype='high', output='sos')
+        sos = signal.butter(order, lo / nyq, btype='high', output='sos')
     else:
-        sos = signal.butter(4, min(hi, nyq * 0.99) / nyq, btype='low', output='sos')
+        sos = signal.butter(order, min(hi, nyq * 0.99) / nyq, btype='low', output='sos')
     return signal.sosfiltfilt(sos, x, axis=0)
 
 
@@ -218,7 +223,8 @@ def analyze_phase(x: np.ndarray, fs: float) -> Dict:
     """
     result = {'stereo': x.ndim == 2 and x.shape[1] >= 2, 'correlation': 1.0, 'correlation_low': 1.0,
               'correlation_high': 1.0, 'correlation_p10': 1.0, 'mono_loss_db': 0.0, 'comb_delay_ms': None,
-              'comb_strength': 0.0, 'flags': []}
+              'comb_strength': 0.0, 'bass_width_db': None, 'bass_width_bands': {}, 'mono_below_hz': None,
+              'bass_is_mono': None, 'flags': []}
     mono = x.mean(axis=1) if x.ndim == 2 else x
     if result['stereo']:
         left = x[:, 0].astype(np.float64)
@@ -237,6 +243,32 @@ def analyze_phase(x: np.ndarray, fs: float) -> Dict:
         result['mono_loss_db'] = float(10 * np.log10(e_mono / e_avg))
 
         # whole signal inverted: bass AND highs both anti-correlated
+        # --- bass width: side (L-R) versus mid (L+R) energy, per band and below 150 Hz.
+        # Mono bass = side energy negligible (<= MONO_BASS_THRESHOLD_DB below mid).
+        mid = (left + right) / 2
+        side = (left - right) / 2
+        f_ms, psd_mid = signal.welch(mid, fs=fs, nperseg=8192)
+        _, psd_side = signal.welch(side, fs=fs, nperseg=8192)
+        bands = {}
+        for name, lo, hi in BASS_WIDTH_BANDS:
+            mask = (f_ms >= lo) & (f_ms < hi)
+            e_mid = float(np.sum(psd_mid[mask])) + 1e-20
+            e_side = float(np.sum(psd_side[mask])) + 1e-20
+            bands[name] = float(10 * np.log10(e_side / e_mid))
+        result['bass_width_bands'] = bands
+        low_mask = f_ms < 150.0
+        result['bass_width_db'] = float(10 * np.log10((float(np.sum(psd_side[low_mask])) + 1e-20) /
+                                                      (float(np.sum(psd_mid[low_mask])) + 1e-20)))
+        result['bass_is_mono'] = bool(result['bass_width_db'] <= MONO_BASS_THRESHOLD_DB)
+        # highest frequency below which every band is still mono
+        mono_below = 0.0
+        for name, lo, hi in BASS_WIDTH_BANDS:
+            if bands[name] <= MONO_BASS_THRESHOLD_DB:
+                mono_below = hi
+            else:
+                break
+        result['mono_below_hz'] = float(mono_below)
+
         if result['correlation_low'] < -0.5 and result['correlation_high'] < -0.5:
             result['flags'].append(f"polarity inverted between channels (correlation {result['correlation']:+.2f})")
         elif result['correlation_low'] < 0.3:
@@ -245,6 +277,9 @@ def analyze_phase(x: np.ndarray, fs: float) -> Dict:
             result['flags'].append(f"poor mono compatibility ({result['mono_loss_db']:.1f} dB lost in mono)")
         if -0.5 <= result['correlation'] < 0.2 and not result['flags']:
             result['flags'].append(f"very wide / phasey stereo image (correlation {result['correlation']:+.2f})")
+        if not result['flags'] and not result['bass_is_mono']:
+            result['flags'].append(f"stereo bass: side is only {abs(result['bass_width_db']):.0f} dB below mid under 150 Hz "
+                                   f"(mono only below {result['mono_below_hz']:.0f} Hz)")
 
     # comb filtering: a delayed copy leaves evenly spaced notches over the WHOLE
     # spectrum. Pitched harmonics also look periodic, so only the 1.5-8 kHz band
@@ -359,7 +394,7 @@ def analyze_mastering(path: str, audio: Optional[Tuple[np.ndarray, int]] = None)
     phase = analyze_phase(x, fs)
     for flag in phase['flags']:
         flags.append(flag)
-        score -= 15 if ('inverted' in flag or 'cancels' in flag or 'comb' in flag) else 8
+        score -= 15 if ('inverted' in flag or 'cancels' in flag or 'comb' in flag) else (5 if 'stereo bass' in flag else 8)
 
     return {
         'phase': phase,
@@ -386,8 +421,14 @@ def analyze_mastering(path: str, audio: Optional[Tuple[np.ndarray, int]] = None)
 def format_check(report: Dict) -> str:
     lufs = f"{report['lufs']:.1f}" if report['lufs'] is not None else "  -inf"
     phase = report.get('phase', {})
-    stereo = f"stereo corr {phase.get('correlation', 1.0):+.2f} (bass {phase.get('correlation_low', 1.0):+.2f}), mono loss {phase.get('mono_loss_db', 0.0):+.1f} dB" \
-        if phase.get('stereo') else "mono file"
+    if phase.get('stereo'):
+        stereo = (f"stereo corr {phase.get('correlation', 1.0):+.2f} (bass {phase.get('correlation_low', 1.0):+.2f}), "
+                  f"mono loss {phase.get('mono_loss_db', 0.0):+.1f} dB")
+        if phase.get('bass_width_db') is not None:
+            stereo += (f" | bass width side/mid {phase['bass_width_db']:+.0f} dB: "
+                       + (f"mono below {phase['mono_below_hz']:.0f} Hz" if phase.get('mono_below_hz') else "NOT mono"))
+    else:
+        stereo = "mono file"
     line = (f"{report['filename']}\n"
             f"    {lufs} LUFS | range {report['loudness_range']:.1f} LU | true peak {report['true_peak_db']:+.1f} dBTP | "
             f"PLR {report['plr']:.1f} dB | tilt {report['tilt_db']:+.1f} dB | score {report['score']:.0f}/100\n"
@@ -447,6 +488,17 @@ def apply_tone_match(x: np.ndarray, fs: int, balance: Dict[str, float], target: 
     return y.astype(np.float32), {'low_shelf_db': low_adj, 'high_shelf_db': high_adj}
 
 
+def mono_bass(x: np.ndarray, fs: int, below_hz: float = 120.0) -> np.ndarray:
+    """Sum the stereo content below `below_hz` to mono, keeping the image above it."""
+    if x.ndim != 2 or x.shape[1] < 2 or below_hz <= 0:
+        return x
+    y = x.astype(np.float32).copy()
+    # steep crossover so the band just below `below_hz` is really mono
+    low = _bandpass(y[:, :2], fs, None, below_hz, order=8).astype(np.float32)
+    y[:, :2] = y[:, :2] - low + low.mean(axis=1, keepdims=True)
+    return y
+
+
 def fix_phase(x: np.ndarray, fs: int, phase: Dict, mono_bass_hz: float = 120.0) -> Tuple[np.ndarray, Dict]:
     """
     Repair what can be repaired safely:
@@ -478,8 +530,11 @@ def fix_phase(x: np.ndarray, fs: int, phase: Dict, mono_bass_hz: float = 120.0) 
 
 def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, ceiling_db: float = -1.0,
                     tone_target: Optional[Dict[str, float]] = None, remove_dc: bool = True,
-                    report: Optional[Dict] = None, repair_phase: bool = True) -> Dict:
-    """Write a corrected copy of one track. Returns what was done."""
+                    report: Optional[Dict] = None, repair_phase: bool = True, mono_bass_hz: float = 0.0) -> Dict:
+    """
+    Write a corrected copy of one track. Returns what was done.
+    mono_bass_hz > 0 forces the bass below that frequency to mono (skipped when it already is).
+    """
     x, fs = load_audio(path)
     before = report or analyze_mastering(path, (x, fs))
     actions = {}
@@ -487,6 +542,12 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
     if repair_phase:
         x, phase_actions = fix_phase(x, fs, before.get('phase', {}))
         actions.update(phase_actions)
+    if mono_bass_hz > 0 and 'mono_bass_below_hz' not in actions:
+        phase = before.get('phase') or {}
+        already = phase.get('bass_is_mono') and (phase.get('mono_below_hz') or 0) >= mono_bass_hz
+        if phase.get('stereo') and not already:
+            x = mono_bass(x, fs, mono_bass_hz)
+            actions['mono_bass_below_hz'] = mono_bass_hz
 
     if remove_dc:
         b, a = _biquad_high_pass(fs, 20.0, 0.707)
@@ -614,7 +675,8 @@ def format_check_summary(reports: List[Dict]) -> str:
 
 
 def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, ceiling_db: float = -1.0,
-                    tone_match: bool = False, fmt: str = 'same', progress=None, repair_phase: bool = True) -> List[Dict]:
+                    tone_match: bool = False, fmt: str = 'same', progress=None, repair_phase: bool = True,
+                    mono_bass_hz: float = 0.0) -> List[Dict]:
     """Pre-master a list of files into out_dir. Returns per-track results."""
     os.makedirs(out_dir, exist_ok=True)
     if progress:
@@ -635,7 +697,7 @@ def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, 
         output_path = os.path.join(out_dir, base + out_ext)
         try:
             results.append(premaster_track(path, output_path, target_lufs, ceiling_db, tone_target,
-                                           report=report, repair_phase=repair_phase))
+                                           report=report, repair_phase=repair_phase, mono_bass_hz=mono_bass_hz))
         except Exception as exc:
             results.append({'input': path, 'error': str(exc)})
     return results
@@ -675,6 +737,10 @@ def main():
     chk.add_argument("targets", nargs="+", help="Directory, .m3u playlist or audio files")
     chk.add_argument("--json", help="Also save the full report as JSON")
 
+    bands = sub.add_parser("bands", help="Band tracking, low-mid masking and resonances (mix-stage diagnostics)")
+    bands.add_argument("targets", nargs="+", help="Directory, .m3u playlist, project folder or audio files")
+    bands.add_argument("--json", help="Also save the full reports as JSON")
+
     fix = sub.add_parser("fix", help="Write corrected copies of the tracks into another folder")
     fix.add_argument("target", help="Directory, .m3u playlist, audio file, or a set project folder (its set list is used)")
     fix.add_argument("--out", help="Output folder (default: a 'premaster' subfolder of the target folder)")
@@ -685,7 +751,41 @@ def main():
                      help="Output format (default: same as the source)")
     fix.add_argument("--no-phase-fix", action="store_true", help="Do not flip inverted polarity / mono the bass")
     fix.add_argument("--save-chart", metavar="PNG", help="Write the loudness / true-peak before-after chart")
+    fix.add_argument("--mono-bass", type=float, default=None, metavar="HZ",
+                     help="Force the bass below HZ to mono (default: the project's option, else off; 0 = off)")
     args = parser.parse_args()
+
+    if args.command == "bands":
+        from band_analysis import analyze_bands_cached, format_band_summary
+        from set_project import SetProject
+        files = []
+        for target in args.targets:
+            if os.path.isdir(target) and SetProject.exists(target):
+                project = SetProject.open(target)
+                tracks = project.set_list_tracks() or project.tracks
+                files.extend([t['file_path'] for t in tracks] or project.source_files())
+            else:
+                files.extend(collect_files(target))
+        if not files:
+            print("No audio files found.")
+            sys.exit(1)
+        reports = []
+        for i, path in enumerate(files, 1):
+            print(f"Band analysis {i}/{len(files)}: {os.path.basename(path)}")
+            try:
+                reports.append(analyze_bands_cached(path))
+            except Exception as exc:
+                reports.append({"filename": os.path.basename(path), "error": str(exc)})
+        print()
+        print(format_band_summary(reports))
+        needs_mix = [r["filename"] for r in reports if r.get("verdict") == "mix"]
+        if needs_mix:
+            print(f"\nMIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix))
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as f:
+                json.dump(reports, f, indent=2)
+            print(f"JSON saved to {args.json}")
+        return
 
     if args.command == "check":
         files = []
@@ -711,6 +811,8 @@ def main():
             args.out = args.out or project.premaster_dir
             if args.lufs == -14.0:
                 args.lufs = float(project.options.get("target_lufs", -14.0))
+            if args.mono_bass is None:
+                args.mono_bass = float(project.options.get("mono_bass_hz", 0.0))
             print(f"Pre-mastering project '{project.name}' ({len(files)} tracks) into {args.out}")
         else:
             files = collect_files(args.target)
@@ -723,7 +825,7 @@ def main():
             args.out = os.path.join(base, PREMASTER_DIRNAME)
         results = premaster_files(files, args.out, args.lufs, args.tp, args.tone, args.format,
                                   progress=lambda i, n, name: print(f"Pre-mastering {i}/{n}: {name}"),
-                                  repair_phase=not args.no_phase_fix)
+                                  repair_phase=not args.no_phase_fix, mono_bass_hz=args.mono_bass or 0.0)
         summary = format_premaster_summary(results, args.out)
         print()
         print(summary)

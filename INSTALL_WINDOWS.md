@@ -181,6 +181,14 @@ l'onglet **Playlist Manager**, cadre *Mastering* :
 Le filtrage en peigne, lui, n'est que signalé : il ne se répare pas sans les
 pistes d'origine.
 
+**Analyse par bande** (bouton *Band Analysis*, et onglet *Track*) : suivi du
+signal par bande dans le temps avec des constantes calées sur le tempo, carte
+du masquage du 200–500 Hz par rapport à ses voisines, détection des résonances
+persistantes entre 100 et 800 Hz avec suggestion de creux d'égalisation. Quand
+ces défauts sont détectés, DynaMix indique **reprise du mix conseillée** : le
+pré-mastering aligne les niveaux d'un set mais ne peut pas démasquer un
+bas-médium encombré. En ligne de commande : `python mastering.py bands <dossier>`.
+
 L'onglet **Pre-master** montre ensuite, morceau par morceau, le volume et la
 crête vraie avant et après, et la liste des actions appliquées (gain, timbre,
 polarité, grave en mono). Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export

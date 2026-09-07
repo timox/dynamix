@@ -72,6 +72,7 @@ setup(
         "transition_planner",
         "mixxx_export",
         "mastering",
+        "band_analysis",
         "analysis_store",
         "set_project",
         "charts",

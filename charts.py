@@ -191,8 +191,8 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
 # ------------------------------------------------------------------ track detail
 def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] = None) -> Figure:
     """Energy envelope with intro/outro sections, plus the tone balance against the set."""
-    fig = _figure(9.0, 8.2)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.35, 0.75, 1.0])
+    fig = _figure(9.0, 8.6)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.3, 0.9, 1.0])
     ax1 = fig.add_subplot(gs[0])
     _style(ax1)
     times = np.asarray(profile.get("envelope_times") or [], dtype=float)
@@ -223,8 +223,11 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         head += f"\n{m['lufs']:.1f} LUFS · true peak {m['true_peak_db']:+.1f} dBTP · PLR {m['plr']:.1f} dB · mastering score {m['score']:.0f}/100"
     ax1.set_title(head, loc="left", fontsize=10)
 
-    ax_phase = fig.add_subplot(gs[1])
+    sub = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.3)
+    ax_phase = fig.add_subplot(sub[0])
     _phase_axes(ax_phase, m)
+    ax_bass = fig.add_subplot(sub[1])
+    _bass_width_axes(ax_bass, m)
 
     ax2 = fig.add_subplot(gs[2])
     _mastering_balance_axes(ax2, m, set_median_balance)
@@ -233,6 +236,35 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         ax2.text(0.0, -0.30, "! " + "\n! ".join(flags[:5]), transform=ax2.transAxes, fontsize=8,
                  color=TEXT2, va="top", ha="left")
     return _finish(fig)
+
+
+def _bass_width_axes(ax, report: Dict):
+    """Side/mid energy per low band: below the mono threshold the bass is effectively mono."""
+    _style(ax, grid_axis="y")
+    phase = (report or {}).get("phase") or {}
+    bands = phase.get("bass_width_bands") or {}
+    if not phase.get("stereo") or not bands:
+        ax.text(0.5, 0.5, "No bass width data", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return
+    from mastering import MONO_BASS_THRESHOLD_DB
+    names = list(bands.keys())
+    values = [max(-40.0, float(bands[n])) for n in names]
+    x = np.arange(len(names))
+    colors = [BLUE if v <= MONO_BASS_THRESHOLD_DB else RED for v in values]
+    ax.bar(x, [v + 40 for v in values], bottom=-40, width=0.6, color=colors, linewidth=0)
+    ax.axhline(MONO_BASS_THRESHOLD_DB, color=GRAY, linewidth=1)
+    ax.set_ylim(-40, 2)
+    ax.set_yticks([-40, -30, -20, -10, 0])
+    ax.set_yticklabels(["-40", "-30", "-20 mono", "-10", "0"], fontsize=7)
+    ax.set_xticks(x)
+    ax.set_xticklabels([n.split("-")[0] for n in names], fontsize=7)
+    ax.set_xlabel("band start (Hz)", fontsize=8)
+    ax.set_ylabel("side vs mid (dB)", fontsize=8)
+    below = phase.get("mono_below_hz") or 0
+    verdict = f"mono below {below:.0f} Hz" if below else "NOT mono"
+    ax.set_title(f"Bass width: {verdict} (red = stereo band)", loc="left", fontsize=10)
 
 
 def _phase_axes(ax, report: Dict):
@@ -248,9 +280,9 @@ def _phase_axes(ax, report: Dict):
         ax.set_yticks([])
         ax.set_title("Stereo phase", loc="left", fontsize=10)
         return
-    rows = [("Overall L/R correlation", phase.get("correlation", 1.0)),
-            ("Bass (< 150 Hz)", phase.get("correlation_low", 1.0)),
-            ("Highs (> 1 kHz)", phase.get("correlation_high", 1.0))]
+    rows = [("L/R overall", phase.get("correlation", 1.0)),
+            ("Bass < 150 Hz", phase.get("correlation_low", 1.0)),
+            ("Highs > 1 kHz", phase.get("correlation_high", 1.0))]
     y = np.arange(len(rows))[::-1]
     values = [float(v) for _, v in rows]
     ax.barh(y, values, height=0.5, color=[BLUE if v >= 0 else RED for v in values], linewidth=0)
@@ -264,14 +296,15 @@ def _phase_axes(ax, report: Dict):
             ax.text(v + (0.03 if v >= 0 else -0.03), yi, f"{v:+.2f}", va="center", ha="left" if v >= 0 else "right",
                     fontsize=8, color=TEXT2)
     ax.set_xlim(-1.05, 1.05)
-    ax.set_xticks([-1, -0.5, 0, 0.5, 1])
-    ax.set_xticklabels(["-1 inverted", "-0.5", "0", "+0.5", "+1 in phase"], fontsize=8)
+    ax.set_xticks([-1, 0, 1])
+    ax.set_xticklabels(["-1\ninverted", "0", "+1\nin phase"], fontsize=8)
     ax.set_yticks(y)
     ax.set_yticklabels([label for label, _ in rows], fontsize=8)
+    ax.set_xlabel("correlation (shaded: cancels in mono)", fontsize=8)
     mono = phase.get("mono_loss_db", 0.0)
     comb = phase.get("comb_delay_ms")
-    extra = f"mono fold-down: {mono:+.1f} dB" + (f"   ·   comb filtering: delay ≈ {comb:.2f} ms" if comb else "")
-    ax.set_title(f"Stereo phase  ({extra}; below +0.3 = cancels in mono)", loc="left", fontsize=10)
+    extra = f"mono fold-down {mono:+.1f} dB" + (f", comb ≈ {comb:.2f} ms" if comb else "")
+    ax.set_title(f"Stereo phase ({extra})", loc="left", fontsize=10)
 
 
 BAND_LABELS = [("sub", "Sub (20-60 Hz)"), ("low", "Low (60-250)"), ("low_mid", "Low-mid (250-800)"),
@@ -359,3 +392,84 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
 def save(fig: Figure, path: str) -> str:
     fig.savefig(path, dpi=110, facecolor=SURFACE)
     return path
+
+
+# ------------------------------------------------------------------ band dynamics
+def band_dynamics(report: Dict) -> Figure:
+    """Band envelopes over time (200-500 Hz emphasised), low-mid masking, and the resonance spectrum."""
+    fig = _figure(9.0, 8.0)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.2, 0.8, 1.0])
+    chart = report.get("chart") or {}
+    times = np.asarray(chart.get("times") or [], dtype=float)
+    bands = chart.get("bands") or {}
+    duration = float(times[-1]) if len(times) else 1.0
+
+    ax1 = fig.add_subplot(gs[0])
+    _style(ax1)
+    for name, label in (("low", "60-120 Hz"), ("mid", "0.5-2 kHz")):
+        if name in bands:
+            ax1.plot(times, bands[name], color=GRAY, linewidth=1.5, solid_capstyle="round", label=label)
+    if "mud" in bands:
+        ax1.plot(times, bands["mud"], color=BLUE, linewidth=2, solid_capstyle="round", label="200-500 Hz")
+    ax1.set_ylabel("band level (dBFS)")
+    ax1.set_xlim(0, duration)
+    ticks = np.arange(0, duration + 1, 60 if duration > 240 else 30) if duration else [0]
+    ax1.set_xticks(ticks)
+    ax1.set_xticklabels([_fmt_time(v) for v in ticks])
+    ax1.legend(loc="center right", frameon=False, fontsize=8, labelcolor=TEXT2, ncol=1)
+    st = (report.get("stats") or {}).get("mud") or {}
+    rel = report.get("release_s")
+    ax1.set_title(f"Band tracking — 200-500 Hz range {st.get('range_db', 0):.1f} dB, pulse {st.get('beat_modulation', 0):.2f}"
+                  + (f" (release {rel * 1000:.0f} ms)" if rel else ""), loc="left", fontsize=10)
+
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    _style(ax2)
+    masking = np.asarray(chart.get("masking") or [], dtype=float)
+    mud = report.get("mud") or {}
+    if len(masking):
+        median = float(mud.get("excess_median_db", np.median(masking)))
+        ax2.fill_between(times, masking, median, where=masking > median, color=RED, alpha=0.25, linewidth=0)
+        ax2.plot(times, masking, color=BLUE, linewidth=1.5)
+        ax2.axhline(median, color=GRAY, linewidth=1)
+        ax2.axhline(median + 6, color=GRAY, linewidth=1)
+        ax2.text(duration, median + 6.3, "build-up (+6 dB)", fontsize=7, color=TEXT2, ha="right", va="bottom")
+    ax2.set_ylabel("200-500 vs neighbours (dB)")
+    ax2.set_title(f"Low-mid masking — typical {mud.get('excess_median_db', 0):+.0f} dB, worst {mud.get('excess_p90_db', 0):+.0f} dB, "
+                  f"build-up {mud.get('buildup_share', 0) * 100:.0f}%", loc="left", fontsize=10)
+    ax2.set_xticks(ticks)
+    ax2.set_xticklabels([_fmt_time(v) for v in ticks])
+
+    ax3 = fig.add_subplot(gs[2])
+    _style(ax3)
+    f = np.asarray(chart.get("spectrum_hz") or [], dtype=float)
+    r = np.asarray(chart.get("spectrum_residual_db") or [], dtype=float)
+    if len(f):
+        ax3.fill_between(f, r, 0, where=r > 0, color=BLUE, alpha=0.10, linewidth=0)
+        ax3.plot(f, r, color=BLUE, linewidth=1.5)
+        ax3.axhline(0, color=GRAY, linewidth=1)
+        ax3.set_xscale("log")
+        ax3.set_xlim(100, 800)
+        ax3.set_xticks([100, 150, 200, 300, 400, 500, 600, 800])
+        ax3.set_xticklabels(["100", "150", "200", "300", "400", "500", "600", "800"])
+        ymax = max(8.0, float(np.max(r)) + 3)
+        ax3.set_ylim(min(-6.0, float(np.min(r)) - 1), ymax)
+        for res in (report.get("resonances") or [])[:4]:
+            ax3.scatter([res["freq_hz"]], [res["prominence_db"]], s=60, color=RED, edgecolors=SURFACE, linewidths=2, zorder=3)
+        # label only the two strongest to avoid collisions; the others are in the notes
+        for res in (report.get("resonances") or [])[:2]:
+            ax3.annotate(f"{res['freq_hz']:.0f} Hz", (res["freq_hz"], res["prominence_db"]), textcoords="offset points",
+                         xytext=(6, 4), fontsize=8, color=TEXT2)
+    else:
+        ax3.text(0.5, 0.5, "Track too short for the resonance spectrum", transform=ax3.transAxes, ha="center", color=TEXT2)
+    ax3.set_xlabel("Hz")
+    ax3.set_ylabel("above spectral envelope (dB)")
+    n_res = len(report.get("resonances") or [])
+    ax3.set_title(f"Resonances 100-800 Hz  —  {n_res} persistent peak(s) (red dots)", loc="left", fontsize=10)
+    import textwrap
+    lines = [("! " + l) for l in (report.get("flags") or [])] + [f"EQ: {sug}" for sug in (report.get("eq_suggestions") or [])]
+    if report.get("verdict") == "mix":
+        lines.insert(0, "MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)")
+    if lines:
+        wrapped = "\n".join("\n  ".join(textwrap.wrap(l, 78)) for l in lines[:6])
+        ax3.text(0.0, -0.30, wrapped, transform=ax3.transAxes, fontsize=8, color=TEXT2, va="top", ha="left")
+    return _finish(fig)

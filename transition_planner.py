@@ -201,12 +201,19 @@ class TransitionPlanner:
             outro_end = duration
 
         mastering = None
+        bands = None
         if self.check_mastering:
             try:
                 from mastering import analyze_mastering_cached
                 mastering = analyze_mastering_cached(path)
             except Exception as exc:  # keep planning even if the check fails
                 mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
+            try:
+                from band_analysis import analyze_bands_cached
+                full = analyze_bands_cached(path, bpm=bpm if bpm > 0 else None)
+                bands = {k: full[k] for k in ('mud', 'resonances', 'flags', 'eq_suggestions', 'verdict', 'stats')}
+            except Exception as exc:
+                bands = {'error': str(exc), 'flags': [], 'verdict': 'ok', 'resonances': [], 'eq_suggestions': [], 'mud': {}}
 
         # coarse energy envelope (about 2 points per second) for the charts
         step = max(1, len(rms) // max(1, int(duration * 2)))
@@ -218,6 +225,7 @@ class TransitionPlanner:
             'filename': os.path.basename(path),
             'duration': duration,
             'mastering': mastering,
+            'bands': bands,
             'envelope_times': envelope_t,
             'envelope': envelope,
             'bpm': float(bpm),
@@ -308,11 +316,22 @@ class TransitionPlanner:
                          f"true peak {m['true_peak_db']:+.1f} dBTP | PLR {m['plr']:.1f} dB | tilt {m['tilt_db']:+.1f} dB | "
                          f"score {m['score']:.0f}/100")
             lines.append(f"    {stereo}")
-        if m and m.get('flags'):
-            for flag in m['flags']:
-                lines.append(f"    ! {flag}")
-        elif m:
-            lines.append("    mastering OK")
+        b = p.get('bands') or {}
+        if b.get('mud'):
+            mud = b['mud']
+            lines.append(f"    low mids (200-500 Hz): {mud.get('excess_median_db', 0):+.0f} dB vs neighbours, "
+                         f"build-up {mud.get('buildup_share', 0) * 100:.0f}% of the time, pulse {mud.get('beat_modulation', 0):.2f}")
+            if b.get('resonances'):
+                lines.append("    resonances: " + ", ".join(f"{r['freq_hz']:.0f} Hz (+{r['prominence_db']:.0f} dB)" for r in b['resonances'][:4]))
+        for flag in (m or {}).get('flags') or []:
+            lines.append(f"    ! {flag}")
+        for flag in b.get('flags') or []:
+            lines.append(f"    ! {flag}")
+        for sug in b.get('eq_suggestions') or []:
+            lines.append(f"    EQ: {sug}")
+        from band_analysis import mix_recommendation, format_recommendation
+        kind, reasons = mix_recommendation(b, m)
+        lines.append("    -> " + format_recommendation(kind, reasons))
         return lines
 
     def to_text(self, title: str = "DynaMix Transition Sheet") -> str:
@@ -326,6 +345,13 @@ class TransitionPlanner:
         lines.append("-" * 60)
         for i, p in enumerate(self.profiles, 1):
             lines.extend(self.track_summary(i, p))
+        from band_analysis import mix_recommendation
+        needs_mix = [p['filename'] for p in self.profiles if mix_recommendation(p.get('bands'), p.get('mastering'))[0] == 'mix']
+        if needs_mix:
+            lines.append("")
+            lines.append(f"MIX REVISION RECOMMENDED for {len(needs_mix)} track(s): " + ", ".join(needs_mix))
+            lines.append("These problems (low-mid masking, bands that do not breathe, resonances, comb filtering) live in the mix; "
+                         "the pre-master pass levels the set but cannot fix them.")
         masters = [p['mastering'] for p in self.profiles if p.get('mastering') and p['mastering'].get('lufs') is not None]
         if masters:
             lufs = [m['lufs'] for m in masters]

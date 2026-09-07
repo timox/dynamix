@@ -113,6 +113,7 @@ class SetProject:
                 "target_lufs": -14.0,
                 "tone_match": True,
                 "fix_phase": True,
+                "mono_bass_hz": 120.0,
             },
             "tracks": [],          # analysed track records (one per source file)
             "set_list": [],        # ordered file paths of the proposal / edited set
