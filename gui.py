@@ -24,6 +24,7 @@ from transition_planner import TransitionPlanner
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
 from set_project import SetProject, STEPS
+from playlist_manager import PREMASTER_DIRNAME
 from analysis_store import get_store
 import charts
 
@@ -174,7 +175,7 @@ class DynaMixGUI:
             "analyze": ("Analyze", self.analyze_playlist),
             "setlist": ("Create Set List", self.create_set_list),
             "transitions": ("Plan Transitions", self.plan_transitions),
-            "premaster": ("Pre-master Set...", self.premaster_set),
+            "premaster": ("Pre-master Set", self.premaster_set),
             "playlist": ("Create Playlist", self.create_playlist_from_directory),
             "mixxx": ("Export to Mixxx...", self.export_to_mixxx),
         }
@@ -794,6 +795,9 @@ class DynaMixGUI:
             messagebox.showwarning("Warning", "No audio files found in directory")
             return
         
+        tracks, premastered = self._with_premastered(tracks)
+        if premastered:
+            source += f", {premastered} pre-mastered copies"
         default_name = os.path.basename(os.path.normpath(directory)) or "playlist"
         filename = filedialog.asksaveasfilename(
             title="Save Playlist",
@@ -811,7 +815,6 @@ class DynaMixGUI:
             messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
             return
         
-        self.current_set_list = list(tracks)
         if self.project is not None:
             self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
             self._save_project()
@@ -927,15 +930,8 @@ class DynaMixGUI:
             messagebox.showwarning("Warning", "No audio files found in directory")
             return
         
-        default_out = os.path.join(os.path.dirname(os.path.normpath(directory)),
-                                   os.path.basename(os.path.normpath(directory)) + "_premastered")
-        out_dir = filedialog.askdirectory(title="Choose the OUTPUT folder for the corrected copies (originals are not modified)",
-                                          initialdir=os.path.dirname(default_out), mustexist=False)
-        if not out_dir:
-            return
-        if os.path.normcase(os.path.abspath(out_dir)) == os.path.normcase(os.path.abspath(directory)):
-            messagebox.showerror("Error", "Choose a different folder: the originals must not be overwritten")
-            return
+        # corrected copies always go to <folder>/premaster (never scanned as tracks)
+        out_dir = os.path.join(os.path.abspath(directory), PREMASTER_DIRNAME)
         target_lufs = float(self.premaster_lufs_var.get())
         tone = bool(self.premaster_tone_var.get())
         phase = bool(self.premaster_phase_var.get())
@@ -971,8 +967,23 @@ class DynaMixGUI:
             except Exception as e:
                 self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
         
-        self.update_status(f"Pre-mastering {len(files)} tracks ({source}) to {out_dir}...")
+        self.update_status(f"Pre-mastering {len(files)} tracks ({source}) into {out_dir} ...")
+        self.set_notebook.select(self.premaster_frame)
         threading.Thread(target=work, daemon=True).start()
+    
+    def _with_premastered(self, tracks):
+        """Same track dicts, pointing at the pre-mastered copies when they exist. Returns (tracks, count)."""
+        mapping = self.project.premaster_map() if self.project else {}
+        if not mapping:
+            return list(tracks), 0
+        swapped, count = [], 0
+        for t in tracks:
+            out = mapping.get(t.get("file_path"))
+            if out:
+                t = dict(t, file_path=out, filename=os.path.basename(out))
+                count += 1
+            swapped.append(t)
+        return swapped, count
     
     def _show_transition_window(self, source: str):
         """Display the transition sheet with save / Mixxx export actions"""
@@ -1045,14 +1056,17 @@ class DynaMixGUI:
                                    "A backup of the database will be created first.\n\nContinue?"):
             return
         
+        profiles, premastered = self._with_premastered(planner.profiles)
         try:
             exporter = MixxxExporter(db_path)
-            report = exporter.export(planner.profiles, playlist_name=playlist_name.strip() or None)
+            report = exporter.export(profiles, playlist_name=playlist_name.strip() or None)
         except Exception as e:
             messagebox.showerror("Error", f"Mixxx export failed: {str(e)}")
             return
         
         summary = format_report(report)
+        if premastered:
+            summary = f"Using the pre-mastered copies for {premastered} tracks ({PREMASTER_DIRNAME} subfolder).\n" + summary
         if self.project is not None:
             self.project.mark("mixxx", db=os.path.basename(os.path.dirname(db_path)) or db_path, playlist=playlist_name,
                               cues=report['cues_written'])

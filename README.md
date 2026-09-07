@@ -165,7 +165,7 @@ python mastering.py check my_set.m3u --json report.json
 
 # Corrected copies: loudness normalised to -14 LUFS, true-peak limited at -1 dBTP, DC removed,
 # polarity/bass phase repaired, optional tone matching to the set's median balance
-python mastering.py fix /path/to/music --out /path/to/music_premastered --tone
+python mastering.py fix /path/to/music --tone            # copies go to /path/to/music/premaster
 python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac
 ```
 
@@ -173,7 +173,7 @@ Flags are set-relative where it matters ("darker than the rest of the set", "qui
 rest of the set") so that the goal is a consistent set, not an abstract reference. Comb
 filtering cannot be repaired automatically (it needs the original stems); it is only reported.
 No FFmpeg needed: decoding and encoding go through soundfile/libsndfile (WAV, FLAC, OGG, MP3).
-In the GUI: Playlist Manager tab, **Mastering Report** and **Pre-master Set...**. The transition
+In the GUI: Set Builder tab, **Mastering Report** and **Pre-master Set** (copies go to the `premaster` subfolder, which is never scanned as tracks; the playlist and the Mixxx export then use those copies). The transition
 sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
 measurements, and can be saved as JSON.
 

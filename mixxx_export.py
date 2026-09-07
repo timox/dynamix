@@ -253,6 +253,7 @@ def main():
     parser.add_argument("--no-mastering", action="store_true", help="Skip the mastering/phase check of each track")
     parser.add_argument("--save-charts", metavar="DIR", help="Write the overview, set map and per-track charts as PNG files")
     parser.add_argument("--fresh", action="store_true", help="Ignore the saved set project and rebuild the set list")
+    parser.add_argument("--originals", action="store_true", help="Export the original files even when pre-mastered copies exist")
     parser.add_argument("--db", help="Path to mixxxdb.sqlite (auto-detected by default)")
     parser.add_argument("--playlist-name", help="Name of the Mixxx playlist to create (default: DynaMix - <folder>)")
     parser.add_argument("--no-mixxx", action="store_true", help="Only plan and print the sheet, do not touch Mixxx")
@@ -333,8 +334,15 @@ def main():
               "%LOCALAPPDATA%\\Mixxx\\mixxxdb.sqlite).")
         sys.exit(2)
 
+    profiles = list(planner.profiles)
+    if project is not None and not args.originals:
+        mapping = project.premaster_map()
+        if mapping:
+            profiles = [dict(p, file_path=mapping.get(p["file_path"], p["file_path"])) for p in profiles]
+            print(f"Using the pre-mastered copies for {sum(1 for p in planner.profiles if p['file_path'] in mapping)} tracks "
+                  f"(--originals to export the original files).")
     exporter = MixxxExporter(db_path, backup=not args.no_backup)
-    report = exporter.export(planner.profiles, playlist_name=args.playlist_name or f"DynaMix - {default_name}",
+    report = exporter.export(profiles, playlist_name=args.playlist_name or f"DynaMix - {default_name}",
                              dry_run=args.dry_run)
     print(format_report(report))
     if project is not None and not args.dry_run:

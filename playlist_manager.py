@@ -8,6 +8,11 @@ from analysis_store import get_store
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# Output folders DynaMix creates inside a music folder; never scanned as tracks.
+PREMASTER_DIRNAME = "premaster"
+EXCLUDED_DIRNAMES = {PREMASTER_DIRNAME}
+
+
 class PlaylistManager:
     """Manage and analyze playlists for optimal DJ mixing"""
     
@@ -33,6 +38,8 @@ class PlaylistManager:
         audio_files = []
         
         for root, dirs, files in os.walk(directory):
+            # skip DynaMix output folders and hidden folders
+            dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRNAMES and not d.startswith('.')]
             for file in files:
                 if any(file.lower().endswith(ext) for ext in audio_extensions):
                     audio_files.append(os.path.join(root, file))

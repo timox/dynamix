@@ -535,8 +535,10 @@ def analyze_mastering_cached(path: str) -> Dict:
 def collect_files(target: str) -> List[str]:
     """Directory -> audio files (sorted); .m3u -> its entries; file -> [file]."""
     if os.path.isdir(target):
+        from playlist_manager import EXCLUDED_DIRNAMES
         files = []
-        for root, _, names in os.walk(target):
+        for root, dirs, names in os.walk(target):
+            dirs[:] = [d for d in dirs if d.lower() not in EXCLUDED_DIRNAMES and not d.startswith('.')]
             for name in names:
                 if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
                     files.append(os.path.join(root, name))
@@ -675,7 +677,7 @@ def main():
 
     fix = sub.add_parser("fix", help="Write corrected copies of the tracks into another folder")
     fix.add_argument("target", help="Directory, .m3u playlist or audio file")
-    fix.add_argument("--out", required=True, help="Output folder (created if needed)")
+    fix.add_argument("--out", help="Output folder (default: a 'premaster' subfolder of the target folder)")
     fix.add_argument("--lufs", type=float, default=-14.0, help="Target integrated loudness (default -14 LUFS)")
     fix.add_argument("--tp", type=float, default=-1.0, help="True-peak ceiling in dBTP (default -1.0)")
     fix.add_argument("--tone", action="store_true", help="Gently match the tone of every track to the set's median balance")
@@ -704,6 +706,10 @@ def main():
         if not files:
             print("No audio files found.")
             sys.exit(1)
+        if not args.out:
+            from playlist_manager import PREMASTER_DIRNAME
+            base = args.target if os.path.isdir(args.target) else os.path.dirname(os.path.abspath(args.target))
+            args.out = os.path.join(base, PREMASTER_DIRNAME)
         results = premaster_files(files, args.out, args.lufs, args.tp, args.tone, args.format,
                                   progress=lambda i, n, name: print(f"Pre-mastering {i}/{n}: {name}"),
                                   repair_phase=not args.no_phase_fix)

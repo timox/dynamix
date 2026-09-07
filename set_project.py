@@ -29,7 +29,7 @@ HINTS: Dict[str, str] = {
     "analyze": "Click 'Analyze' to measure BPM, key and energy of every track (cached, only new files take time).",
     "setlist": "Choose the duration and energy curve, then 'Create Set List'.",
     "transitions": "Click 'Plan Transitions' to compute intro/outro sections and the transition sheet.",
-    "premaster": "Optional: 'Pre-master Set...' writes level-matched, phase-repaired copies into another folder.",
+    "premaster": "Optional: 'Pre-master Set' writes level-matched, phase-repaired copies into the 'premaster' subfolder; later steps then use those copies.",
     "playlist": "Optional: 'Create Playlist' writes the set order as an M3U file.",
     "mixxx": "Close Mixxx, then 'Export to Mixxx' from the transition window. Then load the playlist in Auto DJ.",
     "done": "All steps done. In Mixxx: add the playlist to Auto DJ, mode 'Full Intro + Outro'.",
@@ -134,6 +134,17 @@ class SetProject:
             if t["file_path"] == file_path:
                 return t
         return None
+
+    def premaster_map(self) -> Dict[str, str]:
+        """original file path -> pre-mastered copy, for copies that exist on disk."""
+        pm = self.data.get("premaster") or {}
+        mapping = {}
+        for r in pm.get("results") or []:
+            if "error" in r or not r.get("output"):
+                continue
+            if os.path.exists(r["output"]):
+                mapping[r["input"]] = r["output"]
+        return mapping
 
     # ------------------------------------------------------------- steps
     def mark(self, step: str, done: bool = True, **details) -> None:

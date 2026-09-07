@@ -123,7 +123,7 @@ Tout le travail sur un set se fait dans l'onglet **Set Builder**. Le panneau
    Rouvrir un dossier déjà analysé est instantané.
 2. **Create Set List** : durée et courbe d'énergie.
 3. **Plan Transitions** : repères d'intro et d'outro, feuille de transitions.
-4. **Pre-master Set** (optionnel) : copies corrigées dans un autre dossier.
+4. **Pre-master Set** (optionnel) : copies corrigées dans le sous-dossier `premaster`, utilisées ensuite par la playlist et l'export Mixxx.
 5. **Create Playlist** (optionnel) : fichier M3U.
 6. **Export to Mixxx** : repères et playlist dans la base Mixxx.
 
@@ -147,8 +147,8 @@ l'onglet **Playlist Manager**, cadre *Mastering* :
   phase du grave, compatibilité mono, filtrage en peigne) et signale en clair
   ce qui cloche, avec un score sur 100. Les écarts sont jugés par rapport au
   reste du set.
-- **Pre-master Set...** : écrit des **copies corrigées** dans un autre dossier,
-  jamais les originaux : sonie ramenée à la cible choisie (par défaut
+- **Pre-master Set** : écrit des **copies corrigées** dans le sous-dossier
+  `premaster` du dossier de musique, jamais les originaux : sonie ramenée à la cible choisie (par défaut
   −14 LUFS), limiteur de crête à −1 dBTP, suppression de l'offset DC,
   correction de polarité et mise en mono du grave si nécessaire, et
   optionnellement un rapprochement doux de la couleur sonore vers la médiane
@@ -159,12 +159,13 @@ pistes d'origine.
 
 L'onglet **Pre-master** montre ensuite, morceau par morceau, le volume et la
 crête vraie avant et après, et la liste des actions appliquées (gain, timbre,
-polarité, grave en mono). Ajoutez le dossier corrigé dans la bibliothèque Mixxx
-et lancez **Plan Transitions** sur ce dossier. En ligne de commande :
+polarité, grave en mono). Ajoutez le sous-dossier `premaster` dans la bibliothèque Mixxx (ou le
+dossier parent, Mixxx balaye les sous-dossiers) : l'export Mixxx et la
+playlist utilisent automatiquement les copies corrigées. En ligne de commande :
 
 ```bat
 python mastering.py check "C:\Musique\Set"
-python mastering.py fix "C:\Musique\Set" --out "C:\Musique\Set_premaster" --tone
+python mastering.py fix "C:\Musique\Set" --tone
 ```
 
 Aucun logiciel supplémentaire n'est nécessaire, FFmpeg compris.

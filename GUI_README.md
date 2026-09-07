@@ -38,7 +38,7 @@ python gui.py
     1. Analyze (BPM, key, energy; every file is cached, only new files take time)
     2. Create Set List (duration, energy curve)
     3. Plan Transitions (intro/outro sections, transition sheet)
-    4. Pre-master Set (optional, corrected copies in another folder)
+    4. Pre-master Set (optional, corrected copies in the 'premaster' subfolder; the playlist and the Mixxx export then use those copies)
     5. Create Playlist (optional, M3U)
     6. Export to Mixxx (intro/outro cues + playlist for Auto DJ)
   - Redoing an early step (new analysis with different files, new set list)
