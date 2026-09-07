@@ -737,6 +737,10 @@ def main():
     chk.add_argument("targets", nargs="+", help="Directory, .m3u playlist or audio files")
     chk.add_argument("--json", help="Also save the full report as JSON")
 
+    bands = sub.add_parser("bands", help="Band tracking, low-mid masking and resonances (mix-stage diagnostics)")
+    bands.add_argument("targets", nargs="+", help="Directory, .m3u playlist, project folder or audio files")
+    bands.add_argument("--json", help="Also save the full reports as JSON")
+
     fix = sub.add_parser("fix", help="Write corrected copies of the tracks into another folder")
     fix.add_argument("target", help="Directory, .m3u playlist, audio file, or a set project folder (its set list is used)")
     fix.add_argument("--out", help="Output folder (default: a 'premaster' subfolder of the target folder)")
@@ -750,6 +754,38 @@ def main():
     fix.add_argument("--mono-bass", type=float, default=None, metavar="HZ",
                      help="Force the bass below HZ to mono (default: the project's option, else off; 0 = off)")
     args = parser.parse_args()
+
+    if args.command == "bands":
+        from band_analysis import analyze_bands_cached, format_band_summary
+        from set_project import SetProject
+        files = []
+        for target in args.targets:
+            if os.path.isdir(target) and SetProject.exists(target):
+                project = SetProject.open(target)
+                tracks = project.set_list_tracks() or project.tracks
+                files.extend([t['file_path'] for t in tracks] or project.source_files())
+            else:
+                files.extend(collect_files(target))
+        if not files:
+            print("No audio files found.")
+            sys.exit(1)
+        reports = []
+        for i, path in enumerate(files, 1):
+            print(f"Band analysis {i}/{len(files)}: {os.path.basename(path)}")
+            try:
+                reports.append(analyze_bands_cached(path))
+            except Exception as exc:
+                reports.append({"filename": os.path.basename(path), "error": str(exc)})
+        print()
+        print(format_band_summary(reports))
+        needs_mix = [r["filename"] for r in reports if r.get("verdict") == "mix"]
+        if needs_mix:
+            print(f"\nMIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix))
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as f:
+                json.dump(reports, f, indent=2)
+            print(f"JSON saved to {args.json}")
+        return
 
     if args.command == "check":
         files = []

@@ -392,3 +392,84 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
 def save(fig: Figure, path: str) -> str:
     fig.savefig(path, dpi=110, facecolor=SURFACE)
     return path
+
+
+# ------------------------------------------------------------------ band dynamics
+def band_dynamics(report: Dict) -> Figure:
+    """Band envelopes over time (200-500 Hz emphasised), low-mid masking, and the resonance spectrum."""
+    fig = _figure(9.0, 8.0)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.2, 0.8, 1.0])
+    chart = report.get("chart") or {}
+    times = np.asarray(chart.get("times") or [], dtype=float)
+    bands = chart.get("bands") or {}
+    duration = float(times[-1]) if len(times) else 1.0
+
+    ax1 = fig.add_subplot(gs[0])
+    _style(ax1)
+    for name, label in (("low", "60-120 Hz"), ("mid", "0.5-2 kHz")):
+        if name in bands:
+            ax1.plot(times, bands[name], color=GRAY, linewidth=1.5, solid_capstyle="round", label=label)
+    if "mud" in bands:
+        ax1.plot(times, bands["mud"], color=BLUE, linewidth=2, solid_capstyle="round", label="200-500 Hz")
+    ax1.set_ylabel("band level (dBFS)")
+    ax1.set_xlim(0, duration)
+    ticks = np.arange(0, duration + 1, 60 if duration > 240 else 30) if duration else [0]
+    ax1.set_xticks(ticks)
+    ax1.set_xticklabels([_fmt_time(v) for v in ticks])
+    ax1.legend(loc="center right", frameon=False, fontsize=8, labelcolor=TEXT2, ncol=1)
+    st = (report.get("stats") or {}).get("mud") or {}
+    rel = report.get("release_s")
+    ax1.set_title(f"Band tracking — 200-500 Hz range {st.get('range_db', 0):.1f} dB, pulse {st.get('beat_modulation', 0):.2f}"
+                  + (f" (release {rel * 1000:.0f} ms)" if rel else ""), loc="left", fontsize=10)
+
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    _style(ax2)
+    masking = np.asarray(chart.get("masking") or [], dtype=float)
+    mud = report.get("mud") or {}
+    if len(masking):
+        median = float(mud.get("excess_median_db", np.median(masking)))
+        ax2.fill_between(times, masking, median, where=masking > median, color=RED, alpha=0.25, linewidth=0)
+        ax2.plot(times, masking, color=BLUE, linewidth=1.5)
+        ax2.axhline(median, color=GRAY, linewidth=1)
+        ax2.axhline(median + 6, color=GRAY, linewidth=1)
+        ax2.text(duration, median + 6.3, "build-up (+6 dB)", fontsize=7, color=TEXT2, ha="right", va="bottom")
+    ax2.set_ylabel("200-500 vs neighbours (dB)")
+    ax2.set_title(f"Low-mid masking — typical {mud.get('excess_median_db', 0):+.0f} dB, worst {mud.get('excess_p90_db', 0):+.0f} dB, "
+                  f"build-up {mud.get('buildup_share', 0) * 100:.0f}%", loc="left", fontsize=10)
+    ax2.set_xticks(ticks)
+    ax2.set_xticklabels([_fmt_time(v) for v in ticks])
+
+    ax3 = fig.add_subplot(gs[2])
+    _style(ax3)
+    f = np.asarray(chart.get("spectrum_hz") or [], dtype=float)
+    r = np.asarray(chart.get("spectrum_residual_db") or [], dtype=float)
+    if len(f):
+        ax3.fill_between(f, r, 0, where=r > 0, color=BLUE, alpha=0.10, linewidth=0)
+        ax3.plot(f, r, color=BLUE, linewidth=1.5)
+        ax3.axhline(0, color=GRAY, linewidth=1)
+        ax3.set_xscale("log")
+        ax3.set_xlim(100, 800)
+        ax3.set_xticks([100, 150, 200, 300, 400, 500, 600, 800])
+        ax3.set_xticklabels(["100", "150", "200", "300", "400", "500", "600", "800"])
+        ymax = max(8.0, float(np.max(r)) + 3)
+        ax3.set_ylim(min(-6.0, float(np.min(r)) - 1), ymax)
+        for res in (report.get("resonances") or [])[:4]:
+            ax3.scatter([res["freq_hz"]], [res["prominence_db"]], s=60, color=RED, edgecolors=SURFACE, linewidths=2, zorder=3)
+        # label only the two strongest to avoid collisions; the others are in the notes
+        for res in (report.get("resonances") or [])[:2]:
+            ax3.annotate(f"{res['freq_hz']:.0f} Hz", (res["freq_hz"], res["prominence_db"]), textcoords="offset points",
+                         xytext=(6, 4), fontsize=8, color=TEXT2)
+    else:
+        ax3.text(0.5, 0.5, "Track too short for the resonance spectrum", transform=ax3.transAxes, ha="center", color=TEXT2)
+    ax3.set_xlabel("Hz")
+    ax3.set_ylabel("above spectral envelope (dB)")
+    n_res = len(report.get("resonances") or [])
+    ax3.set_title(f"Resonances 100-800 Hz  —  {n_res} persistent peak(s) (red dots)", loc="left", fontsize=10)
+    import textwrap
+    lines = [("! " + l) for l in (report.get("flags") or [])] + [f"EQ: {sug}" for sug in (report.get("eq_suggestions") or [])]
+    if report.get("verdict") == "mix":
+        lines.insert(0, "MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)")
+    if lines:
+        wrapped = "\n".join("\n  ".join(textwrap.wrap(l, 78)) for l in lines[:6])
+        ax3.text(0.0, -0.30, wrapped, transform=ax3.transAxes, fontsize=8, color=TEXT2, va="top", ha="left")
+    return _finish(fig)
