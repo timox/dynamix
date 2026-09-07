@@ -72,6 +72,9 @@ setup(
         "transition_planner",
         "mixxx_export",
         "mastering",
+        "analysis_store",
+        "set_project",
+        "charts",
         "gui",
         "examples"
     ],

@@ -520,6 +520,18 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
     return {'input': path, 'output': output_path, 'before': before, 'after': after, 'actions': actions}
 
 
+def analyze_mastering_cached(path: str) -> Dict:
+    """analyze_mastering() through the per-file analysis cache."""
+    from analysis_store import get_store
+    store = get_store()
+    cached = store.get(path, 'mastering')
+    if cached is not None:
+        return cached
+    report = analyze_mastering(path)
+    store.put(path, 'mastering', report)
+    return report
+
+
 def collect_files(target: str) -> List[str]:
     """Directory -> audio files (sorted); .m3u -> its entries; file -> [file]."""
     if os.path.isdir(target):
@@ -562,11 +574,12 @@ def check_files(files: List[str], progress=None, relative: bool = True) -> List[
         if progress:
             progress(i + 1, len(files), os.path.basename(path))
         try:
-            reports.append(analyze_mastering(path))
+            reports.append(analyze_mastering_cached(path))
         except Exception as exc:  # unreadable file: keep going
             reports.append({'file_path': path, 'filename': os.path.basename(path), 'error': str(exc),
                             'flags': [f"could not analyze: {exc}"], 'score': 0.0, 'lufs': None,
                             'loudness_range': 0.0, 'true_peak_db': 0.0, 'plr': 0.0, 'tilt_db': 0.0})
+    reports = [dict(r, flags=list(r.get('flags', []))) for r in reports]
     if relative:
         add_set_relative_flags(reports)
     return reports
@@ -669,6 +682,7 @@ def main():
     fix.add_argument("--format", default="same", choices=["same", "wav", "flac", "mp3", "ogg"],
                      help="Output format (default: same as the source)")
     fix.add_argument("--no-phase-fix", action="store_true", help="Do not flip inverted polarity / mono the bass")
+    fix.add_argument("--save-chart", metavar="PNG", help="Write the loudness / true-peak before-after chart")
     args = parser.parse_args()
 
     if args.command == "check":
@@ -693,8 +707,29 @@ def main():
         results = premaster_files(files, args.out, args.lufs, args.tp, args.tone, args.format,
                                   progress=lambda i, n, name: print(f"Pre-mastering {i}/{n}: {name}"),
                                   repair_phase=not args.no_phase_fix)
+        summary = format_premaster_summary(results, args.out)
         print()
-        print(format_premaster_summary(results, args.out))
+        print(summary)
+        if os.path.isdir(args.target):
+            from set_project import SetProject
+            if SetProject.exists(args.target):
+                project = SetProject(args.target)
+                keep = ('lufs', 'true_peak_db', 'plr', 'score', 'clip_runs', 'flags')
+                slim = [({'input': r['input'], 'error': r['error']} if 'error' in r else
+                         {'input': r['input'], 'output': r['output'], 'actions': r['actions'],
+                          'before': {k: r['before'].get(k) for k in keep}, 'after': {k: r['after'].get(k) for k in keep}})
+                        for r in results]
+                project.data["premaster"] = {"out_dir": os.path.abspath(args.out), "target_lufs": args.lufs, "tone_match": args.tone,
+                                             "fix_phase": not args.no_phase_fix, "results": slim, "summary": summary}
+                project.mark("premaster", out_dir=os.path.abspath(args.out), count=sum(1 for r in results if 'error' not in r))
+                project.save()
+                print(f"Set project updated: {project.path}")
+        if args.save_chart:
+            import matplotlib
+            matplotlib.use("Agg")
+            import charts
+            charts.save(charts.premaster_before_after(results, args.lufs, args.tp), args.save_chart)
+            print(f"Before/after chart written to {args.save_chart}")
 
 
 if __name__ == "__main__":

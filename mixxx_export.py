@@ -251,6 +251,8 @@ def main():
     parser.add_argument("--sheet", help="Save the transition sheet to this text file")
     parser.add_argument("--json", help="Save the per-track analysis and transitions as JSON")
     parser.add_argument("--no-mastering", action="store_true", help="Skip the mastering/phase check of each track")
+    parser.add_argument("--save-charts", metavar="DIR", help="Write the overview, set map and per-track charts as PNG files")
+    parser.add_argument("--fresh", action="store_true", help="Ignore the saved set project and rebuild the set list")
     parser.add_argument("--db", help="Path to mixxxdb.sqlite (auto-detected by default)")
     parser.add_argument("--playlist-name", help="Name of the Mixxx playlist to create (default: DynaMix - <folder>)")
     parser.add_argument("--no-mixxx", action="store_true", help="Only plan and print the sheet, do not touch Mixxx")
@@ -258,16 +260,31 @@ def main():
     parser.add_argument("--no-backup", action="store_true", help="Do not back up the Mixxx database first")
     args = parser.parse_args()
 
+    project = None
     if args.m3u:
         tracks = tracks_from_m3u(args.m3u)
         default_name = os.path.splitext(os.path.basename(args.m3u))[0]
     else:
         from playlist_manager import PlaylistManager
-        manager = PlaylistManager(args.playlist)
-        print(f"Analyzing {args.playlist} ...")
-        manager.analyze_playlist()
-        tracks = manager.create_set_list(duration_minutes=args.set_duration, energy_curve=args.energy_curve)
+        from set_project import SetProject
+        project = SetProject(args.playlist)
         default_name = os.path.basename(os.path.normpath(args.playlist))
+        manager = PlaylistManager(args.playlist)
+        print(f"Analyzing {args.playlist} (cached results are reused) ...")
+        manager.analyze_playlist(progress_callback=lambda i, n, name, status: print(f"  {i}/{n} {status}: {name}"))
+        project.set_tracks(manager.tracks)
+        project.mark("analyze", count=len(manager.tracks), cached=manager.last_run["cached"], analyzed=manager.last_run["analyzed"])
+        saved = project.set_list_tracks()
+        if saved and not args.fresh:
+            tracks = saved
+            print(f"Using the saved set list of the project ({len(tracks)} tracks). Use --fresh to rebuild it.")
+        else:
+            tracks = manager.create_set_list(duration_minutes=args.set_duration, energy_curve=args.energy_curve)
+            project.set_set_list(tracks)
+            project.options.update({"set_duration": args.set_duration, "energy_curve": args.energy_curve})
+            project.invalidate_from("setlist")
+            project.mark("setlist", count=len(tracks), duration=args.set_duration, curve=args.energy_curve)
+        project.save()
 
     if len(tracks) < 1:
         print("No tracks to plan.")
@@ -283,6 +300,29 @@ def main():
     if args.json:
         planner.save_json(args.json)
         print(f"Transition data saved to {args.json}")
+    if project is not None:
+        project.data["transitions"] = planner.to_dict()
+        project.mark("transitions", count=len(planner.transitions))
+        project.save()
+        print(f"Set project updated: {project.path}")
+    if args.save_charts:
+        import matplotlib
+        matplotlib.use("Agg")
+        import charts
+        os.makedirs(args.save_charts, exist_ok=True)
+        targets = None
+        if project is not None:
+            from playlist_manager import PlaylistManager
+            values = [PlaylistManager._energy_value(t) for t in tracks]
+            targets = PlaylistManager._target_curve(values, project.options.get("energy_curve", "build"))
+        charts.save(charts.set_overview(planner.profiles, targets), os.path.join(args.save_charts, "set_overview.png"))
+        charts.save(charts.set_timeline(planner.profiles, planner.transitions), os.path.join(args.save_charts, "set_map.png"))
+        from mastering import playlist_tone_target
+        reports = [p["mastering"] for p in planner.profiles if p.get("mastering") and p["mastering"].get("lufs") is not None]
+        median = playlist_tone_target(reports) if reports else None
+        for i, prof in enumerate(planner.profiles, 1):
+            charts.save(charts.track_detail(prof, median), os.path.join(args.save_charts, f"track_{i:02d}.png"))
+        print(f"Charts written to {args.save_charts}")
 
     if args.no_mixxx:
         return
@@ -297,6 +337,9 @@ def main():
     report = exporter.export(planner.profiles, playlist_name=args.playlist_name or f"DynaMix - {default_name}",
                              dry_run=args.dry_run)
     print(format_report(report))
+    if project is not None and not args.dry_run:
+        project.mark("mixxx", db=db_path, playlist=args.playlist_name or f"DynaMix - {default_name}", cues=report["cues_written"])
+        project.save()
 
 
 if __name__ == "__main__":

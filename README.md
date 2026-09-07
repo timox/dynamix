@@ -116,6 +116,27 @@ python gui.py
 
 The GUI provides access to all DynaMix features through an intuitive interface.
 
+### Set Builder: a guided, persistent workflow
+
+The GUI's **Set Builder** tab walks through six steps (Analyze → Create Set List →
+Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and shows what is
+done, when, and what comes next. Two persistence layers make this possible:
+
+- **Analysis cache** (`analysis_store.py`): every per-file result (features, intro/outro
+  profile, mastering report) is stored in `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on
+  Windows or `~/.dynamix/analysis.sqlite` elsewhere (`DYNAMIX_HOME` overrides), keyed by
+  path, size and modification time. A track is analysed once; re-opening a folder is
+  instant. Delete the file to start over.
+- **Set project** (`set_project.py`): `.dynamix-set.json` inside the music folder keeps the
+  options, the analysed tracks, the proposed order, the step status with timestamps, the
+  transition plan and the pre-master results. The GUI and `mixxx_export.py --playlist`
+  both read and update it (`--fresh` rebuilds the set list).
+
+Charts (`charts.py`, also `mixxx_export.py --save-charts DIR` and `mastering.py fix
+--save-chart PNG`): set energy curve vs. target and tempo, set map with intro/outro
+sections and transition scores, per-track energy envelope and tone balance against the
+set, and loudness / true-peak before → after of the pre-master pass.
+
 ### Energy Level and Set Ordering
 
 Each track gets an **energy level from 1 to 10**. It is computed on the loudness-normalised

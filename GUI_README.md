@@ -26,25 +26,36 @@ python gui.py
   - Get mix recommendations
   - See optimal exit/entry points
 
-### 3. Playlist Manager Tab
-- **Purpose**: Manage and analyze entire music collections
-- **Features**:
-  - Scan directories for audio files
-  - Create a playlist file (M3U) from the selected directory in one click,
-    reusing the analyzed order or set list when available
-  - Analyze entire playlists
-  - Create optimized set lists
-  - Mastering Report: loudness, true peak, clipping, DC, tone balance and
-    stereo phase (polarity, bass phase, mono compatibility, comb filtering)
-    for every track, with plain-language flags and a 0-100 score
-  - Pre-master Set: writes corrected copies of the tracks into another folder
-    (loudness normalised, true-peak limited, phase repaired, optional tone
-    matching); originals are never modified
-  - Plan transitions: beat-aligned intro/outro sections for every track and a
-    transition sheet (score, tempo change, exit/entry times) that can be saved
-    or exported into Mixxx as intro/outro cues plus a playlist for Auto DJ
-  - Configure energy curves and duration
-  - View playlist in table format
+### 3. Set Builder Tab
+- **Purpose**: Build a set from a music folder, step by step, without ever
+  redoing work
+- **How it works**:
+  - Choose the music folder. If a set was already started there, its project
+    (`.dynamix-set.json` in the folder) is reloaded: analysed tracks, proposed
+    order, transitions, pre-master results and the status of every step
+  - The **Workflow** panel lists the six steps with a ✓ / ○ status, the date and
+    key figures of each, and a "Next:" hint telling you what to do now:
+    1. Analyze (BPM, key, energy; every file is cached, only new files take time)
+    2. Create Set List (duration, energy curve)
+    3. Plan Transitions (intro/outro sections, transition sheet)
+    4. Pre-master Set (optional, corrected copies in another folder)
+    5. Create Playlist (optional, M3U)
+    6. Export to Mixxx (intro/outro cues + playlist for Auto DJ)
+  - Redoing an early step (new analysis with different files, new set list)
+    resets the later ones, so the status is always truthful
+- **Tabs on the right**:
+  - **Tracks**: the analysed tracks or the proposed order, with BPM, key,
+    duration, energy level, mastering score and flags. Select a row to open it
+    in the Track tab
+  - **Overview**: energy curve of the set against the target curve, tempo
+    along the set, and the set map (where each track plays, its intro/outro
+    sections, and transitions that need attention)
+  - **Track**: energy envelope over time with intro/outro marked, loudness /
+    true peak / PLR, and the tone balance of the track against the set median
+  - **Pre-master**: loudness and true peak before -> after for every track,
+    with the list of actions taken (gain, tone, polarity, mono bass)
+- **Project summary** button: text summary of the project and its steps
+- **Analysis cache**: shown at the bottom of the panel (files, results, path)
 
 ### 4. DJ Tools Tab
 - **Purpose**: Access DJ performance tools
