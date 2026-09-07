@@ -23,6 +23,7 @@ DEFAULTS: Dict[str, Any] = {
     "target_lufs": -14.0,
     "tone_match": True,
     "fix_phase": True,
+    "mono_bass_hz": 120.0,         # pre-master: force mono bass below this frequency (0 = off)
     "output_format": "same",       # same | wav | flac | mp3 | ogg
 }
 
@@ -74,7 +75,7 @@ class Config:
         return find_mixxx_db() or ""
 
     def project_defaults(self) -> Dict[str, Any]:
-        return {k: self.get(k) for k in ("set_duration", "energy_curve", "mix_bars", "target_lufs", "tone_match", "fix_phase")}
+        return {k: self.get(k) for k in ("set_duration", "energy_curve", "mix_bars", "target_lufs", "tone_match", "fix_phase", "mono_bass_hz")}
 
 
 def environment_report() -> List[Tuple[str, bool, str]]:

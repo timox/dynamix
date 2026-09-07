@@ -27,7 +27,7 @@ class TestConfig(unittest.TestCase):
         d = Config()
         self.assertEqual(d.get("target_lufs"), -12.0)
         self.assertEqual(d.projects_root, os.path.join(self.tmp, "proj"))
-        self.assertEqual(set(d.project_defaults()), {"set_duration", "energy_curve", "mix_bars", "target_lufs", "tone_match", "fix_phase"})
+        self.assertEqual(set(d.project_defaults()), {"set_duration", "energy_curve", "mix_bars", "target_lufs", "tone_match", "fix_phase", "mono_bass_hz"})
 
     def test_environment_report(self):
         from config import environment_report, format_environment_report

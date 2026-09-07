@@ -107,6 +107,13 @@ class SetBuilderMixin:
         ttk.Checkbutton(grid, text="Match tone to the set", variable=self.premaster_tone_var).grid(row=3, column=0, columnspan=2, sticky="w")
         self.premaster_phase_var = tk.BooleanVar(value=bool(self.config.get("fix_phase")))
         ttk.Checkbutton(grid, text="Fix phase problems", variable=self.premaster_phase_var).grid(row=4, column=0, columnspan=2, sticky="w")
+        mono_row = ttk.Frame(grid)
+        mono_row.grid(row=5, column=0, columnspan=2, sticky="w")
+        self.mono_bass_var = tk.BooleanVar(value=float(self.config.get("mono_bass_hz") or 0) > 0)
+        ttk.Checkbutton(mono_row, text="Mono bass below", variable=self.mono_bass_var).pack(side=tk.LEFT)
+        self.mono_bass_hz_var = tk.DoubleVar(value=float(self.config.get("mono_bass_hz") or 120.0) or 120.0)
+        ttk.Spinbox(mono_row, from_=40, to=300, increment=10, textvariable=self.mono_bass_hz_var, width=5).pack(side=tk.LEFT, padx=3)
+        ttk.Label(mono_row, text="Hz").pack(side=tk.LEFT)
         ttk.Button(options_frame, text="Mastering Report", command=self.mastering_report).pack(anchor="w", padx=4, pady=(0, 4))
         self.cache_label = ttk.Label(left, text="", foreground=MUTED, wraplength=330, anchor="w", justify=tk.LEFT)
         self.cache_label.pack(fill=tk.X, padx=2, pady=2)
@@ -281,6 +288,10 @@ class SetBuilderMixin:
         self.premaster_lufs_var.set(float(opts.get("target_lufs", -14.0)))
         self.premaster_tone_var.set(bool(opts.get("tone_match", True)))
         self.premaster_phase_var.set(bool(opts.get("fix_phase", True)))
+        mono_hz = float(opts.get("mono_bass_hz", 120.0) or 0)
+        self.mono_bass_var.set(mono_hz > 0)
+        if mono_hz > 0:
+            self.mono_bass_hz_var.set(mono_hz)
         
         manager = PlaylistManager(project.source_dir)
         manager.tracks = list(project.tracks)
@@ -309,6 +320,7 @@ class SetBuilderMixin:
             "target_lufs": float(self.premaster_lufs_var.get()),
             "tone_match": bool(self.premaster_tone_var.get()),
             "fix_phase": bool(self.premaster_phase_var.get()),
+            "mono_bass_hz": float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0,
         })
         self.project.save()
         self._refresh_workflow()
@@ -595,11 +607,13 @@ class SetBuilderMixin:
         target_lufs = float(self.premaster_lufs_var.get())
         tone = bool(self.premaster_tone_var.get())
         phase = bool(self.premaster_phase_var.get())
+        mono_hz = float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0
         fmt = self.config.get("output_format", "same")
         
         def work():
             try:
                 results = premaster_files(files, out_dir, target_lufs=target_lufs, tone_match=tone, repair_phase=phase, fmt=fmt,
+                                          mono_bass_hz=mono_hz,
                                           progress=lambda i, n, name: self.root.after(
                                               0, self.update_status, f"Pre-mastering {i}/{n}: {name}"))
                 summary = format_premaster_summary(results, out_dir)
@@ -612,7 +626,7 @@ class SetBuilderMixin:
                               "before": {k: r["before"].get(k) for k in keep}, "after": {k: r["after"].get(k) for k in keep}})
                             for r in results]
                     project.data["premaster"] = {"out_dir": out_dir, "target_lufs": target_lufs, "tone_match": tone,
-                                                 "fix_phase": phase, "results": slim, "summary": summary}
+                                                 "fix_phase": phase, "mono_bass_hz": mono_hz, "results": slim, "summary": summary}
                     project.mark("premaster", count=done_count)
                     self._save_project()
                     self._render_premaster()
@@ -881,6 +895,9 @@ class ConfigTabMixin:
         ttk.Label(dg, text="Pre-master output format:").grid(row=3, column=0, sticky="w", pady=2)
         self.cfg_format_var = tk.StringVar(value=cfg.get("output_format"))
         ttk.Combobox(dg, textvariable=self.cfg_format_var, values=["same", "wav", "flac", "mp3", "ogg"], width=8, state="readonly").grid(row=3, column=1, sticky="w")
+        ttk.Label(dg, text="Mono bass below (Hz, 0 = off):").grid(row=3, column=2, sticky="w", padx=(16, 0))
+        self.cfg_mono_var = tk.DoubleVar(value=float(cfg.get("mono_bass_hz")))
+        ttk.Spinbox(dg, from_=0, to=300, increment=10, textvariable=self.cfg_mono_var, width=8).grid(row=3, column=3, sticky="w")
         
         btns = ttk.Frame(frame)
         btns.pack(fill=tk.X, padx=10, pady=5)
@@ -924,6 +941,7 @@ class ConfigTabMixin:
         cfg.set("tone_match", bool(self.cfg_tone_var.get()))
         cfg.set("fix_phase", bool(self.cfg_phase_var.get()))
         cfg.set("output_format", self.cfg_format_var.get())
+        cfg.set("mono_bass_hz", float(self.cfg_mono_var.get()))
         os.makedirs(cfg.projects_root, exist_ok=True)
         path = cfg.save()
         self.cfg_status.config(text=f"Saved to {path}")

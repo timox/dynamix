@@ -191,8 +191,8 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
 # ------------------------------------------------------------------ track detail
 def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] = None) -> Figure:
     """Energy envelope with intro/outro sections, plus the tone balance against the set."""
-    fig = _figure(9.0, 8.2)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.35, 0.75, 1.0])
+    fig = _figure(9.0, 8.6)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.3, 0.9, 1.0])
     ax1 = fig.add_subplot(gs[0])
     _style(ax1)
     times = np.asarray(profile.get("envelope_times") or [], dtype=float)
@@ -223,8 +223,11 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         head += f"\n{m['lufs']:.1f} LUFS · true peak {m['true_peak_db']:+.1f} dBTP · PLR {m['plr']:.1f} dB · mastering score {m['score']:.0f}/100"
     ax1.set_title(head, loc="left", fontsize=10)
 
-    ax_phase = fig.add_subplot(gs[1])
+    sub = gs[1].subgridspec(1, 2, width_ratios=[1.15, 1.0], wspace=0.35)
+    ax_phase = fig.add_subplot(sub[0])
     _phase_axes(ax_phase, m)
+    ax_bass = fig.add_subplot(sub[1])
+    _bass_width_axes(ax_bass, m)
 
     ax2 = fig.add_subplot(gs[2])
     _mastering_balance_axes(ax2, m, set_median_balance)
@@ -233,6 +236,34 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         ax2.text(0.0, -0.30, "! " + "\n! ".join(flags[:5]), transform=ax2.transAxes, fontsize=8,
                  color=TEXT2, va="top", ha="left")
     return _finish(fig)
+
+
+def _bass_width_axes(ax, report: Dict):
+    """Side/mid energy per low band: below the mono threshold the bass is effectively mono."""
+    _style(ax, grid_axis="y")
+    phase = (report or {}).get("phase") or {}
+    bands = phase.get("bass_width_bands") or {}
+    if not phase.get("stereo") or not bands:
+        ax.text(0.5, 0.5, "No bass width data", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return
+    from mastering import MONO_BASS_THRESHOLD_DB
+    names = list(bands.keys())
+    values = [max(-40.0, float(bands[n])) for n in names]
+    x = np.arange(len(names))
+    colors = [BLUE if v <= MONO_BASS_THRESHOLD_DB else RED for v in values]
+    ax.bar(x, [v + 40 for v in values], bottom=-40, width=0.6, color=colors, linewidth=0)
+    ax.axhline(MONO_BASS_THRESHOLD_DB, color=GRAY, linewidth=1)
+    ax.text(len(names) - 0.4, MONO_BASS_THRESHOLD_DB + 0.8, "mono threshold", fontsize=7, color=TEXT2, ha="right", va="bottom")
+    ax.set_ylim(-40, 2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, fontsize=7, rotation=30, ha="right")
+    ax.set_xlabel("Band (Hz)", fontsize=8)
+    ax.set_ylabel("Side vs mid (dB)", fontsize=8)
+    below = phase.get("mono_below_hz") or 0
+    verdict = f"bass mono below {below:.0f} Hz" if below else "bass NOT mono"
+    ax.set_title(f"Bass width: {verdict}", loc="left", fontsize=10)
 
 
 def _phase_axes(ax, report: Dict):
