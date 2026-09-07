@@ -223,7 +223,7 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         head += f"\n{m['lufs']:.1f} LUFS · true peak {m['true_peak_db']:+.1f} dBTP · PLR {m['plr']:.1f} dB · mastering score {m['score']:.0f}/100"
     ax1.set_title(head, loc="left", fontsize=10)
 
-    sub = gs[1].subgridspec(1, 2, width_ratios=[1.15, 1.0], wspace=0.35)
+    sub = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.3)
     ax_phase = fig.add_subplot(sub[0])
     _phase_axes(ax_phase, m)
     ax_bass = fig.add_subplot(sub[1])
@@ -255,15 +255,16 @@ def _bass_width_axes(ax, report: Dict):
     colors = [BLUE if v <= MONO_BASS_THRESHOLD_DB else RED for v in values]
     ax.bar(x, [v + 40 for v in values], bottom=-40, width=0.6, color=colors, linewidth=0)
     ax.axhline(MONO_BASS_THRESHOLD_DB, color=GRAY, linewidth=1)
-    ax.text(len(names) - 0.4, MONO_BASS_THRESHOLD_DB + 0.8, "mono threshold", fontsize=7, color=TEXT2, ha="right", va="bottom")
     ax.set_ylim(-40, 2)
+    ax.set_yticks([-40, -30, -20, -10, 0])
+    ax.set_yticklabels(["-40", "-30", "-20 mono", "-10", "0"], fontsize=7)
     ax.set_xticks(x)
-    ax.set_xticklabels(names, fontsize=7, rotation=30, ha="right")
-    ax.set_xlabel("Band (Hz)", fontsize=8)
-    ax.set_ylabel("Side vs mid (dB)", fontsize=8)
+    ax.set_xticklabels([n.split("-")[0] for n in names], fontsize=7)
+    ax.set_xlabel("band start (Hz)", fontsize=8)
+    ax.set_ylabel("side vs mid (dB)", fontsize=8)
     below = phase.get("mono_below_hz") or 0
-    verdict = f"bass mono below {below:.0f} Hz" if below else "bass NOT mono"
-    ax.set_title(f"Bass width: {verdict}", loc="left", fontsize=10)
+    verdict = f"mono below {below:.0f} Hz" if below else "NOT mono"
+    ax.set_title(f"Bass width: {verdict} (red = stereo band)", loc="left", fontsize=10)
 
 
 def _phase_axes(ax, report: Dict):
@@ -279,9 +280,9 @@ def _phase_axes(ax, report: Dict):
         ax.set_yticks([])
         ax.set_title("Stereo phase", loc="left", fontsize=10)
         return
-    rows = [("Overall L/R correlation", phase.get("correlation", 1.0)),
-            ("Bass (< 150 Hz)", phase.get("correlation_low", 1.0)),
-            ("Highs (> 1 kHz)", phase.get("correlation_high", 1.0))]
+    rows = [("L/R overall", phase.get("correlation", 1.0)),
+            ("Bass < 150 Hz", phase.get("correlation_low", 1.0)),
+            ("Highs > 1 kHz", phase.get("correlation_high", 1.0))]
     y = np.arange(len(rows))[::-1]
     values = [float(v) for _, v in rows]
     ax.barh(y, values, height=0.5, color=[BLUE if v >= 0 else RED for v in values], linewidth=0)
@@ -295,14 +296,15 @@ def _phase_axes(ax, report: Dict):
             ax.text(v + (0.03 if v >= 0 else -0.03), yi, f"{v:+.2f}", va="center", ha="left" if v >= 0 else "right",
                     fontsize=8, color=TEXT2)
     ax.set_xlim(-1.05, 1.05)
-    ax.set_xticks([-1, -0.5, 0, 0.5, 1])
-    ax.set_xticklabels(["-1 inverted", "-0.5", "0", "+0.5", "+1 in phase"], fontsize=8)
+    ax.set_xticks([-1, 0, 1])
+    ax.set_xticklabels(["-1\ninverted", "0", "+1\nin phase"], fontsize=8)
     ax.set_yticks(y)
     ax.set_yticklabels([label for label, _ in rows], fontsize=8)
+    ax.set_xlabel("correlation (shaded: cancels in mono)", fontsize=8)
     mono = phase.get("mono_loss_db", 0.0)
     comb = phase.get("comb_delay_ms")
-    extra = f"mono fold-down: {mono:+.1f} dB" + (f"   ·   comb filtering: delay ≈ {comb:.2f} ms" if comb else "")
-    ax.set_title(f"Stereo phase  ({extra}; below +0.3 = cancels in mono)", loc="left", fontsize=10)
+    extra = f"mono fold-down {mono:+.1f} dB" + (f", comb ≈ {comb:.2f} ms" if comb else "")
+    ax.set_title(f"Stereo phase ({extra})", loc="left", fontsize=10)
 
 
 BAND_LABELS = [("sub", "Sub (20-60 Hz)"), ("low", "Low (60-250)"), ("low_mid", "Low-mid (250-800)"),
