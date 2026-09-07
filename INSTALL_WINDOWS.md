@@ -114,26 +114,50 @@ Mettez les chemins entre guillemets s'ils contiennent des espaces.
 
 ## 5 bis. L'onglet Set Builder : le fil conducteur
 
-Tout le travail sur un set se fait dans l'onglet **Set Builder**. Le panneau
-*Workflow* liste les six étapes avec leur état, leur date et un rappel
-« Next : » de ce qu'il reste à faire :
+Un set est un **projet**, c'est-à-dire un dossier créé par DynaMix dans le
+dossier des projets (réglable dans l'onglet **Configuration**, par défaut
+`Documents\..\DynaMix Projects` dans votre profil) :
+
+```
+DynaMix Projects\Samedi soir\
+    project.json     options, morceaux analysés, set list, état des étapes
+    source\          les fichiers audio importés (copies) dans le projet
+    premaster\       les copies corrigées du pré-mastering
+    exports\         playlists M3U, feuilles de transitions, JSON, graphiques
+```
+
+Vos dossiers de musique ne sont jamais modifiés : **New project...** crée le
+projet, **Import audio...** y copie les fichiers d'un dossier. Le menu
+déroulant rouvre n'importe quel projet avec tout ce qu'il contient.
+
+Le panneau *Workflow* liste les six étapes avec leur état, leur date et un
+rappel « Next : » :
 
 1. **Analyze** : BPM, tonalité, énergie. Chaque fichier n'est analysé qu'une
    fois, le résultat est conservé dans `%LOCALAPPDATA%\DynaMix\analysis.sqlite`.
-   Rouvrir un dossier déjà analysé est instantané.
-2. **Create Set List** : durée et courbe d'énergie.
+2. **Propose** : un ordre proposé selon la durée et la courbe d'énergie.
+   C'est un point de départ : dans l'onglet *Tracks*, la **bibliothèque**
+   reste affichée à gauche et la **set list** à droite, avec les boutons
+   Add / Remove / Up / Down pour corriger la proposition à la main.
 3. **Plan Transitions** : repères d'intro et d'outro, feuille de transitions.
-4. **Pre-master Set** (optionnel) : copies corrigées dans le sous-dossier `premaster`, utilisées ensuite par la playlist et l'export Mixxx.
-5. **Create Playlist** (optionnel) : fichier M3U.
-6. **Export to Mixxx** : repères et playlist dans la base Mixxx.
+4. **Pre-master Set** (optionnel) : copies corrigées dans `premaster\`.
+5. **Create Playlist** (optionnel) : fichier M3U dans `exports\`.
+6. **Export to Mixxx** : repères et playlist dans la base Mixxx indiquée dans
+   l'onglet Configuration.
 
-L'état du set est enregistré dans `.dynamix-set.json` au sein du dossier de
-musique. En rouvrant le dossier, vous retrouvez l'ordre proposé, les
-transitions, les résultats de pré-mastering et l'étape en cours. Les onglets
-de droite montrent les graphiques : courbe d'énergie du set face à la cible,
-carte du set avec les zones d'intro et d'outro, détail d'un morceau
-(enveloppe d'énergie, équilibre spectral face au set) et, pour le
-pré-mastering, le volume et la crête vraie avant et après pour chaque morceau.
+Les onglets de droite montrent les graphiques : courbe d'énergie du set face à
+la cible, carte du set avec les zones d'intro et d'outro, détail d'un morceau
+et, pour le pré-mastering, le volume et la crête vraie avant et après.
+
+## 5 ter. L'onglet Configuration
+
+Tout ce qui dépend de votre machine est réuni là : le dossier des projets, la
+base Mixxx (bouton *Detect*, ou laissez vide pour la détection automatique),
+les valeurs par défaut des nouveaux projets (durée, courbe, longueur de fondu,
+sonie cible, timbre, phase, format de sortie) et un rapport d'environnement
+qui indique ce que DynaMix a trouvé : Tkinter, libsndfile et son support MP3,
+librosa, numba, FFmpeg, base Mixxx, cache d'analyses. Cliquez sur
+**Save configuration** après modification.
 
 ## 6. Musiques mal masterisées : contrôle et pré-mastering
 
@@ -147,8 +171,8 @@ l'onglet **Playlist Manager**, cadre *Mastering* :
   phase du grave, compatibilité mono, filtrage en peigne) et signale en clair
   ce qui cloche, avec un score sur 100. Les écarts sont jugés par rapport au
   reste du set.
-- **Pre-master Set** : écrit des **copies corrigées** dans le sous-dossier
-  `premaster` du dossier de musique, jamais les originaux : sonie ramenée à la cible choisie (par défaut
+- **Pre-master Set** : écrit des **copies corrigées** dans le dossier
+  `premaster\` du projet, jamais les originaux : sonie ramenée à la cible choisie (par défaut
   −14 LUFS), limiteur de crête à −1 dBTP, suppression de l'offset DC,
   correction de polarité et mise en mono du grave si nécessaire, et
   optionnellement un rapprochement doux de la couleur sonore vers la médiane
@@ -159,13 +183,12 @@ pistes d'origine.
 
 L'onglet **Pre-master** montre ensuite, morceau par morceau, le volume et la
 crête vraie avant et après, et la liste des actions appliquées (gain, timbre,
-polarité, grave en mono). Ajoutez le sous-dossier `premaster` dans la bibliothèque Mixxx (ou le
-dossier parent, Mixxx balaye les sous-dossiers) : l'export Mixxx et la
-playlist utilisent automatiquement les copies corrigées. En ligne de commande :
+polarité, grave en mono). Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
+Mixxx et la playlist utilisent automatiquement les copies corrigées. En ligne de commande :
 
 ```bat
 python mastering.py check "C:\Musique\Set"
-python mastering.py fix "C:\Musique\Set" --tone
+python mastering.py fix "%USERPROFILE%\DynaMix Projects\Samedi soir" --tone
 ```
 
 Aucun logiciel supplémentaire n'est nécessaire, FFmpeg compris.

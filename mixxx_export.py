@@ -18,6 +18,7 @@ Requirements:
 A timestamped backup of the database is created before anything is written.
 
 Usage (command line):
+    python mixxx_export.py --project "C:\\Users\\me\\DynaMix Projects\\Saturday"
     python mixxx_export.py --playlist "C:\\Music\\Set" --set-duration 60
     python mixxx_export.py --m3u "C:\\Music\\Set\\Set.m3u" --sheet transitions.txt
     python mixxx_export.py --m3u set.m3u --dry-run
@@ -242,11 +243,12 @@ def format_report(report: Dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Plan DynaMix transitions and push them to Mixxx")
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--playlist", help="Music directory: analyze it and build a set list")
+    source.add_argument("--project", help="Set project folder (or its project.json): reuse its set list and record the steps")
+    source.add_argument("--playlist", help="Music directory: analyze it and build a set list (no project)")
     source.add_argument("--m3u", help="Existing M3U/M3U8 playlist: keep its order")
-    parser.add_argument("--set-duration", type=int, default=60, help="Set duration in minutes (with --playlist)")
-    parser.add_argument("--energy-curve", default="build", choices=["build", "wave", "constant"],
-                        help="Energy curve for the set list (with --playlist)")
+    parser.add_argument("--set-duration", type=int, default=None, help="Set duration in minutes (default 60, or the project's option)")
+    parser.add_argument("--energy-curve", default=None, choices=["build", "wave", "peak_middle", "constant"],
+                        help="Energy curve for the set list (default build, or the project's option)")
     parser.add_argument("--mix-bars", type=int, default=8, help="Crossfade length in bars (default 8)")
     parser.add_argument("--sheet", help="Save the transition sheet to this text file")
     parser.add_argument("--json", help="Save the per-track analysis and transitions as JSON")
@@ -265,14 +267,25 @@ def main():
     if args.m3u:
         tracks = tracks_from_m3u(args.m3u)
         default_name = os.path.splitext(os.path.basename(args.m3u))[0]
-    else:
+    elif args.playlist:
         from playlist_manager import PlaylistManager
-        from set_project import SetProject
-        project = SetProject(args.playlist)
         default_name = os.path.basename(os.path.normpath(args.playlist))
         manager = PlaylistManager(args.playlist)
         print(f"Analyzing {args.playlist} (cached results are reused) ...")
         manager.analyze_playlist(progress_callback=lambda i, n, name, status: print(f"  {i}/{n} {status}: {name}"))
+        tracks = manager.create_set_list(duration_minutes=args.set_duration or 60, energy_curve=args.energy_curve or "build")
+    else:
+        from playlist_manager import PlaylistManager
+        from set_project import SetProject
+        project = SetProject.open(args.project)
+        default_name = project.name
+        files = project.source_files()
+        if not files:
+            print(f"No audio in {project.source_dir}: import files into the project first.")
+            sys.exit(1)
+        manager = PlaylistManager(project.source_dir)
+        print(f"Analyzing project '{project.name}' (cached results are reused) ...")
+        manager.analyze_playlist(files, progress_callback=lambda i, n, name, status: print(f"  {i}/{n} {status}: {name}"))
         project.set_tracks(manager.tracks)
         project.mark("analyze", count=len(manager.tracks), cached=manager.last_run["cached"], analyzed=manager.last_run["analyzed"])
         saved = project.set_list_tracks()
@@ -280,11 +293,13 @@ def main():
             tracks = saved
             print(f"Using the saved set list of the project ({len(tracks)} tracks). Use --fresh to rebuild it.")
         else:
-            tracks = manager.create_set_list(duration_minutes=args.set_duration, energy_curve=args.energy_curve)
+            duration = args.set_duration or int(project.options.get("set_duration", 60))
+            curve = args.energy_curve or project.options.get("energy_curve", "build")
+            tracks = manager.create_set_list(duration_minutes=duration, energy_curve=curve)
             project.set_set_list(tracks)
-            project.options.update({"set_duration": args.set_duration, "energy_curve": args.energy_curve})
+            project.options.update({"set_duration": duration, "energy_curve": curve})
             project.invalidate_from("setlist")
-            project.mark("setlist", count=len(tracks), duration=args.set_duration, curve=args.energy_curve)
+            project.mark("setlist", count=len(tracks), duration=duration, curve=curve)
         project.save()
 
     if len(tracks) < 1:
@@ -306,6 +321,11 @@ def main():
         project.mark("transitions", count=len(planner.transitions))
         project.save()
         print(f"Set project updated: {project.path}")
+    if project is not None and args.save_charts is None and args.sheet is None:
+        # a project always keeps its sheet and charts in exports/
+        args.sheet = os.path.join(project.exports_dir, "transitions.txt")
+        planner.save_text(args.sheet)
+        args.save_charts = os.path.join(project.exports_dir, "charts")
     if args.save_charts:
         import matplotlib
         matplotlib.use("Agg")
@@ -328,7 +348,10 @@ def main():
     if args.no_mixxx:
         return
 
-    db_path = args.db or find_mixxx_db()
+    db_path = args.db
+    if not db_path:
+        from config import Config
+        db_path = Config().mixxx_db_path()
     if not db_path:
         print("Mixxx database not found. Pass --db PATH\\to\\mixxxdb.sqlite (Windows default: "
               "%LOCALAPPDATA%\\Mixxx\\mixxxdb.sqlite).")

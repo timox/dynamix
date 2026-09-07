@@ -676,7 +676,7 @@ def main():
     chk.add_argument("--json", help="Also save the full report as JSON")
 
     fix = sub.add_parser("fix", help="Write corrected copies of the tracks into another folder")
-    fix.add_argument("target", help="Directory, .m3u playlist or audio file")
+    fix.add_argument("target", help="Directory, .m3u playlist, audio file, or a set project folder (its set list is used)")
     fix.add_argument("--out", help="Output folder (default: a 'premaster' subfolder of the target folder)")
     fix.add_argument("--lufs", type=float, default=-14.0, help="Target integrated loudness (default -14 LUFS)")
     fix.add_argument("--tp", type=float, default=-1.0, help="True-peak ceiling in dBTP (default -1.0)")
@@ -702,7 +702,18 @@ def main():
                 json.dump(reports, f, indent=2)
             print(f"\nJSON report saved to {args.json}")
     else:
-        files = collect_files(args.target)
+        from set_project import SetProject
+        project = None
+        if os.path.isdir(args.target) and SetProject.exists(args.target):
+            project = SetProject.open(args.target)
+            tracks = project.set_list_tracks() or project.tracks
+            files = [t['file_path'] for t in tracks] or project.source_files()
+            args.out = args.out or project.premaster_dir
+            if args.lufs == -14.0:
+                args.lufs = float(project.options.get("target_lufs", -14.0))
+            print(f"Pre-mastering project '{project.name}' ({len(files)} tracks) into {args.out}")
+        else:
+            files = collect_files(args.target)
         if not files:
             print("No audio files found.")
             sys.exit(1)
@@ -716,10 +727,8 @@ def main():
         summary = format_premaster_summary(results, args.out)
         print()
         print(summary)
-        if os.path.isdir(args.target):
-            from set_project import SetProject
-            if SetProject.exists(args.target):
-                project = SetProject(args.target)
+        if project is not None:
+            if True:
                 keep = ('lufs', 'true_peak_db', 'plr', 'score', 'clip_runs', 'flags')
                 slim = [({'input': r['input'], 'error': r['error']} if 'error' in r else
                          {'input': r['input'], 'output': r['output'], 'actions': r['actions'],

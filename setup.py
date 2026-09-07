@@ -75,6 +75,8 @@ setup(
         "analysis_store",
         "set_project",
         "charts",
+        "config",
+        "set_builder",
         "gui",
         "examples"
     ],

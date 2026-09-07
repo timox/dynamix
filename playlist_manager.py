@@ -122,7 +122,10 @@ class PlaylistManager:
                     analyzer = AudioAnalyzer(file_path)
                     features = analyzer.get_audio_features()
                     if store:
-                        store.put(file_path, 'features', features)
+                        try:
+                            store.put(file_path, 'features', features)
+                        except OSError:
+                            pass  # file not reachable for stat (e.g. mocked): skip caching
                 
                 self.tracks.append(self.track_record(file_path, features))
                 self.analysis_cache[file_path] = features

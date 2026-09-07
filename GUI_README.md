@@ -27,35 +27,41 @@ python gui.py
   - See optimal exit/entry points
 
 ### 3. Set Builder Tab
-- **Purpose**: Build a set from a music folder, step by step, without ever
-  redoing work
-- **How it works**:
-  - Choose the music folder. If a set was already started there, its project
-    (`.dynamix-set.json` in the folder) is reloaded: analysed tracks, proposed
-    order, transitions, pre-master results and the status of every step
-  - The **Workflow** panel lists the six steps with a ✓ / ○ status, the date and
-    key figures of each, and a "Next:" hint telling you what to do now:
-    1. Analyze (BPM, key, energy; every file is cached, only new files take time)
-    2. Create Set List (duration, energy curve)
+- **Purpose**: Build a set as a project, step by step, without ever redoing work
+- **Projects**: a set is a folder under the projects folder (see the
+  Configuration tab): `project.json`, `source/` (the audio files imported
+  into the project, copies), `premaster/` (corrected copies) and `exports/`
+  (M3U, transition sheets, JSON, charts). Your music folders are never
+  written to. Use **New project...** then **Import audio...**; the project
+  combobox reopens any existing project with everything it contains.
+- **Workflow panel**: the six steps with a ✓ / ○ status, the date and key
+  figures of each, and a "Next:" hint:
+    1. Analyze (BPM, key, energy; cached per file, only new files take time)
+    2. Propose a set list (duration, energy curve)
     3. Plan Transitions (intro/outro sections, transition sheet)
-    4. Pre-master Set (optional, corrected copies in the 'premaster' subfolder; the playlist and the Mixxx export then use those copies)
-    5. Create Playlist (optional, M3U)
-    6. Export to Mixxx (intro/outro cues + playlist for Auto DJ)
-  - Redoing an early step (new analysis with different files, new set list)
-    resets the later ones, so the status is always truthful
-- **Tabs on the right**:
-  - **Tracks**: the analysed tracks or the proposed order, with BPM, key,
-    duration, energy level, mastering score and flags. Select a row to open it
-    in the Track tab
-  - **Overview**: energy curve of the set against the target curve, tempo
-    along the set, and the set map (where each track plays, its intro/outro
-    sections, and transitions that need attention)
-  - **Track**: energy envelope over time with intro/outro marked, loudness /
-    true peak / PLR, and the tone balance of the track against the set median
-  - **Pre-master**: loudness and true peak before -> after for every track,
-    with the list of actions taken (gain, tone, polarity, mono bass)
+    4. Pre-master Set (optional, into the project's premaster folder)
+    5. Create Playlist (optional, M3U into exports/)
+    6. Export to Mixxx (uses the database set in the Configuration tab)
+  Redoing an early step resets the later ones, so the status is always true.
+- **Tracks tab**: the **Library** (all analysed tracks, with their position in
+  the set) on the left and the **Set list** (playing order) on the right. The
+  algorithm's proposal is a starting point: **Add / Remove / Up / Down** edit
+  the set list by hand (double-click a library row to add it, a set row to
+  remove it); the library never disappears. Select a row to open it in the
+  Track tab.
+- **Overview**: set energy curve against the target, tempo, and the set map
+- **Track**: energy envelope with intro/outro, loudness figures, tone balance
+- **Pre-master**: loudness and true peak before -> after, actions per track
 - **Project summary** button: text summary of the project and its steps
-- **Analysis cache**: shown at the bottom of the panel (files, results, path)
+
+### 3 bis. Configuration Tab
+- **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
+  = auto-detect), and where DynaMix keeps its cache and configuration
+- **Defaults for new projects**: set duration, energy curve, crossfade
+  length, target loudness, tone matching, phase repair, pre-master format
+- **Environment**: what DynaMix found on this machine (Python, Tkinter,
+  libsndfile with MP3 support, librosa, numba, FFmpeg, Mixxx database,
+  analysis cache). Refresh after installing something.
 
 ### 4. DJ Tools Tab
 - **Purpose**: Access DJ performance tools

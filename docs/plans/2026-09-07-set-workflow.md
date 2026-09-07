@@ -79,3 +79,22 @@ Steps: implement panel → implement chart embedding → headless smoke test wit
 - Add `.dynamix-set.json` and `*.sqlite` to `.gitignore`
 
 Steps: implement → run the whole flow on the synthetic set → commit → push.
+
+---
+
+## Addendum (same day): project folders, configuration tab, editable set list
+
+### Task 7: Configuration (`config.py`)
+`Config` saved as `<DynaMix home>/config.json`: `projects_root` (default `~/DynaMix Projects`), `mixxx_db` (auto-detected, overridable), defaults (`set_duration`, `energy_curve`, `mix_bars`, `target_lufs`, `tone_match`, `fix_phase`, `output_format`). `environment_report()` lists Python, Tkinter, soundfile/libsndfile MP3 support, numba, FFmpeg on PATH, Mixxx database, analysis cache. Tests: roundtrip, defaults, report keys.
+
+### Task 8: Project folders (`set_project.py`)
+A project lives in `<projects_root>/<name>/`: `project.json`, `source/` (imported audio copies), `premaster/`, `exports/` (M3U, sheets, JSON, charts). `SetProject.create(root, name, source_folder)`, `SetProject.open(path)`, `list_projects(root)`, `import_audio(files, progress)` (copy, skip identical), `source_files()`. Set-list editing: `add_to_set`, `remove_from_set`, `move_in_set`, `set_order`; every edit invalidates later steps. Tests updated.
+
+### Task 9: GUI
+- New **Configuration** tab (paths, Mixxx database with Detect, defaults, environment report, Save).
+- Set Builder header: project combobox + New project (name + music folder -> import) + Import audio.
+- Tracks tab: Library (all analysed) and Set list (ordered) side by side with Add / Remove / Up / Down / Propose; the library list never disappears.
+- Outputs default to the project's folders; Mixxx export uses the configured database without a dialog.
+
+### Task 10: CLI + docs
+`mixxx_export.py --project PATH`, `mastering.py fix --project PATH`; README, GUI_README, INSTALL_WINDOWS.
