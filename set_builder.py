@@ -126,8 +126,8 @@ class SetBuilderMixin:
         lists.add(lib_frame, weight=1)
         self.library_caption = ttk.Label(lib_frame, text="Library (all analysed tracks)", foreground=MUTED, anchor="w")
         self.library_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        self.library_tree = self._make_tree(lib_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Set"),
-                                            {"#": 35, "Filename": 220, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Set": 40})
+        self.library_tree = self._make_tree(lib_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Set", "Flags"),
+                                            {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Set": 40, "Flags": 240})
         self.library_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.library_tree))
         self.library_tree.bind("<Double-1>", lambda e: self.set_add())
         
@@ -142,18 +142,15 @@ class SetBuilderMixin:
         lists.add(set_frame, weight=1)
         self.set_caption = ttk.Label(set_frame, text="Set list (playing order)", foreground=MUTED, anchor="w")
         self.set_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        self.set_tree = self._make_tree(set_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master"),
-                                        {"#": 35, "Filename": 220, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55})
+        self.set_tree = self._make_tree(set_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Flags"),
+                                        {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Flags": 240})
         self.set_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.set_tree))
         self.set_tree.bind("<Double-1>", lambda e: self.set_remove())
         self.playlist_tree = self.set_tree  # older code paths
         
-        self.overview_frame = ttk.Frame(self.set_notebook)
-        self.set_notebook.add(self.overview_frame, text="Overview")
-        self.track_frame = ttk.Frame(self.set_notebook)
-        self.set_notebook.add(self.track_frame, text="Track")
-        self.premaster_frame = ttk.Frame(self.set_notebook)
-        self.set_notebook.add(self.premaster_frame, text="Pre-master")
+        self.overview_frame = self._scrollable_tab("Overview")
+        self.track_frame = self._scrollable_tab("Track")
+        self.premaster_frame = self._scrollable_tab("Pre-master")
         for f, msg in ((self.overview_frame, "Analyze the tracks and build a set list to see the energy curve and the set map."),
                        (self.track_frame, "Select a track in the Tracks tab to see its energy envelope, intro/outro and tone balance."),
                        (self.premaster_frame, "Run 'Pre-master Set' to see what was changed on every track.")):
@@ -164,11 +161,46 @@ class SetBuilderMixin:
         if projects:
             self.load_project(projects[0])
     
+    def _scrollable_tab(self, title):
+        """A notebook tab whose content scrolls vertically; returns the inner frame to fill."""
+        outer = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(outer, text=title)
+        canvas = tk.Canvas(outer, highlightthickness=0, background="#fcfcfb")
+        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        
+        def on_inner_configure(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        def on_canvas_configure(event):
+            canvas.itemconfigure(window, width=event.width)  # charts follow the width, keep their height
+        
+        def on_wheel(event):
+            if event.delta:  # Windows / macOS
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+            elif event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+        
+        inner.bind("<Configure>", on_inner_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind(seq, on_wheel)
+            inner.bind(seq, on_wheel)
+        inner._scroll_canvas = canvas
+        return inner
+    
     def _make_tree(self, parent, columns, widths):
         tree = ttk.Treeview(parent, columns=columns, show="headings", height=14, selectmode="browse")
         for col in columns:
             tree.heading(col, text=col)
-            tree.column(col, width=widths.get(col, 80), anchor="w" if col in ("Filename", "Key") else "center", stretch=(col == "Filename"))
+            tree.column(col, width=widths.get(col, 80), anchor="w" if col in ("Filename", "Key", "Flags") else "center",
+                        stretch=(col in ("Filename", "Flags")))
         sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -344,6 +376,14 @@ class SetBuilderMixin:
                   f"{score:.0f}" if score is not None else "-"]
         if with_set:
             values.append(track.get("set_position") or "")
+        flags = (mastering or {}).get("flags") or []
+        if mastering and not flags:
+            values.append("OK")
+        elif flags:
+            text = "; ".join(flags)
+            values.append(text if len(text) <= 90 else text[:89] + "…")
+        else:
+            values.append("")
         return values
     
     def _refresh_tables(self):
@@ -725,13 +765,22 @@ class SetBuilderMixin:
         if placeholder:
             ttk.Label(container, text=placeholder, foreground=MUTED, wraplength=600).pack(padx=20, pady=20, anchor="w")
     
-    def _show_figure(self, container, fig):
-        for child in container.winfo_children():
-            child.destroy()
+    def _show_figure(self, container, fig, replace=True):
+        """Embed a figure: it follows the container's width and keeps its designed height."""
+        if replace:
+            for child in container.winfo_children():
+                child.destroy()
         canvas = FigureCanvasTkAgg(fig, container)
+        widget = canvas.get_tk_widget()
+        widget.configure(height=charts.pixel_height(fig), highlightthickness=0)
+        widget.pack(fill=tk.X, expand=False, padx=2, pady=(2, 8))
+        scroll_canvas = getattr(container, "_scroll_canvas", None)
+        if scroll_canvas is not None:
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(seq, lambda e, c=scroll_canvas: c.yview_scroll(
+                    int(-e.delta / 120) if e.delta else (-1 if e.num == 4 else 1), "units"))
         canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self._chart_canvases[str(container)] = canvas
+        self._chart_canvases[f"{container}:{len(container.winfo_children())}"] = canvas
         return canvas
     
     def _render_overview(self):
@@ -743,14 +792,10 @@ class SetBuilderMixin:
         if self.current_set_list:
             values = [PlaylistManager._energy_value(t) for t in tracks]
             targets = PlaylistManager._target_curve(values, self.energy_curve_var.get())
-        top = ttk.Frame(self.overview_frame)
-        top.pack(fill=tk.BOTH, expand=True)
-        self._show_figure(top, charts.set_overview(tracks, targets))
+        self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:
-            bottom = ttk.Frame(self.overview_frame)
-            bottom.pack(fill=tk.BOTH, expand=True)
-            self._show_figure(bottom, charts.set_timeline(planner.profiles, planner.transitions))
+            self._show_figure(self.overview_frame, charts.set_timeline(planner.profiles, planner.transitions), replace=False)
     
     def _render_premaster(self):
         pm = self.project.data.get("premaster") if self.project else None
@@ -758,11 +803,9 @@ class SetBuilderMixin:
             self._clear_frame(self.premaster_frame, "Run 'Pre-master Set' to see what was changed on every track.")
             return
         self._clear_frame(self.premaster_frame)
-        fig_frame = ttk.Frame(self.premaster_frame)
-        fig_frame.pack(fill=tk.BOTH, expand=True)
-        self._show_figure(fig_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
-        text = scrolledtext.ScrolledText(self.premaster_frame, height=8, font=("Consolas", 9))
-        text.pack(fill=tk.X)
+        self._show_figure(self.premaster_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
+        text = scrolledtext.ScrolledText(self.premaster_frame, height=10, font=("Consolas", 9), wrap=tk.NONE)
+        text.pack(fill=tk.X, padx=2, pady=(0, 8))
         text.insert(tk.END, pm.get("summary", ""))
     
     def on_track_selected(self, tree=None):
