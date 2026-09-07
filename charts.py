@@ -51,6 +51,21 @@ def _figure(width: float = 9.0, height: float = 5.0) -> Figure:
     return fig
 
 
+def _finish(fig: Figure) -> Figure:
+    """Layout that is recomputed at every draw, so labels stay inside when the window resizes."""
+    try:
+        fig.set_layout_engine("constrained")
+        fig.get_layout_engine().set(w_pad=0.08, h_pad=0.08, hspace=0.06, wspace=0.06)
+    except Exception:  # older matplotlib
+        fig.tight_layout()
+    return fig
+
+
+def pixel_height(fig: Figure) -> int:
+    """Height in pixels the figure was designed for (used to size its Tk canvas)."""
+    return int(fig.get_size_inches()[1] * fig.dpi)
+
+
 def _short(name: str, n: int = 18) -> str:
     base = os.path.splitext(os.path.basename(name))[0]
     return base if len(base) <= n else base[:n - 1] + "…"
@@ -109,8 +124,7 @@ def set_overview(tracks: Sequence[Dict], targets: Optional[Sequence[float]] = No
     ax2.set_xticks(x)
     ax2.set_xticklabels(names, rotation=30, ha="right", fontsize=8)
     ax2.set_xlim(0.5, n + 0.5 if n else 1.5)
-    fig.tight_layout()
-    return fig
+    return _finish(fig)
 
 
 # ------------------------------------------------------------------ timeline
@@ -162,20 +176,24 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
     ax.set_xlim(0, total * 1.45 if total else 1)
     ax.set_ylim(0.3, n + 0.7)
     ax.set_yticks([])
-    ticks = np.arange(0, total + 1, 300 if total > 1200 else 60) if total else [0]
+    if total:
+        step = max(60.0, np.ceil(total / 8.0 / 60.0) * 60.0)
+        ticks = np.arange(0, total + step, step)
+    else:
+        ticks = [0]
     ax.set_xticks(ticks)
     ax.set_xticklabels([_fmt_time(v) for v in ticks])
     ax.set_xlabel("Set time (min:sec)")
-    ax.set_title("Set map: light = intro/outro sections, blue = body, gray = skipped tail", loc="left", fontsize=11)
-    fig.tight_layout()
-    return fig
+    ax.set_title("Set map  (light = intro/outro, blue = body, gray = skipped tail)", loc="left", fontsize=11)
+    return _finish(fig)
 
 
 # ------------------------------------------------------------------ track detail
 def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] = None) -> Figure:
     """Energy envelope with intro/outro sections, plus the tone balance against the set."""
-    fig = _figure(9.0, 5.6)
-    ax1 = fig.add_subplot(2, 1, 1)
+    fig = _figure(9.0, 8.2)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.35, 0.75, 1.0])
+    ax1 = fig.add_subplot(gs[0])
     _style(ax1)
     times = np.asarray(profile.get("envelope_times") or [], dtype=float)
     env = np.asarray(profile.get("envelope") or [], dtype=float)
@@ -191,9 +209,9 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
             ax1.axvline(float(a), color=GRAY, linewidth=1)
             ax1.axvline(float(b), color=GRAY, linewidth=1)
     if profile.get("intro_end") is not None:
-        ax1.text(float(profile["intro_start"]), 1.5, "intro", fontsize=8, color=TEXT2, ha="left", va="bottom")
+        ax1.text(float(profile["intro_start"]) + 0.5, -43.5, "intro", fontsize=8, color=TEXT2, ha="left", va="bottom")
     if profile.get("outro_start") is not None:
-        ax1.text(float(profile["outro_end"]), 1.5, "outro", fontsize=8, color=TEXT2, ha="right", va="bottom")
+        ax1.text(float(profile["outro_end"]) - 0.5, -43.5, "outro", fontsize=8, color=TEXT2, ha="right", va="bottom")
     ax1.set_xlim(0, duration or 1)
     ticks = np.arange(0, duration + 1, 60 if duration > 240 else 30) if duration else [0]
     ax1.set_xticks(ticks)
@@ -205,14 +223,55 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
         head += f"\n{m['lufs']:.1f} LUFS · true peak {m['true_peak_db']:+.1f} dBTP · PLR {m['plr']:.1f} dB · mastering score {m['score']:.0f}/100"
     ax1.set_title(head, loc="left", fontsize=10)
 
-    ax2 = fig.add_subplot(2, 1, 2)
+    ax_phase = fig.add_subplot(gs[1])
+    _phase_axes(ax_phase, m)
+
+    ax2 = fig.add_subplot(gs[2])
     _mastering_balance_axes(ax2, m, set_median_balance)
     flags = m.get("flags") or []
     if flags:
-        ax2.text(0.0, -0.32, "! " + "\n! ".join(flags[:4]), transform=ax2.transAxes, fontsize=8,
+        ax2.text(0.0, -0.30, "! " + "\n! ".join(flags[:5]), transform=ax2.transAxes, fontsize=8,
                  color=TEXT2, va="top", ha="left")
-    fig.tight_layout()
-    return fig
+    return _finish(fig)
+
+
+def _phase_axes(ax, report: Dict):
+    """L/R correlation overall, in the bass and in the highs (-1 inverted .. +1 in phase), plus mono loss."""
+    _style(ax, grid_axis="x")
+    phase = (report or {}).get("phase") or {}
+    if not phase:
+        ax.text(0.5, 0.5, "No phase data (run the mastering check)", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.set_yticks([])
+        return
+    if not phase.get("stereo"):
+        ax.text(0.5, 0.5, "Mono file: no stereo phase to check", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.set_yticks([])
+        ax.set_title("Stereo phase", loc="left", fontsize=10)
+        return
+    rows = [("Overall L/R correlation", phase.get("correlation", 1.0)),
+            ("Bass (< 150 Hz)", phase.get("correlation_low", 1.0)),
+            ("Highs (> 1 kHz)", phase.get("correlation_high", 1.0))]
+    y = np.arange(len(rows))[::-1]
+    values = [float(v) for _, v in rows]
+    ax.barh(y, values, height=0.5, color=[BLUE if v >= 0 else RED for v in values], linewidth=0)
+    ax.axvline(0, color=GRAY, linewidth=1)
+    ax.axvspan(-1.05, 0.3, color=STATUS_WARNING, alpha=0.08, linewidth=0)  # zone where mono compatibility suffers
+    for yi, v in zip(y, values):
+        if abs(v) > 0.8:  # no room beyond the bar end: label inside, in white
+            ax.text(v - (0.03 if v >= 0 else -0.03), yi, f"{v:+.2f}", va="center", ha="right" if v >= 0 else "left",
+                    fontsize=8, color=SURFACE)
+        else:
+            ax.text(v + (0.03 if v >= 0 else -0.03), yi, f"{v:+.2f}", va="center", ha="left" if v >= 0 else "right",
+                    fontsize=8, color=TEXT2)
+    ax.set_xlim(-1.05, 1.05)
+    ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+    ax.set_xticklabels(["-1 inverted", "-0.5", "0", "+0.5", "+1 in phase"], fontsize=8)
+    ax.set_yticks(y)
+    ax.set_yticklabels([label for label, _ in rows], fontsize=8)
+    mono = phase.get("mono_loss_db", 0.0)
+    comb = phase.get("comb_delay_ms")
+    extra = f"mono fold-down: {mono:+.1f} dB" + (f"   ·   comb filtering: delay ≈ {comb:.2f} ms" if comb else "")
+    ax.set_title(f"Stereo phase  ({extra}; below +0.3 = cancels in mono)", loc="left", fontsize=10)
 
 
 BAND_LABELS = [("sub", "Sub (20-60 Hz)"), ("low", "Low (60-250)"), ("low_mid", "Low-mid (250-800)"),
@@ -250,8 +309,7 @@ def mastering_balance(report: Dict, set_median: Optional[Dict[str, float]] = Non
     fig = _figure(7.0, 3.2)
     ax = fig.add_subplot(1, 1, 1)
     _mastering_balance_axes(ax, report, set_median)
-    fig.tight_layout()
-    return fig
+    return _finish(fig)
 
 
 # ------------------------------------------------------------------ pre-master
@@ -283,7 +341,7 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
     ax1.set_yticks(y)
     ax1.set_yticklabels(names, fontsize=8)
     ax1.set_title("Loudness: before -> after", loc="left", fontsize=11)
-    ax1.legend(loc="lower left", frameon=False, fontsize=8, labelcolor=TEXT2)
+    ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, frameon=False, fontsize=8, labelcolor=TEXT2)
 
     tp_b = [float(r["before"]["true_peak_db"]) for r in ok]
     tp_a = [float(r["after"]["true_peak_db"]) for r in ok]
@@ -292,11 +350,10 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
     if clipped:
         ax2.scatter([max(tp_b) + 1.2] * len(clipped), clipped, marker="x", s=40, color=STATUS_CRITICAL,
                     linewidths=1.5, label="was clipping")
-        ax2.legend(loc="lower left", frameon=False, fontsize=8, labelcolor=TEXT2)
+        ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3, frameon=False, fontsize=8, labelcolor=TEXT2)
     ax2.tick_params(labelleft=False)
     ax2.set_title("True peak: before -> after", loc="left", fontsize=11)
-    fig.tight_layout()
-    return fig
+    return _finish(fig)
 
 
 def save(fig: Figure, path: str) -> str:

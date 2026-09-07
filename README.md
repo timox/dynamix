@@ -116,26 +116,37 @@ python gui.py
 
 The GUI provides access to all DynaMix features through an intuitive interface.
 
-### Set Builder: a guided, persistent workflow
+### Set Builder: projects, a guided workflow, and a set list you can edit
 
-The GUI's **Set Builder** tab walks through six steps (Analyze → Create Set List →
-Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and shows what is
-done, when, and what comes next. Two persistence layers make this possible:
+A set is a **project folder** under the projects folder chosen in the GUI's Configuration tab
+(default `~/DynaMix Projects`):
 
-- **Analysis cache** (`analysis_store.py`): every per-file result (features, intro/outro
-  profile, mastering report) is stored in `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on
-  Windows or `~/.dynamix/analysis.sqlite` elsewhere (`DYNAMIX_HOME` overrides), keyed by
-  path, size and modification time. A track is analysed once; re-opening a folder is
-  instant. Delete the file to start over.
-- **Set project** (`set_project.py`): `.dynamix-set.json` inside the music folder keeps the
-  options, the analysed tracks, the proposed order, the step status with timestamps, the
-  transition plan and the pre-master results. The GUI and `mixxx_export.py --playlist`
-  both read and update it (`--fresh` rebuilds the set list).
+```
+<projects folder>/<set name>/
+    project.json     options, analysed tracks, set list, step status, results
+    source/          the audio files imported (copied) into the project
+    premaster/       corrected copies written by the pre-master pass
+    exports/         M3U playlists, transition sheets, JSON, charts
+```
 
-Charts (`charts.py`, also `mixxx_export.py --save-charts DIR` and `mastering.py fix
---save-chart PNG`): set energy curve vs. target and tempo, set map with intro/outro
-sections and transition scores, per-track energy envelope and tone balance against the
-set, and loudness / true-peak before → after of the pre-master pass.
+Your music folders are never written to. The Set Builder tab walks through six steps
+(Analyze → Propose → Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and
+shows what is done, when, and what comes next. The proposed order is a starting point: the
+Tracks tab keeps the whole library next to the set list, with Add / Remove / Up / Down.
+
+- **Analysis cache** (`analysis_store.py`): every per-file result is stored in
+  `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows or `~/.dynamix/analysis.sqlite`
+  elsewhere (`DYNAMIX_HOME` overrides). A track is analysed once.
+- **Configuration** (`config.py`, `config.json` next to the cache): projects folder, Mixxx
+  database, defaults for new projects, and an environment report (Tkinter, libsndfile MP3
+  support, FFmpeg, Mixxx database, cache).
+- **Command line**: `mixxx_export.py --project <folder>` reuses the project's set list, writes
+  the sheet and charts into `exports/` and records the steps; `mastering.py fix <project folder>`
+  pre-masters the set list into `premaster/`.
+
+Charts (`charts.py`): set energy curve vs. target and tempo, set map with intro/outro sections
+and transition scores, per-track energy envelope and tone balance against the set, and
+loudness / true-peak before → after of the pre-master pass.
 
 ### Energy Level and Set Ordering
 
@@ -165,7 +176,8 @@ python mastering.py check my_set.m3u --json report.json
 
 # Corrected copies: loudness normalised to -14 LUFS, true-peak limited at -1 dBTP, DC removed,
 # polarity/bass phase repaired, optional tone matching to the set's median balance
-python mastering.py fix /path/to/music --out /path/to/music_premastered --tone
+python mastering.py fix /path/to/music --tone            # copies go to /path/to/music/premaster
+python mastering.py fix "~/DynaMix Projects/Saturday"      # a project: its set list, into premaster/
 python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac
 ```
 
@@ -173,7 +185,7 @@ Flags are set-relative where it matters ("darker than the rest of the set", "qui
 rest of the set") so that the goal is a consistent set, not an abstract reference. Comb
 filtering cannot be repaired automatically (it needs the original stems); it is only reported.
 No FFmpeg needed: decoding and encoding go through soundfile/libsndfile (WAV, FLAC, OGG, MP3).
-In the GUI: Playlist Manager tab, **Mastering Report** and **Pre-master Set...**. The transition
+In the GUI: Set Builder tab, **Mastering Report** and **Pre-master Set** (copies go to the project's `premaster/` folder; the playlist and the Mixxx export then use those copies). The transition
 sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
 measurements, and can be saved as JSON.
 
