@@ -6,11 +6,15 @@ import unittest
 
 class TestConfig(unittest.TestCase):
     def setUp(self):
+        import analysis_store
         self.tmp = tempfile.mkdtemp(prefix="dynamix_cfg_")
         os.environ["DYNAMIX_HOME"] = self.tmp
+        analysis_store.reset_store()
 
     def tearDown(self):
+        import analysis_store
         os.environ.pop("DYNAMIX_HOME", None)
+        analysis_store.reset_store()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_defaults_and_roundtrip(self):

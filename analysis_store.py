@@ -70,11 +70,17 @@ class AnalysisStore:
         return abs_path, int(st.st_size), int(st.st_mtime_ns)
 
     def get(self, path: str, kind: str) -> Optional[Dict[str, Any]]:
-        """Return the cached document, or None when absent or stale."""
+        """Return the cached document, or None when absent, stale or unreadable."""
         try:
             abs_path, size, mtime = self._identity(path)
         except OSError:
             return None
+        try:
+            return self._get(abs_path, size, mtime, kind)
+        except sqlite3.Error:
+            return None
+
+    def _get(self, abs_path: str, size: int, mtime: int, kind: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT size, mtime, version, data FROM analyses WHERE path = ? AND kind = ?",
@@ -90,16 +96,24 @@ class AnalysisStore:
     def has(self, path: str, kind: str) -> bool:
         return self.get(path, kind) is not None
 
-    def put(self, path: str, kind: str, data: Dict[str, Any]) -> None:
-        abs_path, size, mtime = self._identity(path)
+    def put(self, path: str, kind: str, data: Dict[str, Any]) -> bool:
+        """Store a document. Returns False (without raising) when the file or the database is unreachable."""
+        try:
+            abs_path, size, mtime = self._identity(path)
+        except OSError:
+            return False
         payload = json.dumps(data, default=_json_default)
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO analyses (path, kind, size, mtime, version, data, created)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (abs_path, kind, size, mtime, ANALYZER_VERSION, payload,
-                 _dt.datetime.now().isoformat(timespec="seconds")),
-            )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO analyses (path, kind, size, mtime, version, data, created)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (abs_path, kind, size, mtime, ANALYZER_VERSION, payload,
+                     _dt.datetime.now().isoformat(timespec="seconds")),
+                )
+        except sqlite3.Error:
+            return False
+        return True
 
     def kinds_for(self, path: str) -> Dict[str, bool]:
         """Which kinds are cached and fresh for this file."""

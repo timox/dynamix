@@ -51,6 +51,12 @@ class TestAnalysisStore(unittest.TestCase):
         self.assertEqual(self.store.clear(self.file), 2)
         self.assertEqual(self.store.stats()["entries"], 0)
 
+    def test_unreachable_database_degrades_gracefully(self):
+        store = AnalysisStore(self.db)
+        store.db_path = os.path.join(self.tmp, "missing_dir", "x.sqlite")  # cannot be opened
+        self.assertFalse(store.put(self.file, "features", {"a": 1}))
+        self.assertIsNone(store.get(self.file, "features"))
+
     def test_numpy_values_are_serialised(self):
         import numpy as np
         self.store.put(self.file, "features", {"bpm": np.float64(120.5), "beats": np.array([1, 2])})
