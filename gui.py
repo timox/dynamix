@@ -22,7 +22,10 @@ from export_tools import ExportTools
 from mix_enhanced import EnhancedMixAnalyzer
 from transition_planner import TransitionPlanner
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
-from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary
+from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
+from set_project import SetProject, STEPS
+from analysis_store import get_store
+import charts
 
 
 class DynaMixGUI:
@@ -140,72 +143,278 @@ class DynaMixGUI:
         self.compat_viz_frame.pack(fill=tk.BOTH, expand=True)
     
     def create_playlist_tab(self):
-        """Create playlist management tab"""
+        """Set Builder: guided workflow with persistent project, table and charts"""
         frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Playlist Manager")
+        self.notebook.add(frame, text="Set Builder")
+        self.project = None
+        self._chart_canvases = {}
         
-        # Directory selection
+        # Folder selection
         dir_frame = ttk.Frame(frame)
-        dir_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(dir_frame, text="Music Directory:").pack(side=tk.LEFT, padx=5)
+        dir_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(dir_frame, text="Music folder:").pack(side=tk.LEFT, padx=5)
         self.playlist_dir_var = tk.StringVar()
-        ttk.Entry(dir_frame, textvariable=self.playlist_dir_var, width=50).pack(side=tk.LEFT, padx=5)
+        entry = ttk.Entry(dir_frame, textvariable=self.playlist_dir_var, width=60)
+        entry.pack(side=tk.LEFT, padx=5)
+        entry.bind("<Return>", lambda e: self.load_project(self.playlist_dir_var.get()))
         ttk.Button(dir_frame, text="Browse", command=self.browse_playlist_dir).pack(side=tk.LEFT, padx=5)
-        ttk.Button(dir_frame, text="Analyze Playlist", command=self.analyze_playlist).pack(side=tk.LEFT, padx=5)
-        ttk.Button(dir_frame, text="Create Playlist", command=self.create_playlist_from_directory).pack(side=tk.LEFT, padx=5)
+        ttk.Button(dir_frame, text="Project summary", command=self.show_project_summary).pack(side=tk.LEFT, padx=5)
         
-        # Options
-        options_frame = ttk.LabelFrame(frame, text="Set List Options")
-        options_frame.pack(fill=tk.X, padx=10, pady=5)
+        paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        ttk.Label(options_frame, text="Duration (minutes):").pack(side=tk.LEFT, padx=5)
+        # ---- left: workflow steps + options
+        left = ttk.Frame(paned, width=340)
+        paned.add(left, weight=0)
+        
+        steps_frame = ttk.LabelFrame(left, text="Workflow")
+        steps_frame.pack(fill=tk.X, padx=2, pady=2)
+        self.step_widgets = {}
+        actions = {
+            "analyze": ("Analyze", self.analyze_playlist),
+            "setlist": ("Create Set List", self.create_set_list),
+            "transitions": ("Plan Transitions", self.plan_transitions),
+            "premaster": ("Pre-master Set...", self.premaster_set),
+            "playlist": ("Create Playlist", self.create_playlist_from_directory),
+            "mixxx": ("Export to Mixxx...", self.export_to_mixxx),
+        }
+        for i, (key, label, required) in enumerate(STEPS, 1):
+            row = ttk.Frame(steps_frame)
+            row.pack(fill=tk.X, padx=4, pady=2)
+            status = ttk.Label(row, text="○", width=2)
+            status.pack(side=tk.LEFT)
+            text = ttk.Label(row, text=f"{i}. {label}", width=30, anchor="w")
+            text.pack(side=tk.LEFT)
+            btn_text, command = actions[key]
+            ttk.Button(row, text=btn_text, command=command, width=18).pack(side=tk.RIGHT, padx=2)
+            detail = ttk.Label(steps_frame, text="", foreground="#52514e", anchor="w", wraplength=320)
+            detail.pack(fill=tk.X, padx=28)
+            self.step_widgets[key] = {"status": status, "text": text, "detail": detail}
+        self.next_step_label = ttk.Label(steps_frame, text="Next: choose a music folder.", wraplength=320,
+                                         anchor="w", justify=tk.LEFT, font=("TkDefaultFont", 9, "bold"))
+        self.next_step_label.pack(fill=tk.X, padx=6, pady=(6, 4))
+        
+        options_frame = ttk.LabelFrame(left, text="Options")
+        options_frame.pack(fill=tk.X, padx=2, pady=6)
+        grid = ttk.Frame(options_frame)
+        grid.pack(fill=tk.X, padx=4, pady=4)
+        ttk.Label(grid, text="Set duration (min):").grid(row=0, column=0, sticky="w", pady=2)
         self.set_duration_var = tk.IntVar(value=60)
-        ttk.Spinbox(options_frame, from_=15, to=240, textvariable=self.set_duration_var, width=10).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Label(options_frame, text="Energy Curve:").pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(grid, from_=15, to=240, textvariable=self.set_duration_var, width=8).grid(row=0, column=1, sticky="w")
+        ttk.Label(grid, text="Energy curve:").grid(row=1, column=0, sticky="w", pady=2)
         self.energy_curve_var = tk.StringVar(value="build")
-        energy_combo = ttk.Combobox(options_frame, textvariable=self.energy_curve_var, 
-                                   values=["build", "wave", "peak_middle", "constant"], width=15)
-        energy_combo.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Button(options_frame, text="Create Set List", command=self.create_set_list).pack(side=tk.LEFT, padx=5)
-        ttk.Button(options_frame, text="Plan Transitions", command=self.plan_transitions).pack(side=tk.LEFT, padx=5)
-        
-        # Mastering tools
-        master_frame = ttk.LabelFrame(frame, text="Mastering")
-        master_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Button(master_frame, text="Mastering Report", command=self.mastering_report).pack(side=tk.LEFT, padx=5)
-        ttk.Label(master_frame, text="Target loudness (LUFS):").pack(side=tk.LEFT, padx=5)
+        ttk.Combobox(grid, textvariable=self.energy_curve_var, values=["build", "wave", "peak_middle", "constant"],
+                     width=12, state="readonly").grid(row=1, column=1, sticky="w")
+        ttk.Label(grid, text="Target loudness (LUFS):").grid(row=2, column=0, sticky="w", pady=2)
         self.premaster_lufs_var = tk.DoubleVar(value=-14.0)
-        ttk.Spinbox(master_frame, from_=-24.0, to=-6.0, increment=0.5, textvariable=self.premaster_lufs_var, width=7).pack(side=tk.LEFT, padx=5)
+        ttk.Spinbox(grid, from_=-24.0, to=-6.0, increment=0.5, textvariable=self.premaster_lufs_var, width=8).grid(row=2, column=1, sticky="w")
         self.premaster_tone_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(master_frame, text="Match tone", variable=self.premaster_tone_var).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(grid, text="Match tone to the set", variable=self.premaster_tone_var).grid(row=3, column=0, columnspan=2, sticky="w")
         self.premaster_phase_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(master_frame, text="Fix phase", variable=self.premaster_phase_var).pack(side=tk.LEFT, padx=5)
-        ttk.Button(master_frame, text="Pre-master Set...", command=self.premaster_set).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(grid, text="Fix phase problems", variable=self.premaster_phase_var).grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Button(options_frame, text="Mastering Report", command=self.mastering_report).pack(anchor="w", padx=4, pady=(0, 4))
         
-        # Results
-        results_frame = ttk.Frame(frame)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        cache_frame = ttk.Frame(left)
+        cache_frame.pack(fill=tk.X, padx=2, pady=2)
+        self.cache_label = ttk.Label(cache_frame, text="", foreground="#52514e", wraplength=320, anchor="w", justify=tk.LEFT)
+        self.cache_label.pack(fill=tk.X)
         
-        # Playlist table
-        table_frame = ttk.Frame(results_frame)
-        table_frame.pack(fill=tk.BOTH, expand=True)
+        # ---- right: tracks table + charts
+        right = ttk.Frame(paned)
+        paned.add(right, weight=1)
+        self.set_notebook = ttk.Notebook(right)
+        self.set_notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Treeview for playlist
-        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy (1-10)")
+        table_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(table_frame, text="Tracks")
+        self.table_caption = ttk.Label(table_frame, text="", foreground="#52514e", anchor="w")
+        self.table_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
+        columns = ("#", "Filename", "BPM", "Key", "Duration", "Energy (1-10)", "Master", "Flags")
         self.playlist_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
-        
+        widths = {"#": 35, "Filename": 260, "BPM": 60, "Key": 80, "Duration": 65, "Energy (1-10)": 90, "Master": 60, "Flags": 260}
         for col in columns:
             self.playlist_tree.heading(col, text=col)
-            self.playlist_tree.column(col, width=100)
-        
+            self.playlist_tree.column(col, width=widths[col], anchor="w" if col in ("Filename", "Flags", "Key") else "center")
         scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.playlist_tree.yview)
         self.playlist_tree.configure(yscrollcommand=scrollbar.set)
-        
         self.playlist_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.playlist_tree.bind("<<TreeviewSelect>>", self.on_track_selected)
+        
+        self.overview_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.overview_frame, text="Overview")
+        self.track_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.track_frame, text="Track")
+        self.premaster_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.premaster_frame, text="Pre-master")
+        for f, msg in ((self.overview_frame, "Analyze the folder and create a set list to see the energy curve and the set map."),
+                       (self.track_frame, "Select a track in the Tracks tab to see its energy envelope, intro/outro and tone balance."),
+                       (self.premaster_frame, "Run 'Pre-master Set...' to see what was changed on every track.")):
+            ttk.Label(f, text=msg, foreground="#52514e", wraplength=600).pack(padx=20, pady=20, anchor="w")
+    
+    # ------------------------------------------------------------------ project / workflow helpers
+    def load_project(self, directory):
+        """Open (or create in memory) the set project of a folder and restore its state"""
+        if not directory or not os.path.isdir(directory):
+            return
+        self.playlist_dir_var.set(directory)
+        self.current_playlist_dir = directory
+        self.project = SetProject(directory)
+        opts = self.project.options
+        self.set_duration_var.set(int(opts.get("set_duration", 60)))
+        self.energy_curve_var.set(opts.get("energy_curve", "build"))
+        self.premaster_lufs_var.set(float(opts.get("target_lufs", -14.0)))
+        self.premaster_tone_var.set(bool(opts.get("tone_match", True)))
+        self.premaster_phase_var.set(bool(opts.get("fix_phase", True)))
+        
+        manager = PlaylistManager(directory)
+        manager.tracks = list(self.project.tracks)
+        self.playlist_manager = manager
+        self.current_set_list = self.project.set_list_tracks() or None
+        self.transition_planner = self._planner_from_project()
+        self.transition_source_dir = directory
+        
+        if self.current_set_list:
+            self._populate_playlist_tree(self.current_set_list, "Set list (proposed order)")
+        elif manager.tracks:
+            self._populate_playlist_tree(manager.tracks, "Analyzed tracks (folder order)")
+        else:
+            self._populate_playlist_tree([], "No analysis yet")
+        self._refresh_workflow()
+        self._render_overview()
+        self._render_premaster()
+        if SetProject.exists(directory):
+            self.update_status(f"Project loaded: {self.project.path}")
+        else:
+            self.update_status(f"New set project for {directory} (saved after the first step)")
+    
+    def _save_project(self):
+        if self.project is None:
+            return
+        self.project.options.update({
+            "set_duration": int(self.set_duration_var.get()),
+            "energy_curve": self.energy_curve_var.get(),
+            "target_lufs": float(self.premaster_lufs_var.get()),
+            "tone_match": bool(self.premaster_tone_var.get()),
+            "fix_phase": bool(self.premaster_phase_var.get()),
+        })
+        self.project.save()
+        self._refresh_workflow()
+    
+    def _planner_from_project(self):
+        """Rebuild a TransitionPlanner from the saved plan (no audio work)"""
+        data = self.project.data.get("transitions") if self.project else None
+        if not data or not data.get("tracks"):
+            return None
+        planner = TransitionPlanner(self.project.set_list_tracks() or self.project.tracks)
+        planner.profiles = list(data["tracks"])
+        planner.transitions = list(data.get("transitions") or [])
+        return planner
+    
+    def _refresh_workflow(self):
+        """Update the step panel from the project"""
+        if self.project is None:
+            return
+        for key, label, required in STEPS:
+            state = self.project.step_state(key)
+            w = self.step_widgets[key]
+            w["status"].config(text="✓" if state.get("done") else "○")
+            details = state.get("details") or {}
+            parts = []
+            if state.get("at"):
+                parts.append(state["at"].replace("T", " ")[:16])
+            for k in ("count", "cached", "analyzed", "duration", "curve", "out_dir", "file", "playlist", "db", "cues"):
+                if k in details:
+                    parts.append(f"{k} {details[k]}")
+            w["detail"].config(text=" · ".join(parts))
+        key, hint = self.project.next_step()
+        self.next_step_label.config(text=f"Next: {hint}")
+        try:
+            stats = get_store().stats()
+            self.cache_label.config(text=f"Analysis cache: {stats['files']} files, {stats['entries']} results ({stats['db_path']})")
+        except Exception:
+            pass
+    
+    def show_project_summary(self):
+        if self.project is None:
+            messagebox.showinfo("Project", "Choose a music folder first")
+            return
+        self._show_text_window("Set project", "\n".join(self.project.summary_lines()), "set_summary.txt")
+    
+    def _show_figure(self, container, fig):
+        """Embed a matplotlib figure in a frame (replacing its content)"""
+        for child in container.winfo_children():
+            child.destroy()
+        canvas = FigureCanvasTkAgg(fig, container)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._chart_canvases[str(container)] = canvas
+        return canvas
+    
+    def _render_overview(self):
+        """Overview tab: energy curve + BPM, and the set map when transitions exist"""
+        tracks = self.current_set_list or (self.playlist_manager.tracks if getattr(self, "playlist_manager", None) else [])
+        if not tracks:
+            return
+        for child in self.overview_frame.winfo_children():
+            child.destroy()
+        targets = None
+        if self.current_set_list:
+            values = [PlaylistManager._energy_value(t) for t in tracks]
+            targets = PlaylistManager._target_curve(values, self.energy_curve_var.get())
+        top = ttk.Frame(self.overview_frame)
+        top.pack(fill=tk.BOTH, expand=True)
+        self._show_figure(top, charts.set_overview(tracks, targets))
+        planner = getattr(self, "transition_planner", None)
+        if planner and planner.profiles:
+            bottom = ttk.Frame(self.overview_frame)
+            bottom.pack(fill=tk.BOTH, expand=True)
+            self._show_figure(bottom, charts.set_timeline(planner.profiles, planner.transitions))
+    
+    def _render_premaster(self):
+        pm = self.project.data.get("premaster") if self.project else None
+        if not pm or not pm.get("results"):
+            return
+        for child in self.premaster_frame.winfo_children():
+            child.destroy()
+        fig_frame = ttk.Frame(self.premaster_frame)
+        fig_frame.pack(fill=tk.BOTH, expand=True)
+        self._show_figure(fig_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
+        text = scrolledtext.ScrolledText(self.premaster_frame, height=8, font=("Consolas", 9))
+        text.pack(fill=tk.X)
+        text.insert(tk.END, pm.get("summary", ""))
+    
+    def on_track_selected(self, event=None):
+        """Track tab: envelope + intro/outro + tone balance for the selected row"""
+        selection = self.playlist_tree.selection()
+        if not selection:
+            return
+        values = self.playlist_tree.item(selection[0], "values")
+        if not values or len(values) < 2:
+            return
+        filename = values[1]
+        planner = getattr(self, "transition_planner", None)
+        profile = None
+        if planner:
+            for p in planner.profiles:
+                if p.get("filename") == filename:
+                    profile = p
+                    break
+        if profile is None:
+            source = self.current_set_list or (self.playlist_manager.tracks if getattr(self, "playlist_manager", None) else [])
+            for t in source:
+                if t.get("filename") == filename:
+                    profile = dict(t)
+                    break
+        if profile is None:
+            return
+        median = None
+        if planner:
+            reports = [p.get("mastering") for p in planner.profiles if p.get("mastering") and p["mastering"].get("lufs") is not None]
+            if reports:
+                median = playlist_tone_target(reports)
+        self._show_figure(self.track_frame, charts.track_detail(profile, median))
+        self.set_notebook.select(self.track_frame)
     
     def create_dj_tools_tab(self):
         """Create DJ tools tab"""
@@ -323,10 +532,9 @@ class DynaMixGUI:
             self.current_track2 = filename
     
     def browse_playlist_dir(self):
-        directory = filedialog.askdirectory(title="Select Music Directory")
+        directory = filedialog.askdirectory(title="Select music folder")
         if directory:
-            self.playlist_dir_var.set(directory)
-            self.current_playlist_dir = directory
+            self.load_project(directory)
     
     def browse_dj_tools_file(self):
         filename = filedialog.askopenfilename(
@@ -476,51 +684,85 @@ class DynaMixGUI:
         threading.Thread(target=analyze, daemon=True).start()
     
     def analyze_playlist(self):
-        """Analyze playlist"""
+        """Analyze the folder (cached per file) and record it in the project"""
         directory = self.playlist_dir_var.get()
         if not directory or not os.path.exists(directory):
             messagebox.showerror("Error", "Please select a valid directory")
             return
+        if self.project is None or os.path.normcase(os.path.abspath(self.project.folder)) != os.path.normcase(os.path.abspath(directory)):
+            self.load_project(directory)
         
         def analyze():
             try:
-                self.update_status("Analyzing playlist...")
                 manager = PlaylistManager(directory)
                 audio_files = manager.scan_directory()
-                
                 if not audio_files:
-                    messagebox.showwarning("Warning", "No audio files found in directory")
+                    self.root.after(0, messagebox.showwarning, "Warning", "No audio files found in directory")
                     return
                 
-                df = manager.analyze_playlist(audio_files)
+                def progress(i, n, name, status):
+                    self.root.after(0, self.update_status, f"Analyzing {i}/{n} ({status}): {name}")
                 
-                self._populate_playlist_tree(manager.tracks)
+                manager.analyze_playlist(audio_files, progress_callback=progress)
+                run = manager.last_run
                 
-                self.playlist_manager = manager
-                self.update_status(f"Playlist analyzed: {len(df)} tracks")
+                def done():
+                    before = {t["file_path"] for t in self.project.tracks}
+                    after = {t["file_path"] for t in manager.tracks}
+                    self.playlist_manager = manager
+                    self.project.set_tracks(manager.tracks)
+                    if before and before != after:
+                        self.project.invalidate_from("analyze")
+                        self.current_set_list = None
+                        self.transition_planner = None
+                    else:
+                        self.current_set_list = self.project.set_list_tracks() or None
+                    self.project.mark("analyze", count=len(manager.tracks), cached=run["cached"], analyzed=run["analyzed"])
+                    self._save_project()
+                    self._populate_playlist_tree(self.current_set_list or manager.tracks,
+                                                 "Set list (proposed order)" if self.current_set_list else "Analyzed tracks (folder order)")
+                    self._render_overview()
+                    self.update_status(f"Analyzed {len(manager.tracks)} tracks ({run['cached']} from cache, {run['analyzed']} new, {run['failed']} failed)")
+                
+                self.root.after(0, done)
             except Exception as e:
-                messagebox.showerror("Error", f"Playlist analysis failed: {str(e)}")
-                self.update_status("Error during analysis")
+                self.root.after(0, messagebox.showerror, "Error", f"Playlist analysis failed: {str(e)}")
+                self.root.after(0, self.update_status, "Error during analysis")
         
+        self.update_status("Analyzing playlist...")
         threading.Thread(target=analyze, daemon=True).start()
     
-    def _populate_playlist_tree(self, tracks):
+    def _populate_playlist_tree(self, tracks, caption=None):
         """Fill the playlist table with a list of track dictionaries"""
         for item in self.playlist_tree.get_children():
             self.playlist_tree.delete(item)
+        
+        planner = getattr(self, "transition_planner", None)
+        mastering_by_name = {}
+        if planner:
+            for p in planner.profiles:
+                if p.get("mastering"):
+                    mastering_by_name[p.get("filename")] = p["mastering"]
         
         for idx, track in enumerate(tracks):
             bpm = track.get('bpm', 0) or 0
             duration = track.get('duration', 0) or 0
             energy = track.get('energy_level', 0) or 0
+            m = mastering_by_name.get(track.get('filename', ''), {})
+            score = m.get('score')
+            flags = m.get('flags') or []
             self.playlist_tree.insert("", tk.END, values=(
                 idx + 1,
                 track.get('filename', ''),
                 f"{bpm:.1f}" if bpm else "-",
                 track.get('key') or "-",
                 f"{duration / 60:.1f}" if duration else "-",
-                f"{energy:.1f}" if energy else "-"
+                f"{energy:.1f}" if energy else "-",
+                f"{score:.0f}" if score is not None else "-",
+                ("; ".join(flags)[:80] + ("…" if len("; ".join(flags)) > 80 else "")) if flags else ("OK" if m else "-"),
             ))
+        if caption is not None:
+            self.table_caption.config(text=f"{caption} — {len(tracks)} tracks")
     
     def create_playlist_from_directory(self):
         """
@@ -569,19 +811,21 @@ class DynaMixGUI:
             messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
             return
         
-        self._populate_playlist_tree(tracks)
         self.current_set_list = list(tracks)
+        if self.project is not None:
+            self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
+            self._save_project()
         self.update_status(f"Playlist saved: {len(tracks)} tracks ({source}) -> {filename}")
         messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
     
     def _tracks_for_directory(self, directory):
         """Tracks to work on, in order: set list, analyzed tracks, or a plain directory scan."""
+        if self.project is None or os.path.normcase(os.path.abspath(self.project.folder)) != os.path.normcase(os.path.abspath(directory)):
+            self.load_project(directory)
         manager = getattr(self, 'playlist_manager', None)
-        same_dir = manager is not None and os.path.normcase(os.path.abspath(manager.playlist_directory)) == \
-            os.path.normcase(os.path.abspath(directory))
-        if same_dir and getattr(self, 'current_set_list', None):
+        if getattr(self, 'current_set_list', None):
             return list(self.current_set_list), "set list"
-        if same_dir and manager.tracks:
+        if manager is not None and manager.tracks:
             return list(manager.tracks), "analyzed tracks"
         return PlaylistManager(directory).quick_playlist(), "directory scan"
     
@@ -604,7 +848,17 @@ class DynaMixGUI:
                     0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
                 self.transition_planner = planner
                 self.transition_source_dir = directory
-                self.root.after(0, self._show_transition_window, source)
+                
+                def done():
+                    if self.project is not None:
+                        self.project.data["transitions"] = planner.to_dict()
+                        self.project.mark("transitions", count=len(planner.transitions))
+                        self._save_project()
+                    self._populate_playlist_tree(tracks, "Set list (proposed order)" if self.current_set_list else "Analyzed tracks (folder order)")
+                    self._render_overview()
+                    self._show_transition_window(source)
+                
+                self.root.after(0, done)
             except Exception as e:
                 self.root.after(0, messagebox.showerror, "Error", f"Transition planning failed: {str(e)}")
                 self.root.after(0, self.update_status, "Error during transition planning")
@@ -692,9 +946,28 @@ class DynaMixGUI:
                                           progress=lambda i, n, name: self.root.after(
                                               0, self.update_status, f"Pre-mastering {i}/{n}: {name}"))
                 summary = format_premaster_summary(results, out_dir)
-                self.root.after(0, self._show_text_window, "Pre-master Pass", summary, "premaster_report.txt")
-                done = sum(1 for r in results if 'error' not in r)
-                self.root.after(0, self.update_status, f"Pre-master done: {done}/{len(results)} tracks written to {out_dir}")
+                done_count = sum(1 for r in results if 'error' not in r)
+                
+                def done():
+                    if self.project is not None:
+                        slim = []
+                        for r in results:
+                            if 'error' in r:
+                                slim.append({'input': r['input'], 'error': r['error']})
+                                continue
+                            keep = ('lufs', 'true_peak_db', 'plr', 'score', 'clip_runs', 'flags')
+                            slim.append({'input': r['input'], 'output': r['output'], 'actions': r['actions'],
+                                         'before': {k: r['before'].get(k) for k in keep},
+                                         'after': {k: r['after'].get(k) for k in keep}})
+                        self.project.data["premaster"] = {"out_dir": out_dir, "target_lufs": target_lufs, "tone_match": tone,
+                                                          "fix_phase": phase, "results": slim, "summary": summary}
+                        self.project.mark("premaster", out_dir=out_dir, count=done_count)
+                        self._save_project()
+                    self._render_premaster()
+                    self.set_notebook.select(self.premaster_frame)
+                    self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir}")
+                
+                self.root.after(0, done)
             except Exception as e:
                 self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
         
@@ -780,6 +1053,10 @@ class DynaMixGUI:
             return
         
         summary = format_report(report)
+        if self.project is not None:
+            self.project.mark("mixxx", db=os.path.basename(os.path.dirname(db_path)) or db_path, playlist=playlist_name,
+                              cues=report['cues_written'])
+            self._save_project()
         if log_widget is not None:
             log_widget.insert(tk.END, "\n\nMIXXX EXPORT\n" + "-" * 60 + "\n" + summary + "\n")
             log_widget.see(tk.END)
@@ -787,24 +1064,28 @@ class DynaMixGUI:
         messagebox.showinfo("Export to Mixxx", summary)
     
     def create_set_list(self):
-        """Create set list from analyzed playlist"""
-        if not hasattr(self, 'playlist_manager'):
-            messagebox.showwarning("Warning", "Please analyze playlist first")
+        """Create the set list proposal from the analyzed tracks and record it in the project"""
+        manager = getattr(self, 'playlist_manager', None)
+        if manager is None or not manager.tracks:
+            messagebox.showwarning("Warning", "Please analyze the folder first (step 1)")
             return
         
         try:
-            duration = self.set_duration_var.get()
+            duration = int(self.set_duration_var.get())
             energy_curve = self.energy_curve_var.get()
-            
-            set_list = self.playlist_manager.create_set_list(
-                duration_minutes=duration,
-                energy_curve=energy_curve
-            )
-            
-            self._populate_playlist_tree(set_list)
-            
+            set_list = manager.create_set_list(duration_minutes=duration, energy_curve=energy_curve)
             self.current_set_list = set_list
-            self.update_status(f"Set list created: {len(set_list)} tracks")
+            self.transition_planner = None
+            if self.project is not None:
+                self.project.set_set_list(set_list)
+                self.project.invalidate_from("setlist")
+                self.project.mark("setlist", count=len(set_list), duration=duration, curve=energy_curve)
+                self._save_project()
+            self._populate_playlist_tree(set_list, "Set list (proposed order)")
+            self._render_overview()
+            self.set_notebook.select(self.overview_frame)
+            total = sum(float(t.get('duration') or 0) for t in set_list) / 60
+            self.update_status(f"Set list created: {len(set_list)} tracks, {total:.0f} min, curve '{energy_curve}'")
         except Exception as e:
             messagebox.showerror("Error", f"Set list creation failed: {str(e)}")
     

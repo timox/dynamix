@@ -112,6 +112,29 @@ python dj_tools.py --batch "C:\Musique\Set" --output-dir "C:\Musique\Notes"
 
 Mettez les chemins entre guillemets s'ils contiennent des espaces.
 
+## 5 bis. L'onglet Set Builder : le fil conducteur
+
+Tout le travail sur un set se fait dans l'onglet **Set Builder**. Le panneau
+*Workflow* liste les six étapes avec leur état, leur date et un rappel
+« Next : » de ce qu'il reste à faire :
+
+1. **Analyze** : BPM, tonalité, énergie. Chaque fichier n'est analysé qu'une
+   fois, le résultat est conservé dans `%LOCALAPPDATA%\DynaMix\analysis.sqlite`.
+   Rouvrir un dossier déjà analysé est instantané.
+2. **Create Set List** : durée et courbe d'énergie.
+3. **Plan Transitions** : repères d'intro et d'outro, feuille de transitions.
+4. **Pre-master Set** (optionnel) : copies corrigées dans un autre dossier.
+5. **Create Playlist** (optionnel) : fichier M3U.
+6. **Export to Mixxx** : repères et playlist dans la base Mixxx.
+
+L'état du set est enregistré dans `.dynamix-set.json` au sein du dossier de
+musique. En rouvrant le dossier, vous retrouvez l'ordre proposé, les
+transitions, les résultats de pré-mastering et l'étape en cours. Les onglets
+de droite montrent les graphiques : courbe d'énergie du set face à la cible,
+carte du set avec les zones d'intro et d'outro, détail d'un morceau
+(enveloppe d'énergie, équilibre spectral face au set) et, pour le
+pré-mastering, le volume et la crête vraie avant et après pour chaque morceau.
+
 ## 6. Musiques mal masterisées : contrôle et pré-mastering
 
 Si vos fichiers ont des niveaux très différents, du clipping, un grave en
@@ -134,8 +157,10 @@ l'onglet **Playlist Manager**, cadre *Mastering* :
 Le filtrage en peigne, lui, n'est que signalé : il ne se répare pas sans les
 pistes d'origine.
 
-Ensuite, ajoutez le dossier corrigé dans la bibliothèque Mixxx et lancez
-**Plan Transitions** sur ce dossier. En ligne de commande :
+L'onglet **Pre-master** montre ensuite, morceau par morceau, le volume et la
+crête vraie avant et après, et la liste des actions appliquées (gain, timbre,
+polarité, grave en mono). Ajoutez le dossier corrigé dans la bibliothèque Mixxx
+et lancez **Plan Transitions** sur ce dossier. En ligne de commande :
 
 ```bat
 python mastering.py check "C:\Musique\Set"

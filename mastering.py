@@ -682,6 +682,7 @@ def main():
     fix.add_argument("--format", default="same", choices=["same", "wav", "flac", "mp3", "ogg"],
                      help="Output format (default: same as the source)")
     fix.add_argument("--no-phase-fix", action="store_true", help="Do not flip inverted polarity / mono the bass")
+    fix.add_argument("--save-chart", metavar="PNG", help="Write the loudness / true-peak before-after chart")
     args = parser.parse_args()
 
     if args.command == "check":
@@ -706,8 +707,29 @@ def main():
         results = premaster_files(files, args.out, args.lufs, args.tp, args.tone, args.format,
                                   progress=lambda i, n, name: print(f"Pre-mastering {i}/{n}: {name}"),
                                   repair_phase=not args.no_phase_fix)
+        summary = format_premaster_summary(results, args.out)
         print()
-        print(format_premaster_summary(results, args.out))
+        print(summary)
+        if os.path.isdir(args.target):
+            from set_project import SetProject
+            if SetProject.exists(args.target):
+                project = SetProject(args.target)
+                keep = ('lufs', 'true_peak_db', 'plr', 'score', 'clip_runs', 'flags')
+                slim = [({'input': r['input'], 'error': r['error']} if 'error' in r else
+                         {'input': r['input'], 'output': r['output'], 'actions': r['actions'],
+                          'before': {k: r['before'].get(k) for k in keep}, 'after': {k: r['after'].get(k) for k in keep}})
+                        for r in results]
+                project.data["premaster"] = {"out_dir": os.path.abspath(args.out), "target_lufs": args.lufs, "tone_match": args.tone,
+                                             "fix_phase": not args.no_phase_fix, "results": slim, "summary": summary}
+                project.mark("premaster", out_dir=os.path.abspath(args.out), count=sum(1 for r in results if 'error' not in r))
+                project.save()
+                print(f"Set project updated: {project.path}")
+        if args.save_chart:
+            import matplotlib
+            matplotlib.use("Agg")
+            import charts
+            charts.save(charts.premaster_before_after(results, args.lufs, args.tp), args.save_chart)
+            print(f"Before/after chart written to {args.save_chart}")
 
 
 if __name__ == "__main__":
