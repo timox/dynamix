@@ -86,6 +86,22 @@ class TestSelectionAndProposals(unittest.TestCase):
         with self.assertRaises(IndexError):
             q.use_proposal(5)
 
+    def test_set_tracks_with_attempted_files(self):
+        self.p.add_to_selection([self.a, self.b])
+        attempted = [self.a, self.b]
+        self.p.add_to_selection([self.c])  # added while the analysis ran
+        self.p.set_tracks([{"file_path": self.a, "filename": "a.wav"}], attempted=attempted)
+        self.assertEqual(self.p.data["failed"], [self.b])
+        states = {os.path.basename(r["file_path"]): r["state"] for r in self.p.selection_rows()}
+        self.assertEqual(states, {"a.wav": "analysed", "b.wav": "failed", "c.wav": "pending"})
+
+    def test_set_tracks_attempted_path_removed_meanwhile_is_not_failed(self):
+        self.p.add_to_selection([self.a, self.b])
+        attempted = [self.a, self.b]
+        self.p.remove_from_selection([self.b])
+        self.p.set_tracks([], attempted=attempted)
+        self.assertEqual(self.p.data["failed"], [self.a])
+
     def test_forget_analysis(self):
         self.p.add_to_selection([self.a])
         self._analysed(self.a)

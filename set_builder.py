@@ -50,6 +50,7 @@ class SetBuilderMixin:
         self._selection_rows = []
         self._library_entries = []
         self._library_scanning = False
+        self._library_rescan_pending = False
         self._previewing = False
         
         # ---- header: project selection
@@ -565,6 +566,7 @@ class SetBuilderMixin:
             self._refresh_library_table()
             return
         if self._library_scanning:
+            self._library_rescan_pending = True  # scan again when the running scan ends
             return
         self._library_scanning = True
         self._refresh_library_table()
@@ -585,6 +587,9 @@ class SetBuilderMixin:
                 self._library_entries = entries
                 self._refresh_library_table()
                 self.update_status(f"Library: {len(entries)} tracks in {folder}")
+                if self._library_rescan_pending:
+                    self._library_rescan_pending = False
+                    self.rescan_library()
             self.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
 
@@ -650,7 +655,9 @@ class SetBuilderMixin:
         return out
 
     def _after_manual_edit(self):
-        self.project.mark("setlist", count=len(self.project.set_list), manual=True)
+        curve = (self.project.step_state("setlist").get("details") or {}).get("curve")
+        extra = {"curve": curve} if curve else {}
+        self.project.mark("setlist", count=len(self.project.set_list), manual=True, **extra)
         self.current_set_list = self.project.set_list_tracks() or None
         self.transition_planner = None
         self._save_project()
@@ -739,27 +746,40 @@ class SetBuilderMixin:
                 run = manager.last_run
                 
                 def done():
+                    # the selection may have changed while the worker ran: keep selected records only
+                    selected = set(project.selection)
+                    records = [t for t in manager.tracks if t["file_path"] in selected]
                     before = {t["file_path"] for t in project.tracks}
-                    after = {t["file_path"] for t in manager.tracks}
-                    self.playlist_manager = manager
-                    project.set_tracks(manager.tracks)
+                    after = {t["file_path"] for t in records}
+                    project.set_tracks(records, attempted=files)
                     if before and before != after:
                         project.invalidate_from("analyze")
+                    added = sum(1 for r in project.selection_rows() if r["state"] == "pending")
+                    if added:
+                        project.mark("analyze", done=False)
+                        log.info("%d tracks were added during the analysis: click 'Analyze selection' again", added)
+                    else:
+                        project.mark("analyze", count=len(records), cached=run["cached"], analyzed=run["analyzed"])
+                    if self.project is not project:
+                        project.save()
+                        log.info("Analysis of project '%s' saved (another project was opened meanwhile)", project.name)
+                        return
+                    manager.tracks = records
+                    self.playlist_manager = manager
                     self.current_set_list = project.set_list_tracks() or None
                     if not self.current_set_list:
                         self.transition_planner = None
-                    project.mark("analyze", count=len(manager.tracks), cached=run["cached"], analyzed=run["analyzed"])
                     self._save_project()
-                    self._merge_into_library(manager.tracks)
+                    self._merge_into_library(records)
                     self._refresh_tables()
                     self._refresh_library_table()
                     self._render_overview()
-                    message = (f"Analysis: {len(manager.tracks)} tracks ({run['cached']} from cache, "
+                    message = (f"Analysis: {len(records)} tracks ({run['cached']} from cache, "
                                f"{run['analyzed']} new, {run['failed']} failed)")
                     log.info(message)
                     failed = [os.path.basename(p) for p in project.data.get("failed") or []]
                     if failed:
-                        log.warning("Analysis failed for %d tracks: %s (see the errors above)", len(failed), ", ".join(failed))
+                        log.warning("Analysis failed for %d tracks: %s", len(failed), ", ".join(failed))
                     self.update_status(message)
                 self.root.after(0, done)
             except Exception as e:
@@ -908,9 +928,13 @@ class SetBuilderMixin:
                     0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
                 
                 def done():
-                    self.transition_planner = planner
                     project.data["transitions"] = planner.to_dict()
                     project.mark("transitions", count=len(planner.transitions))
+                    if self.project is not project:
+                        project.save()
+                        log.info("Transitions of project '%s' saved (another project was opened meanwhile)", project.name)
+                        return
+                    self.transition_planner = planner
                     self._save_project()
                     self._refresh_tables()
                     self._render_overview()
@@ -1010,6 +1034,10 @@ class SetBuilderMixin:
                     project.data["premaster"] = {"out_dir": out_dir, "target_lufs": target_lufs, "tone_match": tone,
                                                  "fix_phase": phase, "mono_bass_hz": mono_hz, "results": slim, "summary": summary}
                     project.mark("premaster", count=done_count)
+                    if self.project is not project:
+                        project.save()
+                        log.info("Pre-master of project '%s' saved (another project was opened meanwhile)", project.name)
+                        return
                     self._save_project()
                     self._render_premaster()
                     self.set_notebook.select(self.premaster_frame)
@@ -1380,6 +1408,6 @@ class ConfigTabMixin:
         message = f"Analysis cache cleared: {removed} results removed"
         log.info(message)
         self.refresh_environment()
-        if hasattr(self, "_after_cache_cleared"):
-            self._after_cache_cleared()
+        if hasattr(self, "rescan_library"):
+            self.rescan_library()  # the projects keep their analysed tracks (spec): only the library's badges change
         self.update_status(message)

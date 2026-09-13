@@ -126,6 +126,23 @@ def scenario():
         check(get_store().get(first, "features") is None, "the cache entry is gone")
         check(pump(lambda: not app._library_scanning, 10.0), "the library is rescanned after clearing the cache")
 
+        fake = [{"file_path": p, "filename": os.path.basename(p), "duration": 300.0, "bpm": 120.0, "key": "A minor",
+                 "energy_level": 4.0, "has_beat": True} for p in app.project.selection]
+        app.project.set_tracks(fake)
+        app.project.mark("analyze", count=len(fake))
+        tracks_before = [dict(t) for t in app.project.tracks]
+        app.clear_whole_cache()
+        check(app.project.tracks == tracks_before and app.project.is_done("analyze"),
+              "clearing the whole cache keeps the open project's analysed tracks and workflow")
+        check(pump(lambda: not app._library_scanning and not app._library_rescan_pending, 10.0),
+              "the library is rescanned after clearing the whole cache")
+
+        app.rescan_library()
+        app.rescan_library()
+        check(app._library_rescan_pending, "a rescan asked during a scan is queued")
+        check(pump(lambda: not app._library_scanning and not app._library_rescan_pending and len(app._library_rows) == 2, 10.0),
+              "the queued rescan runs and the library lists the 2 tracks again")
+
         # --- checks added by later tasks go above this line ---
 
 

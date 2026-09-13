@@ -270,11 +270,18 @@ class SetProject:
     def tracks(self) -> List[Dict]:
         return self.data["tracks"]
 
-    def set_tracks(self, tracks: List[Dict]) -> None:
+    def set_tracks(self, tracks: List[Dict], attempted: Optional[List[str]] = None) -> None:
+        """Store the analysed records; `attempted` = the files the analysis ran on (default: the selection on disk).
+
+        Only attempted files still in the selection and without a record are failed; files
+        added to the selection after the attempt stay pending.
+        """
         self.data["tracks"] = [dict(t) for t in tracks]
         known = {t["file_path"] for t in self.data["tracks"]}
         self.data["set_list"] = [p for p in self.data["set_list"] if p in known]
-        self.data["failed"] = [p for p in self.selection_files() if p not in known]
+        candidates = attempted if attempted is not None else self.selection_files()
+        selected = set(self.data["selection"])
+        self.data["failed"] = [p for p in candidates if p not in known and p in selected]
 
     # ------------------------------------------------------------- selection (picked in the library)
     @property
