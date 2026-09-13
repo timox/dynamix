@@ -78,6 +78,8 @@ try:
     check("smoke warning" in app.log_text.get("1.0", tk.END), "the Log tab shows the records")
     app.notebook.select(0)
 
+    check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
+
     # --- checks added by later tasks go above this line ---
 finally:
     errors = buffer.records(logging.ERROR)
