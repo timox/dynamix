@@ -38,6 +38,14 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(all(len(r) == 3 for r in rows))
         self.assertIn("[OK  ] Python", format_environment_report())
 
+    def test_library_folder(self):
+        from config import Config
+        c = Config()
+        self.assertEqual(c.get("library_folder"), "")
+        c.set("library_folder", os.path.join(self.tmp, "Mixes"))
+        c.save()
+        self.assertEqual(Config().get("library_folder"), os.path.join(self.tmp, "Mixes"))
+
 
 if __name__ == "__main__":
     unittest.main()

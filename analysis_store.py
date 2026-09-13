@@ -16,7 +16,7 @@ import json
 import os
 import sqlite3
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -139,6 +139,14 @@ class AnalysisStore:
             else:
                 cur = conn.execute("DELETE FROM analyses WHERE path = ?", (os.path.abspath(path),))
             return cur.rowcount
+
+    def clear_paths(self, paths: List[str]) -> int:
+        """Forget every result (all kinds) about these files. Returns rows removed."""
+        removed = 0
+        with self._connect() as conn:
+            for path in paths:
+                removed += conn.execute("DELETE FROM analyses WHERE path = ?", (os.path.abspath(path),)).rowcount
+        return removed
 
 
 _STORE: Optional[AnalysisStore] = None

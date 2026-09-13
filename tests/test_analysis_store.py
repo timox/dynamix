@@ -51,6 +51,18 @@ class TestAnalysisStore(unittest.TestCase):
         self.assertEqual(self.store.clear(self.file), 2)
         self.assertEqual(self.store.stats()["entries"], 0)
 
+    def test_clear_paths(self):
+        other = os.path.join(self.tmp, "other.wav")
+        with open(other, "wb") as f:
+            f.write(b"\x00" * 10)
+        self.store.put(self.file, "features", {"a": 1})
+        self.store.put(self.file, "bands", {"b": 2})
+        self.store.put(other, "features", {"c": 3})
+        self.assertEqual(self.store.clear_paths([self.file, os.path.join(self.tmp, "never.wav")]), 2)
+        self.assertIsNone(self.store.get(self.file, "features"))
+        self.assertEqual(self.store.get(other, "features"), {"c": 3})
+        self.assertEqual(self.store.clear_paths([]), 0)
+
     def test_unreachable_database_degrades_gracefully(self):
         store = AnalysisStore(self.db)
         store.db_path = os.path.join(self.tmp, "missing_dir", "x.sqlite")  # cannot be opened
