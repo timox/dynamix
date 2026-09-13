@@ -80,6 +80,22 @@ try:
 
     check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
 
+    check(pump(lambda: not app._library_scanning and len(app._library_rows) == 2, 10.0),
+          "the library lists the 2 tracks of the library folder")
+    app.library_filter_var.set("two")
+    check(len(app._library_rows) == 1, "the filter narrows the library")
+    app.library_filter_var.set("")
+    app.library_tree.selection_set(app.library_tree.get_children())
+    app.selection_add()
+    check(len(app.project.selection) == 2, "both tracks are selected")
+    check([r["state"] for r in app._selection_rows] == ["pending", "pending"], "new selection rows are pending")
+    app.selection_tree.selection_set("C1")
+    app.selection_remove()
+    check(len(app.project.selection) == 1, "remove drops a track from the selection")
+    app.library_tree.selection_set(app.library_tree.get_children())
+    app.selection_add()
+    check(len(app.project.selection) == 2, "adding again keeps one entry per track")
+
     # --- checks added by later tasks go above this line ---
 finally:
     errors = buffer.records(logging.ERROR)
