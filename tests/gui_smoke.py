@@ -148,6 +148,74 @@ def scenario():
             check(app.set_notebook.select() == str(frame._notebook_tab), "scrollable tabs can be selected")
         app.set_notebook.select(0)
 
+        sr = 22050
+        fx_tracks = []
+        for k, freq in enumerate((220, 330)):
+            path = os.path.join(HOME, f"fx_t{k}.wav")
+            t = np.arange(12 * sr) / sr
+            sf.write(path, (0.3 * np.sin(2 * np.pi * freq * t)).astype("float32"), sr)
+            get_store().put(path, "beats", {"beats": [i * 0.5 for i in range(25)], "bpm": 120.0, "has_beat": True,
+                                            "duration": 12.0})
+            fx_tracks.append(path)
+        fx_samples = os.path.join(HOME, "fx_samples")
+        os.makedirs(fx_samples)
+        sf.write(os.path.join(fx_samples, "riser.wav"), np.full(sr, 0.2, dtype="float32"), sr)
+        app.config.set("fx_samples_folder", fx_samples)
+        project = app.project
+        project.set_tracks([{"file_path": p, "filename": os.path.basename(p), "duration": 12.0, "bpm": 120.0} for p in fx_tracks])
+        project.set_order(fx_tracks)
+        profiles = [{"file_path": p, "filename": os.path.basename(p), "duration": 12.0, "bpm": 120.0, "key": "A minor",
+                     "intro_start": 1.0, "intro_end": 3.0, "outro_start": 8.0, "outro_end": 10.0} for p in fx_tracks]
+        project.data["transitions"] = {"tracks": profiles, "transitions": [{"score": 55}]}
+        project.mark("transitions", count=1)
+        project.save()
+        app.load_project(project.folder)
+        original = open(fx_tracks[0], "rb").read()
+
+        class FakePlayer:
+            def __init__(self):
+                self.loops, self.once, self.stops = [], [], 0
+
+            def play_loop(self, path):
+                self.loops.append(path)
+                return True
+
+            def play_once(self, path):
+                self.once.append(path)
+
+            def stop(self):
+                self.stops += 1
+
+        player = FakePlayer()
+        win = app.open_fx_window(player=player)
+        check(win is not None, "the Transition FX window opens once transitions are planned")
+        check(pump(lambda: len(win.samples) == 1, 5.0), "the FX samples folder is scanned")
+        win.trans_tree.selection_set("T0")
+        check(pump(lambda: win.pair_index == 0, 2.0), "a transition can be selected")
+        win.add_effect("freeze")
+        win.add_effect("sample")
+        check(pump(lambda: hasattr(win, "sample_list") and win.sample_list.size() == 1, 5.0), "the sample list is shown")
+        win.sample_list.selection_set(0)
+        win.pick_sample()
+        check(win.effects()[1]["file"].endswith("riser.wav"), "a sample can be picked")
+        win.fx_tree.selection_set("F0")
+        check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
+        win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)
+        win.start_preview()
+        check(pump(lambda: player.loops and os.path.exists(player.loops[-1]), 20.0), "the preview is rendered and looped")
+        win.nudge_var.set("10")
+        check(app.project.fx_for_pair(*fx_tracks)["nudge_ms"] == 10.0, "the nudge is stored")
+        check(pump(lambda: len(player.loops) >= 2, 20.0), "a change re-renders the looped preview")
+        win.apply_all()
+        check(pump(lambda: app.project.data["fx"]["render"] is not None, 30.0), "Apply all FX renders the copies")
+        check(app.project.is_done("fx"), "the FX step is marked done")
+        _, counts = app.project.rendered_profiles(app.transition_planner.profiles)
+        check(counts["fx"] == 2, f"the export uses the two FX copies, got {counts}")
+        check(app._fx_labels() == {0: "freeze · sample"}, "the set map labels the transition FX")
+        check(open(fx_tracks[0], "rb").read() == original, "the original file is untouched")
+        win.close()
+        check(player.stops >= 1, "closing the window stops the preview")
+
         # --- checks added by later tasks go above this line ---
 
 

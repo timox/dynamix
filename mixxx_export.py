@@ -362,10 +362,9 @@ def main():
 
     profiles = list(planner.profiles)
     if project is not None and not args.originals:
-        mapping = project.premaster_map()
-        if mapping:
-            profiles = [dict(p, file_path=mapping.get(p["file_path"], p["file_path"])) for p in profiles]
-            print(f"Using the pre-mastered copies for {sum(1 for p in planner.profiles if p['file_path'] in mapping)} tracks "
+        profiles, counts = project.rendered_profiles(profiles)
+        if counts["fx"] or counts["premaster"]:
+            print(f"Using {counts['fx']} FX copies and {counts['premaster']} pre-mastered copies "
                   f"(--originals to export the original files).")
     exporter = MixxxExporter(db_path, backup=not args.no_backup)
     report = exporter.export(profiles, playlist_name=args.playlist_name or f"DynaMix - {default_name}",

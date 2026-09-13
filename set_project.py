@@ -31,6 +31,7 @@ STEPS: List[Tuple[str, str, bool]] = [
     ("setlist", "Create the set list", True),
     ("transitions", "Plan the transitions", True),
     ("premaster", "Pre-master the set (optional)", False),
+    ("fx", "Add transition FX (optional)", False),
     ("playlist", "Write the playlist file (M3U)", False),
     ("mixxx", "Export intro/outro cues to Mixxx", True),
 ]
@@ -40,6 +41,7 @@ HINTS: Dict[str, str] = {
     "setlist": "Click 'Propose', compare the variants, then 'Use this proposal' and adjust the order.",
     "transitions": "Click 'Plan Transitions' to compute intro/outro sections and the transition sheet.",
     "premaster": "Optional: 'Pre-master Set' writes level-matched, phase-repaired copies into the project's premaster folder; later steps then use those copies.",
+    "fx": "Optional: 'Transition FX' adds freezes, filter sweeps, echoes and samples on chosen transitions, rendered into the project's fx folder.",
     "playlist": "Optional: 'Create Playlist' writes the set order as an M3U file into the project's exports folder.",
     "mixxx": "Close Mixxx, then 'Export to Mixxx'. Then load the playlist in Auto DJ.",
     "done": "All steps done. In Mixxx: add the playlist to Auto DJ, mode 'Full Intro + Outro'.",

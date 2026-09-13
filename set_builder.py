@@ -27,6 +27,7 @@ from band_analysis import analyze_bands_cached, format_band_summary, mix_recomme
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
 from set_project import SetProject, STEPS, list_projects
+from fx_window import TransitionFxWindow
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
@@ -83,6 +84,7 @@ class SetBuilderMixin:
             "setlist": ("Propose", self.create_set_list),
             "transitions": ("Plan Transitions", self.plan_transitions),
             "premaster": ("Pre-master Set", self.premaster_set),
+            "fx": ("Transition FX", self.open_fx_window),
             "playlist": ("Create Playlist", self.create_playlist_from_directory),
             "mixxx": ("Export to Mixxx", self.export_to_mixxx),
         }
@@ -313,7 +315,7 @@ class SetBuilderMixin:
         text = (f"Reset '{project.name}' to an empty set?\n\n"
                 f"Deleted: the selection ({len(project.selection)} tracks), the analysed track list, the proposals, "
                 f"the set list, the transitions and pre-master results, and {outputs['files']} files "
-                f"({outputs['bytes'] / 1e6:.1f} MB) in premaster/ and exports/.\n\n"
+                f"({outputs['bytes'] / 1e6:.1f} MB) in premaster/, fx/ and exports/.\n\n"
                 "Kept: the project name, its options and notes, the analysis cache and your library.")
         ttk.Label(win, text=text, justify=tk.LEFT, wraplength=520).pack(padx=16, pady=(16, 8), anchor="w")
         delete_imported = tk.BooleanVar(value=False)
@@ -1032,6 +1034,7 @@ class SetBuilderMixin:
                              {"input": r["input"], "output": r["output"], "actions": r["actions"],
                               "before": {k: r["before"].get(k) for k in keep}, "after": {k: r["after"].get(k) for k in keep}})
                             for r in results]
+                    project.invalidate_from("premaster")  # FX renders were made from the previous copies
                     project.data["premaster"] = {"out_dir": out_dir, "target_lufs": target_lufs, "tone_match": tone,
                                                  "fix_phase": phase, "mono_bass_hz": mono_hz, "results": slim, "summary": summary}
                     project.mark("premaster", count=done_count)
@@ -1051,18 +1054,38 @@ class SetBuilderMixin:
         self.set_notebook.select(self.premaster_frame._notebook_tab)
         threading.Thread(target=work, daemon=True).start()
     
-    def _with_premastered(self, tracks):
-        mapping = self.project.premaster_map() if self.project else {}
-        if not mapping:
-            return list(tracks), 0
-        swapped, count = [], 0
-        for t in tracks:
-            out = mapping.get(t.get("file_path"))
-            if out:
-                t = dict(t, file_path=out, filename=os.path.basename(out))
-                count += 1
-            swapped.append(t)
-        return swapped, count
+    def _with_rendered(self, tracks):
+        """Tracks pointing at the file to play: FX copy (with its cue positions), else pre-master, else original."""
+        if self.project is None:
+            return list(tracks), {"fx": 0, "premaster": 0}
+        return self.project.rendered_profiles(list(tracks))
+
+    @staticmethod
+    def _copies_note(counts):
+        parts = [f"{counts[k]} {label}" for k, label in (("fx", "FX copies"), ("premaster", "pre-mastered copies")) if counts[k]]
+        return ", ".join(parts)
+
+    def _fx_labels(self):
+        """Transition index -> its enabled FX types (for the set map)."""
+        if self.project is None:
+            return {}
+        labels = {}
+        lst = self.project.set_list
+        for i, (a, b) in enumerate(zip(lst, lst[1:])):
+            entry = self.project.fx_for_pair(a, b) or {}
+            types = [fx["type"] for fx in entry.get("effects") or [] if fx.get("enabled", True)]
+            if types:
+                labels[i] = " · ".join(types)
+        return labels
+
+    def open_fx_window(self, player=None):
+        if not self._require_project():
+            return None
+        data = self.project.data.get("transitions")
+        if not data or len(data.get("tracks") or []) < 2:
+            messagebox.showwarning("Warning", "Plan the transitions first (step 3)")
+            return None
+        return TransitionFxWindow(self, player=player)
     
     def create_playlist_from_directory(self):
         """Write the set list (or the library order) as an M3U into exports/."""
@@ -1073,7 +1096,7 @@ class SetBuilderMixin:
         if not tracks:
             messagebox.showwarning("Warning", "Nothing to write: analyze the tracks and build a set list first")
             return
-        tracks, premastered = self._with_premastered(tracks)
+        tracks, counts = self._with_rendered(tracks)
         filename = filedialog.asksaveasfilename(
             title="Save Playlist", initialdir=self.project.exports_dir, initialfile=f"{self.project.name}.m3u",
             defaultextension=".m3u", filetypes=[("M3U playlist", "*.m3u"), ("M3U8 playlist (UTF-8)", "*.m3u8"), ("All files", "*.*")])
@@ -1086,7 +1109,7 @@ class SetBuilderMixin:
             return
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
-        note = f" ({premastered} pre-mastered copies)" if premastered else ""
+        note = f" ({self._copies_note(counts)})" if counts["fx"] or counts["premaster"] else ""
         self.update_status(f"Playlist saved: {len(tracks)} tracks{note} -> {filename}")
         messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
     
@@ -1112,15 +1135,15 @@ class SetBuilderMixin:
         if not messagebox.askyesno("Export to Mixxx", f"Database: {db_path}\n\nMixxx must be closed while exporting.\n"
                                    "A backup of the database is created first.\n\nContinue?"):
             return
-        profiles, premastered = self._with_premastered(planner.profiles)
+        profiles, counts = self._with_rendered(planner.profiles)
         try:
             report = MixxxExporter(db_path).export(profiles, playlist_name=playlist_name.strip() or None)
         except Exception as e:
             self._report_error(f"Mixxx export failed: {e}", e)
             return
         summary = format_report(report)
-        if premastered:
-            summary = f"Using the pre-mastered copies for {premastered} tracks.\n" + summary
+        if counts["fx"] or counts["premaster"]:
+            summary = f"Using {self._copies_note(counts)}.\n" + summary
         self.project.mark("mixxx", playlist=playlist_name, cues=report["cues_written"], db=os.path.basename(os.path.dirname(db_path)))
         self._save_project()
         if log_widget is not None:
@@ -1162,6 +1185,7 @@ class SetBuilderMixin:
         ttk.Label(toolbar, text=f"{len(planner.profiles)} tracks, {len(planner.transitions)} transitions ({source})").pack(side=tk.LEFT, padx=5)
         text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
         ttk.Button(toolbar, text="Export to Mixxx...", command=lambda: self.export_to_mixxx(text)).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(toolbar, text="Transition FX...", command=self.open_fx_window).pack(side=tk.RIGHT, padx=5)
         ttk.Button(toolbar, text="Save JSON...", command=self.save_transition_json).pack(side=tk.RIGHT, padx=5)
         ttk.Button(toolbar, text="Save Sheet...", command=lambda: self.save_transition_sheet(title)).pack(side=tk.RIGHT, padx=5)
         text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -1220,7 +1244,8 @@ class SetBuilderMixin:
         self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:
-            self._show_figure(self.overview_frame, charts.set_timeline(planner.profiles, planner.transitions), replace=False)
+            self._show_figure(self.overview_frame, charts.set_timeline(planner.profiles, planner.transitions,
+                                                                       fx_labels=self._fx_labels()), replace=False)
     
     def _render_premaster(self):
         pm = self.project.data.get("premaster") if self.project else None

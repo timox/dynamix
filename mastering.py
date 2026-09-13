@@ -846,6 +846,7 @@ def main():
                          {'input': r['input'], 'output': r['output'], 'actions': r['actions'],
                           'before': {k: r['before'].get(k) for k in keep}, 'after': {k: r['after'].get(k) for k in keep}})
                         for r in results]
+                project.invalidate_from("premaster")  # FX renders were made from the previous copies
                 project.data["premaster"] = {"out_dir": os.path.abspath(args.out), "target_lufs": args.lufs, "tone_match": args.tone,
                                              "fix_phase": not args.no_phase_fix, "results": slim, "summary": summary}
                 project.mark("premaster", out_dir=os.path.abspath(args.out), count=sum(1 for r in results if 'error' not in r))
