@@ -256,6 +256,7 @@ class SetBuilderMixin:
             canvas.bind(seq, on_wheel)
             inner.bind(seq, on_wheel)
         inner._scroll_canvas = canvas
+        inner._notebook_tab = outer  # what set_notebook.select() needs: the inner frame is not a tab
         return inner
     
     def _make_tree(self, parent, columns, widths, selectmode="browse", height=14):
@@ -1040,14 +1041,14 @@ class SetBuilderMixin:
                         return
                     self._save_project()
                     self._render_premaster()
-                    self.set_notebook.select(self.premaster_frame)
+                    self.set_notebook.select(self.premaster_frame._notebook_tab)
                     self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir}")
                 self.root.after(0, done)
             except Exception as e:
                 self._report_error(f"Pre-master failed: {e}", e)
         
         self.update_status(f"Pre-mastering {len(files)} tracks into {out_dir} ...")
-        self.set_notebook.select(self.premaster_frame)
+        self.set_notebook.select(self.premaster_frame._notebook_tab)
         threading.Thread(target=work, daemon=True).start()
     
     def _with_premastered(self, tracks):

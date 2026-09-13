@@ -143,6 +143,11 @@ def scenario():
         check(pump(lambda: not app._library_scanning and not app._library_rescan_pending and len(app._library_rows) == 2, 10.0),
               "the queued rescan runs and the library lists the 2 tracks again")
 
+        for frame in (app.overview_frame, app.track_frame, app.premaster_frame):
+            app.set_notebook.select(frame._notebook_tab)  # raised TclError when given the inner frame
+            check(app.set_notebook.select() == str(frame._notebook_tab), "scrollable tabs can be selected")
+        app.set_notebook.select(0)
+
         # --- checks added by later tasks go above this line ---
 
 
