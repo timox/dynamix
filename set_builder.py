@@ -8,6 +8,7 @@ transitions, optionally pre-mastered, and exported to Mixxx. Every step is
 recorded in the project so the panel always shows where you are.
 """
 
+import logging
 import os
 import threading
 import tkinter as tk
@@ -26,6 +27,7 @@ from set_project import SetProject, STEPS, list_projects, audio_files_in
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
+log = logging.getLogger("dynamix.gui")
 
 
 class SetBuilderMixin:
@@ -334,7 +336,12 @@ class SetBuilderMixin:
             messagebox.showinfo("Project", "Create or open a project first ('New project...')")
             return False
         return True
-    
+
+    def _report_error(self, message, exc=None):
+        """Log an error (with its traceback) and show it; safe to call from a worker thread."""
+        log.error(message, exc_info=exc)
+        self.root.after(0, messagebox.showerror, "Error", message)
+
     def _planner_from_project(self):
         data = self.project.data.get("transitions") if self.project else None
         if not data or not data.get("tracks"):
@@ -514,7 +521,7 @@ class SetBuilderMixin:
                     self.update_status(f"Analyzed {len(manager.tracks)} tracks ({run['cached']} from cache, {run['analyzed']} new, {run['failed']} failed)")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Analysis failed: {str(e)}")
+                self._report_error(f"Analysis failed: {e}", e)
         
         self.update_status(f"Analyzing {len(files)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -542,7 +549,7 @@ class SetBuilderMixin:
             total = sum(float(t.get("duration") or 0) for t in set_list) / 60
             self.update_status(f"Proposed set list: {len(set_list)} tracks, {total:.0f} min, curve '{curve}'. Adjust it in the Tracks tab if needed.")
         except Exception as e:
-            messagebox.showerror("Error", f"Set list creation failed: {str(e)}")
+            self._report_error(f"Set list creation failed: {e}", e)
     
     def _set_tracks_or_warn(self):
         tracks = self.project.set_list_tracks() if self.project else []
@@ -575,7 +582,7 @@ class SetBuilderMixin:
                     self._show_transition_window("set list")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Transition planning failed: {str(e)}")
+                self._report_error(f"Transition planning failed: {e}", e)
         
         self.update_status(f"Planning transitions for {len(tracks)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -598,7 +605,7 @@ class SetBuilderMixin:
                 flagged = sum(1 for r in reports if r.get("flags"))
                 self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Mastering check failed: {str(e)}")
+                self._report_error(f"Mastering check failed: {e}", e)
         
         self.update_status(f"Checking mastering of {len(files)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -629,7 +636,7 @@ class SetBuilderMixin:
                 self.root.after(0, self._show_text_window, "Band Analysis", summary, "band_analysis.txt")
                 self.root.after(0, self.update_status, f"Band analysis done: {len(needs_mix)}/{len(reports)} tracks need a mix revision")
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Band analysis failed: {str(e)}")
+                self._report_error(f"Band analysis failed: {e}", e)
         
         self.update_status(f"Band analysis of {len(tracks)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -674,7 +681,7 @@ class SetBuilderMixin:
                     self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir}")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
+                self._report_error(f"Pre-master failed: {e}", e)
         
         self.update_status(f"Pre-mastering {len(files)} tracks into {out_dir} ...")
         self.set_notebook.select(self.premaster_frame)
@@ -922,7 +929,7 @@ class ConfigTabMixin:
         self.cfg_projects_var = tk.StringVar(value=cfg.get("projects_root"))
         ttk.Entry(grid, textvariable=self.cfg_projects_var, width=70).grid(row=0, column=1, sticky="we", padx=4)
         ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_dir(self.cfg_projects_var)).grid(row=0, column=2)
-        ttk.Label(grid, text="Each set is a subfolder: project.json, source/, premaster/, exports/", foreground=MUTED).grid(row=1, column=1, sticky="w", padx=4)
+        ttk.Label(grid, text="Each set is a subfolder: project.json, premaster/, exports/", foreground=MUTED).grid(row=1, column=1, sticky="w", padx=4)
         ttk.Label(grid, text="Mixxx database:").grid(row=2, column=0, sticky="w", pady=3)
         self.cfg_mixxx_var = tk.StringVar(value=cfg.get("mixxx_db") or "")
         ttk.Entry(grid, textvariable=self.cfg_mixxx_var, width=70).grid(row=2, column=1, sticky="we", padx=4)
@@ -931,6 +938,12 @@ class ConfigTabMixin:
         ttk.Label(grid, text="Leave empty to auto-detect (%LOCALAPPDATA%\\Mixxx\\mixxxdb.sqlite on Windows)", foreground=MUTED).grid(row=3, column=1, sticky="w", padx=4)
         ttk.Label(grid, text="DynaMix data (cache, config):").grid(row=4, column=0, sticky="w", pady=3)
         ttk.Label(grid, text=dynamix_home()).grid(row=4, column=1, sticky="w", padx=4)
+        ttk.Label(grid, text="Music library folder:").grid(row=5, column=0, sticky="w", pady=3)
+        self.cfg_library_var = tk.StringVar(value=cfg.get("library_folder") or "")
+        ttk.Entry(grid, textvariable=self.cfg_library_var, width=70).grid(row=5, column=1, sticky="we", padx=4)
+        ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_dir(self.cfg_library_var)).grid(row=5, column=2)
+        ttk.Label(grid, text="Every track you mixed, in one folder (subfolders included). Scanned in place, never copied.",
+                  foreground=MUTED).grid(row=6, column=1, sticky="w", padx=4)
         grid.columnconfigure(1, weight=1)
         
         defaults = ttk.LabelFrame(frame, text="Defaults for new projects")
@@ -968,7 +981,10 @@ class ConfigTabMixin:
         
         env = ttk.LabelFrame(frame, text="Environment (what DynaMix found on this machine)")
         env.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        ttk.Button(env, text="Refresh", command=self.refresh_environment).pack(anchor="w", padx=6, pady=4)
+        env_bar = ttk.Frame(env)
+        env_bar.pack(anchor="w", padx=6, pady=4)
+        ttk.Button(env_bar, text="Refresh", command=self.refresh_environment).pack(side=tk.LEFT)
+        ttk.Button(env_bar, text="Clear whole cache...", command=self.clear_whole_cache).pack(side=tk.LEFT, padx=6)
         self.env_text = scrolledtext.ScrolledText(env, height=12, font=("Consolas", 9))
         self.env_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
         self.refresh_environment()
@@ -995,6 +1011,7 @@ class ConfigTabMixin:
         cfg = self.config
         cfg.set("projects_root", self.cfg_projects_var.get().strip() or cfg.get("projects_root"))
         cfg.set("mixxx_db", self.cfg_mixxx_var.get().strip())
+        cfg.set("library_folder", self.cfg_library_var.get().strip())
         cfg.set("set_duration", int(self.cfg_duration_var.get()))
         cfg.set("energy_curve", self.cfg_curve_var.get())
         cfg.set("mix_bars", int(self.cfg_bars_var.get()))
@@ -1009,7 +1026,25 @@ class ConfigTabMixin:
         self.update_status("Configuration saved")
         if hasattr(self, "refresh_project_list"):
             self.refresh_project_list()
+        if hasattr(self, "rescan_library"):
+            self.rescan_library()
     
     def refresh_environment(self):
         self.env_text.delete("1.0", tk.END)
         self.env_text.insert(tk.END, format_environment_report())
+
+    def clear_whole_cache(self):
+        store = get_store()
+        stats = store.stats()
+        if not messagebox.askyesno("Clear whole cache",
+                                   f"Forget every analysis result ({stats['files']} files, {stats['entries']} results, "
+                                   f"{stats['size_bytes'] / 1e6:.1f} MB)?\n\nEvery track will be analysed again when needed. "
+                                   "Your library and the projects' selections are not changed.", icon="warning"):
+            return
+        removed = store.clear()
+        message = f"Analysis cache cleared: {removed} results removed"
+        log.info(message)
+        self.refresh_environment()
+        if hasattr(self, "_after_cache_cleared"):
+            self._after_cache_cleared()
+        self.update_status(message)
