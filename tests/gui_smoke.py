@@ -60,27 +60,97 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def scenario():
+        global app
+        app = gui.DynaMixGUI(root, log_buffer=buffer)
+        project = SetProject.create(app.config.projects_root, "smoke")
+        app.load_project(project.folder)
+        pump(seconds=0.5)
+
+        logging.getLogger("dynamix.smoke").warning("smoke warning")
+        check(pump(lambda: app.notebook.tab(app.log_frame, "text").startswith("Log ("), 2.0),
+              "the Log tab title counts new warnings")
+        app.notebook.select(app.log_frame)
+        check(pump(lambda: app.notebook.tab(app.log_frame, "text") == "Log", 2.0), "opening the Log tab resets the counter")
+        check("smoke warning" in app.log_text.get("1.0", tk.END), "the Log tab shows the records")
+        app.notebook.select(0)
+
+        check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
+
+        check(pump(lambda: not app._library_scanning and len(app._library_rows) == 2, 10.0),
+              "the library lists the 2 tracks of the library folder")
+        app.library_filter_var.set("two")
+        check(len(app._library_rows) == 1, "the filter narrows the library")
+        app.library_filter_var.set("")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        check(len(app.project.selection) == 2, "both tracks are selected")
+        check([r["state"] for r in app._selection_rows] == ["pending", "pending"], "new selection rows are pending")
+        app.selection_tree.selection_set("C1")
+        app.selection_remove()
+        check(len(app.project.selection) == 1, "remove drops a track from the selection")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        check(len(app.project.selection) == 2, "adding again keeps one entry per track")
+
+        fake = [{"file_path": p, "filename": os.path.basename(p), "duration": 300.0, "bpm": 120.0 + i, "key": "A minor",
+                 "energy_level": 3.0 + i, "has_beat": True} for i, p in enumerate(app.project.selection)]
+        app.project.set_tracks(fake)
+        app.project.mark("analyze", count=len(fake))
+        app._refresh_tables()
+        check([r["state"] for r in app._selection_rows] == ["analysed", "analysed"], "analysed rows are shown as analysed")
+        app.energy_curve_var.set("all")
+        app.set_duration_var.set(15)
+        app.create_set_list()
+        check(pump(lambda: len(app.project.proposal_variants()) == 4, 15.0), "curve 'all' gives one proposal per curve")
+        check(pump(lambda: app._previewing, 3.0), "the first proposal is previewed")
+        app.set_move(1)
+        check(not app._previewing, "an edit closes the preview first")
+        app.proposal_tree.selection_set("P2")
+        check(pump(lambda: app._previewing, 3.0), "selecting a proposal previews it")
+        app.use_selected_proposal()
+        check(len(app.project.set_list) == 2 and app.project.is_done("setlist"), "the proposal became the set list")
+        check(app.project.options["energy_curve"] != "all", "'all' is not saved as the project's energy curve")
+
+        open(os.path.join(app.project.exports_dir, "old.m3u"), "w").close()
+        result = app._do_reset()
+        check(result == {"files_deleted": 1, "bytes_deleted": 0}, f"reset deletes the exports, got {result}")
+        check(app.project.selection == [] and app._selection_rows == [] and app.project.set_list == [],
+              "reset empties the selection and the set list")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        from analysis_store import get_store
+        first = app.project.selection[0]
+        get_store().put(first, "features", {"duration": 2.0, "bpm": 120.0})
+        check(app._do_clear_analysis_cache(list(app.project.selection)) == 1, "the selection's cache entries are removed")
+        check(get_store().get(first, "features") is None, "the cache entry is gone")
+        check(pump(lambda: not app._library_scanning, 10.0), "the library is rescanned after clearing the cache")
+
+        # --- checks added by later tasks go above this line ---
+
+
+app = None
+failure = [None]
+
+
+def run():
+    try:
+        scenario()
+    except Exception as e:
+        failure[0] = e
+    finally:
+        root.quit()
+
+
 root = tk.Tk()
 root.withdraw()
 root.report_callback_exception = lambda t, e, tb: app_log.log_exception(t, e, tb, "Error in the interface")
 errors = []
 try:
-    app = gui.DynaMixGUI(root, log_buffer=buffer)
-    project = SetProject.create(app.config.projects_root, "smoke")
-    app.load_project(project.folder)
-    pump(seconds=0.5)
-
-    logging.getLogger("dynamix.smoke").warning("smoke warning")
-    check(pump(lambda: app.notebook.tab(app.log_frame, "text").startswith("Log ("), 2.0),
-          "the Log tab title counts new warnings")
-    app.notebook.select(app.log_frame)
-    check(pump(lambda: app.notebook.tab(app.log_frame, "text") == "Log", 2.0), "opening the Log tab resets the counter")
-    check("smoke warning" in app.log_text.get("1.0", tk.END), "the Log tab shows the records")
-    app.notebook.select(0)
-
-    check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
-
-    # --- checks added by later tasks go above this line ---
+    root.after(0, run)
+    root.mainloop()
+    if failure[0] is not None:
+        raise failure[0]
 finally:
     errors = buffer.records(logging.ERROR)
     try:

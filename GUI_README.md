@@ -29,26 +29,37 @@ python gui.py
 ### 3. Set Builder Tab
 - **Purpose**: Build a set as a project, step by step, without ever redoing work
 - **Projects**: a set is a folder under the projects folder (see the
-  Configuration tab): `project.json`, `source/` (the audio files imported
-  into the project, copies), `premaster/` (corrected copies) and `exports/`
-  (M3U, transition sheets, JSON, charts). Your music folders are never
-  written to. Use **New project...** then **Import audio...**; the project
-  combobox reopens any existing project with everything it contains.
+  Configuration tab): `project.json`, `premaster/` (corrected copies) and
+  `exports/` (M3U, transition sheets, JSON, charts). The tracks come from your
+  **music library**: one folder holding every track you mixed, set in the
+  Configuration tab and scanned in place (nothing is copied, the library is
+  never written to). The project combobox reopens any existing project.
+  **Reset project...** starts the set again from an empty selection (name,
+  options, notes and the analysis cache are kept; pre-master and exports are
+  deleted). **Clear analysis cache...** forgets the cached analyses of the
+  selected tracks so they are analysed again.
 - **Workflow panel**: the six steps with a ✓ / ○ status, the date and key
   figures of each, and a "Next:" hint:
-    1. Analyze (BPM, key, energy; cached per file, only new files take time)
-    2. Propose a set list (duration, energy curve)
+    1. Select and analyze (BPM, key, energy; cached per file)
+    2. Propose a set list (several variants from the selection; use one)
     3. Plan Transitions (intro/outro sections, transition sheet)
     4. Pre-master Set (optional, into the project's premaster folder)
     5. Create Playlist (optional, M3U into exports/)
     6. Export to Mixxx (uses the database set in the Configuration tab)
   Redoing an early step resets the later ones, so the status is always true.
-- **Tracks tab**: the **Library** (all analysed tracks, with their position in
-  the set) on the left and the **Set list** (playing order) on the right. The
-  algorithm's proposal is a starting point: **Add / Remove / Up / Down** edit
-  the set list by hand (double-click a library row to add it, a set row to
-  remove it); the library never disappears. Select a row to open it in the
-  Track tab.
+- **Tracks tab**, three columns:
+  **Library** (every track of the library folder, with a filter; double-click
+  or **Add to selection →**), **Selection** (the tracks picked for this set,
+  their duration and state: analysed / pending / failed / missing; **Analyze
+  selection**), and **Proposals + Set list**: choose the duration and the
+  energy curve (or `all`), **Propose** computes several variants from the
+  analysed selection only (duration with crossfades deducted, score, weakest
+  transition). Click a variant to preview it; **Use this proposal** copies it
+  into the set list, which **Up / Down / Remove** and **Add to set list ▶**
+  then edit by hand. Select a selection or set row to open it in the Track tab.
+- **Log tab**: everything DynaMix prints and every error with its traceback,
+  filterable by level, also written to `<DynaMix home>/logs/dynamix.log`
+  (**Open log folder**). The tab title counts new warnings and errors.
 - **Overview**: set energy curve against the target, tempo, and the set map
 - **Track**: energy envelope with intro/outro, loudness figures, stereo
   phase and bass width, tone balance, then the band tracking chart (band

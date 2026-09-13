@@ -8,6 +8,7 @@ transitions, optionally pre-mastered, and exported to Mixxx. Every step is
 recorded in the project so the panel always shows where you are.
 """
 
+import collections
 import logging
 import os
 import threading
@@ -17,13 +18,15 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import charts
+import library
+import set_proposer
 from analysis_store import get_store, dynamix_home
 from config import Config, format_environment_report
 from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
 from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
-from set_project import SetProject, STEPS, list_projects, audio_files_in
+from set_project import SetProject, STEPS, list_projects
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
@@ -44,6 +47,10 @@ class SetBuilderMixin:
         self._chart_canvases = {}
         self._library_rows = []
         self._set_rows = []
+        self._selection_rows = []
+        self._library_entries = []
+        self._library_scanning = False
+        self._previewing = False
         
         # ---- header: project selection
         head = ttk.Frame(frame)
@@ -54,8 +61,9 @@ class SetBuilderMixin:
         self.project_combo.pack(side=tk.LEFT, padx=4)
         self.project_combo.bind("<<ComboboxSelected>>", lambda e: self.open_selected_project())
         ttk.Button(head, text="New project...", command=self.new_project).pack(side=tk.LEFT, padx=4)
-        ttk.Button(head, text="Import audio...", command=self.import_audio).pack(side=tk.LEFT, padx=4)
         ttk.Button(head, text="Project summary", command=self.show_project_summary).pack(side=tk.LEFT, padx=4)
+        ttk.Button(head, text="Reset project...", command=self.reset_project).pack(side=tk.LEFT, padx=(16, 4))
+        ttk.Button(head, text="Clear analysis cache...", command=self.clear_analysis_cache).pack(side=tk.LEFT, padx=4)
         self.project_path_label = ttk.Label(frame, text="No project open. Create one with 'New project...' (the Configuration tab sets where projects live).",
                                             foreground=MUTED, anchor="w")
         self.project_path_label.pack(fill=tk.X, padx=14)
@@ -96,13 +104,9 @@ class SetBuilderMixin:
         options_frame.pack(fill=tk.X, padx=2, pady=6)
         grid = ttk.Frame(options_frame)
         grid.pack(fill=tk.X, padx=4, pady=4)
-        ttk.Label(grid, text="Set duration (min):").grid(row=0, column=0, sticky="w", pady=2)
+        # set duration and energy curve are edited in the Proposals panel of the Tracks tab
         self.set_duration_var = tk.IntVar(value=int(self.config.get("set_duration")))
-        ttk.Spinbox(grid, from_=15, to=240, textvariable=self.set_duration_var, width=8).grid(row=0, column=1, sticky="w")
-        ttk.Label(grid, text="Energy curve:").grid(row=1, column=0, sticky="w", pady=2)
         self.energy_curve_var = tk.StringVar(value=self.config.get("energy_curve"))
-        ttk.Combobox(grid, textvariable=self.energy_curve_var, values=["build", "wave", "peak_middle", "constant"],
-                     width=12, state="readonly").grid(row=1, column=1, sticky="w")
         ttk.Label(grid, text="Target loudness (LUFS):").grid(row=2, column=0, sticky="w", pady=2)
         self.premaster_lufs_var = tk.DoubleVar(value=float(self.config.get("target_lufs")))
         ttk.Spinbox(grid, from_=-24.0, to=-6.0, increment=0.5, textvariable=self.premaster_lufs_var, width=8).grid(row=2, column=1, sticky="w")
@@ -134,29 +138,73 @@ class SetBuilderMixin:
         self.set_notebook.add(tracks_tab, text="Tracks")
         lists = ttk.PanedWindow(tracks_tab, orient=tk.HORIZONTAL)
         lists.pack(fill=tk.BOTH, expand=True)
-        
+
+        # column 1: every track of the library folder
         lib_frame = ttk.Frame(lists)
         lists.add(lib_frame, weight=1)
-        self.library_caption = ttk.Label(lib_frame, text="Library (all analysed tracks)", foreground=MUTED, anchor="w")
+        self.library_caption = ttk.Label(lib_frame, text="Library", foreground=MUTED, anchor="w")
         self.library_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        self.library_tree = self._make_tree(lib_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Set", "Flags"),
-                                            {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Set": 40, "Flags": 240})
-        self.library_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.library_tree))
-        self.library_tree.bind("<Double-1>", lambda e: self.set_add())
-        
-        mid = ttk.Frame(lists)
-        lists.add(mid, weight=0)
-        ttk.Label(mid, text="").pack(pady=14)
-        for text, cmd in (("Add ▶", self.set_add), ("◀ Remove", self.set_remove), ("▲ Up", lambda: self.set_move(-1)),
-                          ("▼ Down", lambda: self.set_move(1)), ("Propose", self.create_set_list)):
-            ttk.Button(mid, text=text, command=cmd, width=10).pack(pady=3, padx=4)
-        
-        set_frame = ttk.Frame(lists)
-        lists.add(set_frame, weight=1)
+        lib_bar = ttk.Frame(lib_frame)
+        lib_bar.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(lib_bar, text="Filter:").pack(side=tk.LEFT)
+        self.library_filter_var = tk.StringVar()
+        ttk.Entry(lib_bar, textvariable=self.library_filter_var, width=16).pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+        ttk.Button(lib_bar, text="Rescan", command=self.rescan_library).pack(side=tk.LEFT, padx=2)
+        ttk.Button(lib_bar, text="Add to selection →", command=self.selection_add).pack(side=tk.LEFT, padx=2)
+        self.library_tree = self._make_tree(lib_frame, ("Filename", "Dur", "BPM", "Key", "Energy", "Sel"),
+                                            {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "Sel": 35},
+                                            selectmode="extended")
+        self.library_tree.bind("<Double-1>", lambda e: self.selection_add())
+        self.library_filter_var.trace_add("write", lambda *args: self._refresh_library_table())
+
+        # column 2: the tracks picked for this set
+        sel_frame = ttk.Frame(lists)
+        lists.add(sel_frame, weight=1)
+        self.selection_caption = ttk.Label(sel_frame, text="Selection", foreground=MUTED, anchor="w")
+        self.selection_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
+        sel_bar = ttk.Frame(sel_frame)
+        sel_bar.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Button(sel_bar, text="← Remove", command=self.selection_remove).pack(side=tk.LEFT, padx=2)
+        ttk.Button(sel_bar, text="Analyze selection", command=self.analyze_playlist).pack(side=tk.LEFT, padx=2)
+        ttk.Button(sel_bar, text="Add to set list ▶", command=self.set_add).pack(side=tk.LEFT, padx=2)
+        self.selection_tree = self._make_tree(sel_frame, ("Filename", "Dur", "BPM", "Key", "Energy", "State"),
+                                              {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "State": 70},
+                                              selectmode="extended")
+        self.selection_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.selection_tree))
+        self.selection_tree.bind("<Double-1>", lambda e: self.selection_remove())
+
+        # column 3: proposals and the set list
+        right_col = ttk.Frame(lists)
+        lists.add(right_col, weight=1)
+        prop_frame = ttk.LabelFrame(right_col, text="Proposals (from the analysed selection)")
+        prop_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+        prop_bar = ttk.Frame(prop_frame)
+        prop_bar.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(prop_bar, text="Duration (min):").pack(side=tk.LEFT)
+        ttk.Spinbox(prop_bar, from_=15, to=240, textvariable=self.set_duration_var, width=5).pack(side=tk.LEFT, padx=3)
+        ttk.Label(prop_bar, text="Curve:").pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Combobox(prop_bar, textvariable=self.energy_curve_var, values=list(set_proposer.CURVES) + ["all"],
+                     width=11, state="readonly").pack(side=tk.LEFT, padx=3)
+        ttk.Button(prop_bar, text="Propose", command=self.create_set_list).pack(side=tk.LEFT, padx=3)
+        prop_body = ttk.Frame(prop_frame)
+        prop_body.pack(fill=tk.X, padx=4)
+        self.proposal_tree = self._make_tree(prop_body, ("#", "Curve", "Tracks", "Duration", "Score", "Worst"),
+                                             {"#": 30, "Curve": 90, "Tracks": 50, "Duration": 120, "Score": 50, "Worst": 90},
+                                             height=4)
+        self.proposal_tree.bind("<<TreeviewSelect>>", lambda e: self.preview_proposal())
+        self.proposal_tree.bind("<Double-1>", lambda e: self.use_selected_proposal())
+        ttk.Button(prop_frame, text="Use this proposal", command=self.use_selected_proposal).pack(anchor="w", padx=4, pady=4)
+        set_frame = ttk.Frame(right_col)
+        set_frame.pack(fill=tk.BOTH, expand=True)
         self.set_caption = ttk.Label(set_frame, text="Set list (playing order)", foreground=MUTED, anchor="w")
         self.set_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
+        set_bar = ttk.Frame(set_frame)
+        set_bar.pack(fill=tk.X, padx=4, pady=2)
+        for text, cmd in (("▲ Up", lambda: self.set_move(-1)), ("▼ Down", lambda: self.set_move(1)), ("Remove", self.set_remove)):
+            ttk.Button(set_bar, text=text, command=cmd, width=9).pack(side=tk.LEFT, padx=2)
         self.set_tree = self._make_tree(set_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Flags"),
                                         {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Flags": 240})
+        self.set_tree.tag_configure("preview", foreground=MUTED)
         self.set_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.set_tree))
         self.set_tree.bind("<Double-1>", lambda e: self.set_remove())
         self.playlist_tree = self.set_tree  # older code paths
@@ -173,6 +221,7 @@ class SetBuilderMixin:
         projects = list_projects(self.config.projects_root)
         if projects:
             self.load_project(projects[0])
+        self.rescan_library()
     
     def _scrollable_tab(self, title):
         """A notebook tab whose content scrolls vertically; returns the inner frame to fill."""
@@ -208,11 +257,11 @@ class SetBuilderMixin:
         inner._scroll_canvas = canvas
         return inner
     
-    def _make_tree(self, parent, columns, widths):
-        tree = ttk.Treeview(parent, columns=columns, show="headings", height=14, selectmode="browse")
+    def _make_tree(self, parent, columns, widths, selectmode="browse", height=14):
+        tree = ttk.Treeview(parent, columns=columns, show="headings", height=height, selectmode=selectmode)
         for col in columns:
             tree.heading(col, text=col)
-            tree.column(col, width=widths.get(col, 80), anchor="w" if col in ("Filename", "Key", "Flags") else "center",
+            tree.column(col, width=widths.get(col, 80), anchor="w" if col in ("Filename", "Key", "Flags", "Curve", "Worst") else "center",
                         stretch=(col in ("Filename", "Flags")))
         sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
@@ -245,40 +294,91 @@ class SetBuilderMixin:
             return
         self.load_project(project.folder)
         self.refresh_project_list()
-        if messagebox.askyesno("Import audio", "Import the audio files of a music folder into this project now?"):
-            self.import_audio()
-    
-    def import_audio(self):
-        if self.project is None:
-            messagebox.showinfo("Project", "Create or open a project first")
-            return
-        folder = filedialog.askdirectory(title="Music folder to import (files are COPIED into the project, originals untouched)")
-        if not folder:
-            return
-        files = audio_files_in(folder)
-        if not files:
-            messagebox.showwarning("Warning", "No audio files found in that folder")
+        if not (self.config.get("library_folder") or "").strip():
+            messagebox.showinfo("Music library", "Set your music library folder in the Configuration tab, "
+                                                 "then pick the tracks of this set in the Library.")
+
+    def reset_project(self):
+        if not self._require_project():
             return
         project = self.project
-        
-        def work():
-            counts = project.import_folder(folder, progress=lambda i, n, name, status: self.root.after(
-                0, self.update_status, f"Importing {i}/{n} ({status}): {name}"))
-            
-            def done():
-                if counts["copied"]:
-                    project.mark("analyze", done=False)
-                    project.invalidate_from("analyze")
-                    project.save()
-                self.load_project(project.folder)
-                self.update_status(f"Import done: {counts['copied']} copied, {counts['skipped']} already there, {counts['failed']} failed")
-                if counts["copied"] and messagebox.askyesno("Analyze", "Analyze the imported tracks now?"):
-                    self.analyze_playlist()
-            self.root.after(0, done)
-        
-        self.update_status(f"Importing {len(files)} files from {folder} ...")
-        threading.Thread(target=work, daemon=True).start()
-    
+        preview = project.reset_preview()
+        outputs, imported = preview["outputs"], preview["imported"]
+        win = tk.Toplevel(self.root)
+        win.title("Reset project")
+        win.transient(self.root)
+        win.resizable(False, False)
+        text = (f"Reset '{project.name}' to an empty set?\n\n"
+                f"Deleted: the selection ({len(project.selection)} tracks), the analysed track list, the proposals, "
+                f"the set list, the transitions and pre-master results, and {outputs['files']} files "
+                f"({outputs['bytes'] / 1e6:.1f} MB) in premaster/ and exports/.\n\n"
+                "Kept: the project name, its options and notes, the analysis cache and your library.")
+        ttk.Label(win, text=text, justify=tk.LEFT, wraplength=520).pack(padx=16, pady=(16, 8), anchor="w")
+        delete_imported = tk.BooleanVar(value=False)
+        if imported["files"]:
+            ttk.Checkbutton(win, text=f"Also delete the imported copies in source/ ({imported['files']} files, "
+                                      f"{imported['bytes'] / 1e6:.1f} MB)", variable=delete_imported).pack(padx=16, anchor="w")
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=tk.X, padx=16, pady=16)
+
+        def confirm():
+            choice = bool(delete_imported.get())
+            win.destroy()
+            self._do_reset(choice)
+        ttk.Button(buttons, text="Reset project", command=confirm).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=6)
+        win.grab_set()
+
+    def _do_reset(self, delete_imported=False):
+        project = self.project
+        try:
+            result = project.reset(delete_imported=delete_imported)
+        except OSError as e:
+            self._report_error(f"Reset failed (is a file open in another program?): {e}", e)
+            self.load_project(project.folder)
+            return None
+        message = (f"Project '{project.name}' reset: {result['files_deleted']} files deleted "
+                   f"({result['bytes_deleted'] / 1e6:.1f} MB)")
+        log.info(message)
+        self.load_project(project.folder)
+        self.update_status(message)
+        return result
+
+    def clear_analysis_cache(self):
+        if not self._require_project():
+            return
+        paths = list(self.project.selection)
+        if not paths:
+            messagebox.showinfo("Clear analysis cache", "The selection is empty: nothing to clear.\n"
+                                                        "(The Configuration tab can clear the whole cache.)")
+            return
+        if not messagebox.askyesno("Clear analysis cache",
+                                   f"Forget the analysis results (features, intro/outro, mastering, bands) of the "
+                                   f"{len(paths)} selected tracks?\n\nThey will be analysed again. The selection is kept; "
+                                   "the set list comes back after 'Analyze selection'.", icon="warning"):
+            return
+        self._do_clear_analysis_cache(paths)
+
+    def _do_clear_analysis_cache(self, paths):
+        removed = get_store().clear_paths(paths)
+        message = f"Analysis cache: {removed} results removed for {len(paths)} selected tracks"
+        log.info(message)
+        self._after_cache_cleared()
+        self.update_status(message)
+        return removed
+
+    def _after_cache_cleared(self):
+        """Cached analyses are gone: the project must analyse its selection again."""
+        if self.project is not None:
+            self.project.forget_analysis()
+            self.playlist_manager.tracks = []
+            self.current_set_list = None
+            self.transition_planner = None
+            self._save_project()
+            self._refresh_tables()
+            self._render_overview()
+        self.rescan_library()
+
     def load_project(self, folder):
         """Open a project folder and restore its state (no audio work)."""
         try:
@@ -299,18 +399,19 @@ class SetBuilderMixin:
         if mono_hz > 0:
             self.mono_bass_hz_var.set(mono_hz)
         
-        manager = PlaylistManager(project.source_dir)
+        manager = PlaylistManager(project.folder)
         manager.tracks = list(project.tracks)
         self.playlist_manager = manager
         self.current_set_list = project.set_list_tracks() or None
         self.transition_planner = self._planner_from_project()
         self.transition_source_dir = project.exports_dir
-        self.current_playlist_dir = project.source_dir
-        
-        n_files = len(project.source_files())
-        self.project_path_label.config(text=f"{project.folder}   ·   {n_files} audio files in source/   ·   from {project.data.get('source_folder') or '-'}")
+        self.current_playlist_dir = project.folder
+
+        self.project_path_label.config(text=f"{project.folder}   ·   {len(project.selection)} selected tracks   ·   "
+                                            f"library: {self.config.get('library_folder') or 'not set (Configuration tab)'}")
         self.refresh_project_list()
         self._refresh_tables()
+        self._refresh_library_table()
         self._refresh_workflow()
         self._clear_frame(self.overview_frame, "Analyze the tracks and build a set list to see the energy curve and the set map.")
         self._render_overview()
@@ -322,7 +423,8 @@ class SetBuilderMixin:
             return
         self.project.options.update({
             "set_duration": int(self.set_duration_var.get()),
-            "energy_curve": self.energy_curve_var.get(),
+            "energy_curve": (self.energy_curve_var.get() if self.energy_curve_var.get() in set_proposer.CURVES
+                             else self.project.options.get("energy_curve", "build")),
             "target_lufs": float(self.premaster_lufs_var.get()),
             "tone_match": bool(self.premaster_tone_var.get()),
             "fix_phase": bool(self.premaster_phase_var.get()),
@@ -362,7 +464,7 @@ class SetBuilderMixin:
             parts = []
             if state.get("at"):
                 parts.append(state["at"].replace("T", " ")[:16])
-            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "file", "playlist", "cues"):
+            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "score", "file", "playlist", "cues"):
                 if k in details:
                     parts.append(f"{k} {details[k]}" if k != "manual" else "edited by hand")
             w["detail"].config(text=" · ".join(parts))
@@ -414,23 +516,113 @@ class SetBuilderMixin:
             values.append("")
         return values
     
+    @staticmethod
+    def _fmt_time(seconds):
+        """h:mm:ss or m:ss, '-' when unknown."""
+        if not seconds:
+            return "-"
+        total = int(round(float(seconds)))
+        hours, rest = divmod(total, 3600)
+        minutes, secs = divmod(rest, 60)
+        return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+    @staticmethod
+    def _short_values(row, duration, last):
+        """Filename, Dur, BPM, Key, Energy, <last> (library and selection tables)."""
+        bpm = row.get("bpm") or 0
+        energy = row.get("energy_level") or 0
+        return [row.get("filename", ""), SetBuilderMixin._fmt_time(duration), f"{bpm:.1f}" if bpm else "-",
+                row.get("key") or "-", f"{energy:.1f}" if energy else "-", last]
+
+    def _refresh_library_table(self, caption=None):
+        tree = self.library_tree
+        for item in tree.get_children():
+            tree.delete(item)
+        selected = set(self.project.selection) if self.project else set()
+        rows = library.filter_entries(self._library_entries, self.library_filter_var.get())
+        self._library_rows = rows
+        for i, entry in enumerate(rows, 1):
+            tree.insert("", tk.END, iid=f"L{i}",
+                        values=self._short_values(entry, entry.get("duration"), "✓" if entry["file_path"] in selected else ""))
+        folder = self.config.get("library_folder") or ""
+        if caption is None:
+            if not folder:
+                caption = "Library: set the library folder in the Configuration tab"
+            elif self._library_scanning:
+                caption = f"Library: scanning {folder} ..."
+            else:
+                total = len(self._library_entries)
+                hours = sum(e.get("duration") or 0 for e in self._library_entries) / 3600
+                shown = f"{len(rows)} shown of " if len(rows) != total else ""
+                caption = f"Library: {shown}{total} tracks, {hours:.1f} h ({folder})"
+        self.library_caption.config(text=caption)
+
+    def rescan_library(self):
+        """Scan the library folder in the background (headers and cache only, no audio decoding)."""
+        folder = (self.config.get("library_folder") or "").strip()
+        if not folder:
+            self._library_entries = []
+            self._refresh_library_table()
+            return
+        if self._library_scanning:
+            return
+        self._library_scanning = True
+        self._refresh_library_table()
+
+        def progress(i, n, name):
+            if i % 50 == 0 or i == n:
+                self.root.after(0, self.update_status, f"Scanning library {i}/{n}: {name}")
+
+        def work():
+            try:
+                entries = library.scan(folder, progress=progress)
+            except Exception as e:
+                entries = []
+                self._report_error(f"Library scan failed: {e}", e)
+
+            def done():
+                self._library_scanning = False
+                self._library_entries = entries
+                self._refresh_library_table()
+                self.update_status(f"Library: {len(entries)} tracks in {folder}")
+            self.root.after(0, done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _merge_into_library(self, tracks):
+        """Show freshly analysed values in the library table without rescanning."""
+        by_path = {t["file_path"]: t for t in tracks}
+        for entry in self._library_entries:
+            t = by_path.get(entry["file_path"])
+            if t:
+                entry.update(analysed=True, duration=t.get("duration") or entry.get("duration"),
+                             bpm=t.get("bpm") or None, key=t.get("key") or None, energy_level=t.get("energy_level") or None)
+
     def _refresh_tables(self):
-        for tree in (self.library_tree, self.set_tree):
+        self._previewing = False
+        for tree in (self.selection_tree, self.set_tree, self.proposal_tree):
             for item in tree.get_children():
                 tree.delete(item)
-        self._library_rows, self._set_rows = [], []
+        self._selection_rows, self._set_rows = [], []
         if self.project is None:
             return
         mastering = self._mastering_by_path()
-        for i, t in enumerate(self.project.library_tracks(), 1):
-            self.library_tree.insert("", tk.END, iid=f"L{i}", values=self._row_values(t, i, mastering.get(t["file_path"]), with_set=True))
-            self._library_rows.append(t)
+        lib_by_path = {e["file_path"]: e for e in self._library_entries}
+        for i, row in enumerate(self.project.selection_rows(), 1):
+            row["duration"] = row.get("duration") or lib_by_path.get(row["file_path"], {}).get("duration")
+            self.selection_tree.insert("", tk.END, iid=f"C{i}", values=self._short_values(row, row["duration"], row["state"]))
+            self._selection_rows.append(row)
         for i, t in enumerate(self.project.set_list_tracks(), 1):
             self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(t, i, mastering.get(t["file_path"])))
             self._set_rows.append(t)
-        total = sum(float(t.get("duration") or 0) for t in self._set_rows) / 60
-        self.library_caption.config(text=f"Library: {len(self._library_rows)} analysed tracks ({len(self.project.source_files())} files in source/)")
-        self.set_caption.config(text=f"Set list: {len(self._set_rows)} tracks, {total:.0f} min — playing order (Add/Remove/Up/Down to edit)")
+        for i, variant in enumerate(self.project.proposal_variants(), 1):
+            self.proposal_tree.insert("", tk.END, iid=f"P{i}", values=self._proposal_values(i, variant))
+        counts = collections.Counter(r["state"] for r in self._selection_rows)
+        others = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()) if state != "analysed")
+        sel_seconds = sum(float(r.get("duration") or 0) for r in self._selection_rows)
+        self.selection_caption.config(text=f"Selection: {len(self._selection_rows)} tracks · {self._fmt_time(sel_seconds)}"
+                                           + (f" ({others})" if others else ""))
+        set_seconds = sum(float(t.get("duration") or 0) for t in self._set_rows)
+        self.set_caption.config(text=f"Set list: {len(self._set_rows)} tracks, {self._fmt_time(set_seconds)} — playing order")
     
     def _populate_playlist_tree(self, tracks, caption=None):
         """Compatibility with older code paths: refresh both tables."""
@@ -445,7 +637,18 @@ class SetBuilderMixin:
         except ValueError:
             return None
         return rows[idx] if 0 <= idx < len(rows) else None
-    
+
+    def _selected_many(self, tree, rows):
+        out = []
+        for iid in tree.selection():
+            try:
+                idx = int(iid[1:]) - 1
+            except ValueError:
+                continue
+            if 0 <= idx < len(rows):
+                out.append(rows[idx])
+        return out
+
     def _after_manual_edit(self):
         self.project.mark("setlist", count=len(self.project.set_list), manual=True)
         self.current_set_list = self.project.set_list_tracks() or None
@@ -454,20 +657,51 @@ class SetBuilderMixin:
         self._refresh_tables()
         self._render_overview()
     
-    def set_add(self):
+    def selection_add(self):
         if not self._require_project():
             return
-        track = self._selected(self.library_tree, self._library_rows)
-        if track is None:
+        entries = self._selected_many(self.library_tree, self._library_rows)
+        if not entries:
+            return
+        added = self.project.add_to_selection([e["file_path"] for e in entries])
+        self._after_selection_change(f"Selection: {added} tracks added ({len(self.project.selection)} selected)")
+
+    def selection_remove(self):
+        if not self._require_project():
+            return
+        rows = self._selected_many(self.selection_tree, self._selection_rows)
+        if not rows:
+            return
+        removed = self.project.remove_from_selection([r["file_path"] for r in rows])
+        self._after_selection_change(f"Selection: {removed} tracks removed ({len(self.project.selection)} selected)")
+
+    def _after_selection_change(self, message):
+        self.playlist_manager.tracks = list(self.project.tracks)
+        self.current_set_list = self.project.set_list_tracks() or None
+        self.transition_planner = None
+        self._save_project()
+        self._refresh_tables()
+        self._refresh_library_table()
+        self._render_overview()
+        log.info(message)
+        self.update_status(message)
+
+    def set_add(self):
+        if not self._require_project() or self._end_preview():
+            return
+        rows = [r for r in self._selected_many(self.selection_tree, self._selection_rows) if r["state"] == "analysed"]
+        if not rows:
+            messagebox.showinfo("Set list", "Select analysed tracks in the Selection first")
             return
         # insert after the selected set-list row, else at the end
         current = self._selected(self.set_tree, self._set_rows)
         position = (self.project.set_list.index(current["file_path"]) + 1) if current else None
-        self.project.add_to_set(track["file_path"], position)
+        for offset, row in enumerate(rows):
+            self.project.add_to_set(row["file_path"], None if position is None else position + offset)
         self._after_manual_edit()
     
     def set_remove(self):
-        if not self._require_project():
+        if not self._require_project() or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
@@ -476,7 +710,7 @@ class SetBuilderMixin:
         self._after_manual_edit()
     
     def set_move(self, delta):
-        if not self._require_project():
+        if not self._require_project() or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
@@ -492,14 +726,14 @@ class SetBuilderMixin:
         if not self._require_project():
             return
         project = self.project
-        files = project.source_files()
+        files = project.selection_files()
         if not files:
-            messagebox.showwarning("Warning", "No audio files in the project. Use 'Import audio...' first.")
+            messagebox.showwarning("Warning", "No selected tracks on disk: pick tracks in the Library and click 'Add to selection →'.")
             return
         
         def work():
             try:
-                manager = PlaylistManager(project.source_dir)
+                manager = PlaylistManager(project.folder)
                 manager.analyze_playlist(files, progress_callback=lambda i, n, name, status: self.root.after(
                     0, self.update_status, f"Analyzing {i}/{n} ({status}): {name}"))
                 run = manager.last_run
@@ -516,9 +750,17 @@ class SetBuilderMixin:
                         self.transition_planner = None
                     project.mark("analyze", count=len(manager.tracks), cached=run["cached"], analyzed=run["analyzed"])
                     self._save_project()
+                    self._merge_into_library(manager.tracks)
                     self._refresh_tables()
+                    self._refresh_library_table()
                     self._render_overview()
-                    self.update_status(f"Analyzed {len(manager.tracks)} tracks ({run['cached']} from cache, {run['analyzed']} new, {run['failed']} failed)")
+                    message = (f"Analysis: {len(manager.tracks)} tracks ({run['cached']} from cache, "
+                               f"{run['analyzed']} new, {run['failed']} failed)")
+                    log.info(message)
+                    failed = [os.path.basename(p) for p in project.data.get("failed") or []]
+                    if failed:
+                        log.warning("Analysis failed for %d tracks: %s (see the errors above)", len(failed), ", ".join(failed))
+                    self.update_status(message)
                 self.root.after(0, done)
             except Exception as e:
                 self._report_error(f"Analysis failed: {e}", e)
@@ -527,29 +769,122 @@ class SetBuilderMixin:
         threading.Thread(target=work, daemon=True).start()
     
     def create_set_list(self):
-        """Propose an order (the library stays; edit the proposal afterwards)."""
+        """Compute proposals from the analysed selection (worker thread); the set list changes on 'Use this proposal'."""
         if not self._require_project():
             return
-        manager = self.playlist_manager
-        if manager is None or not manager.tracks:
-            messagebox.showwarning("Warning", "Analyze the tracks first (step 1)")
+        project = self.project
+        tracks, skipped = project.proposal_tracks()
+        if not tracks:
+            messagebox.showwarning("Warning", "No analysed tracks in the selection: add tracks, then click 'Analyze selection'")
             return
-        try:
-            duration = int(self.set_duration_var.get())
-            curve = self.energy_curve_var.get()
-            set_list = manager.create_set_list(duration_minutes=duration, energy_curve=curve)
-            self.project.set_set_list(set_list)
-            self.project.invalidate_from("setlist")
-            self.project.mark("setlist", count=len(set_list), duration=duration, curve=curve)
-            self.current_set_list = list(set_list)
-            self.transition_planner = None
-            self._save_project()
-            self._refresh_tables()
-            self._render_overview()
-            total = sum(float(t.get("duration") or 0) for t in set_list) / 60
-            self.update_status(f"Proposed set list: {len(set_list)} tracks, {total:.0f} min, curve '{curve}'. Adjust it in the Tracks tab if needed.")
-        except Exception as e:
-            self._report_error(f"Set list creation failed: {e}", e)
+        if skipped:
+            log.warning("Proposals: %d selected tracks left out (not analysed or missing): %s", len(skipped), ", ".join(skipped))
+        duration = int(self.set_duration_var.get())
+        curve = self.energy_curve_var.get()
+        mix_bars = self._mix_bars()
+
+        def work():
+            try:
+                if curve == "all":
+                    variants = [set_proposer.propose(tracks, duration * 60, curve=c, mix_bars=mix_bars, variants=1)[0]
+                                for c in set_proposer.CURVES]
+                    variants.sort(key=lambda v: (-v["score"], v["cost"]))
+                else:
+                    variants = set_proposer.propose(tracks, duration * 60, curve=curve, mix_bars=mix_bars, variants=3)
+            except Exception as e:
+                self._report_error(f"Proposal failed: {e}", e)
+                return
+
+            def done():
+                if self.project is not project:
+                    return  # another project was opened meanwhile
+                project.set_proposals({"duration_min": duration, "curve": curve, "mix_bars": mix_bars}, variants)
+                self._save_project()
+                self._refresh_tables()
+                message = (f"Proposals: {len(variants)} variants for {duration} min ({curve}) from {len(tracks)} tracks, "
+                           f"best score {max(v['score'] for v in variants)}")
+                log.info(message)
+                self.update_status(message + " - select one to preview it, then 'Use this proposal'")
+                self.proposal_tree.selection_set("P1")
+            self.root.after(0, done)
+
+        self.update_status(f"Computing proposals from {len(tracks)} tracks ...")
+        threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _proposal_values(number, variant):
+        worst = variant.get("worst")
+        duration = f"{SetBuilderMixin._fmt_time(variant['effective_seconds'])} / {SetBuilderMixin._fmt_time(variant['target_seconds'])}"
+        return [number, variant["curve"], len(variant["order"]), duration, variant["score"],
+                f"{worst['index'] + 1}→{worst['index'] + 2} · {worst['score']}" if worst else "-"]
+
+    def _selected_proposal(self):
+        """(variant, index) of the selected row of the Proposals table, else (None, None)."""
+        sel = self.proposal_tree.selection()
+        if not sel or self.project is None:
+            return None, None
+        index = int(sel[0][1:]) - 1
+        variants = self.project.proposal_variants()
+        return (variants[index], index) if 0 <= index < len(variants) else (None, None)
+
+    def preview_proposal(self):
+        """Show the selected proposal in the set list table (greyed) and the Overview, without saving."""
+        variant, index = self._selected_proposal()
+        if variant is None:
+            return
+        by_path = {t["file_path"]: t for t in self.project.tracks}
+        tracks = [by_path[p] for p in variant["order"] if p in by_path]
+        for item in self.set_tree.get_children():
+            self.set_tree.delete(item)
+        mastering = self._mastering_by_path()
+        for i, t in enumerate(tracks, 1):
+            self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(t, i, mastering.get(t["file_path"])),
+                                 tags=("preview",))
+        self._set_rows = tracks
+        self._previewing = True
+        self.set_caption.config(text=f"Preview of proposal {index + 1} ({variant['curve']}, score {variant['score']}): "
+                                     f"{len(tracks)} tracks, {self._fmt_time(variant['effective_seconds'])} — "
+                                     "'Use this proposal' to keep it")
+        self._clear_frame(self.overview_frame)
+        self._show_figure(self.overview_frame,
+                          charts.set_overview(tracks, set_proposer.curve_targets(tracks, variant["curve"], self._mix_bars())))
+
+    def use_selected_proposal(self):
+        if not self._require_project():
+            return
+        variant, index = self._selected_proposal()
+        if variant is None:
+            messagebox.showinfo("Proposals", "Select a proposal first (click 'Propose' when the list is empty)")
+            return
+        self.project.use_proposal(index)
+        self.current_set_list = self.project.set_list_tracks() or None
+        self.transition_planner = None
+        self._save_project()
+        self._refresh_tables()
+        self._render_overview()
+        message = (f"Proposal {index + 1} ({variant['curve']}, score {variant['score']}) is now the set list: "
+                   f"{len(self.project.set_list)} tracks")
+        log.info(message)
+        self.update_status(message)
+
+    def _end_preview(self):
+        """If a proposal preview is showing, show the set list again and return True (the edit is skipped)."""
+        if not self._previewing:
+            return False
+        self._refresh_tables()
+        self._render_overview()
+        self.update_status("Preview closed: the set list is shown again (click again to edit it)")
+        return True
+
+    def _mix_bars(self):
+        return int(self.project.options.get("mix_bars", 8)) if self.project else 8
+
+    def _set_curve(self):
+        """Curve of the current set list: the one of the proposal it came from, else the chosen curve."""
+        details = {}
+        if self.project is not None:
+            details = self.project.step_state("setlist").get("details") or {}
+        return details.get("curve") or self.energy_curve_var.get()
     
     def _set_tracks_or_warn(self):
         tracks = self.project.set_list_tracks() if self.project else []
@@ -591,7 +926,7 @@ class SetBuilderMixin:
         if not self._require_project():
             return
         tracks = self.project.set_list_tracks() or self.project.tracks
-        files = [t["file_path"] for t in tracks] or self.project.source_files()
+        files = [t["file_path"] for t in tracks] or self.project.selection_files()
         if not files:
             messagebox.showwarning("Warning", "No audio files in the project")
             return
@@ -718,7 +1053,7 @@ class SetBuilderMixin:
         try:
             ExportTools.export_to_m3u(tracks, filename)
         except Exception as e:
-            messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
+            self._report_error(f"Playlist creation failed: {e}", e)
             return
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
@@ -752,7 +1087,7 @@ class SetBuilderMixin:
         try:
             report = MixxxExporter(db_path).export(profiles, playlist_name=playlist_name.strip() or None)
         except Exception as e:
-            messagebox.showerror("Error", f"Mixxx export failed: {str(e)}")
+            self._report_error(f"Mixxx export failed: {e}", e)
             return
         summary = format_report(report)
         if premastered:
@@ -847,12 +1182,12 @@ class SetBuilderMixin:
     def _render_overview(self):
         tracks = self.current_set_list or (self.playlist_manager.tracks if self.playlist_manager else [])
         if not tracks:
+            self._clear_frame(self.overview_frame, "Analyze the selection and build a set list to see the energy curve and the set map.")
             return
         self._clear_frame(self.overview_frame)
         targets = None
         if self.current_set_list:
-            values = [PlaylistManager._energy_value(t) for t in tracks]
-            targets = PlaylistManager._target_curve(values, self.energy_curve_var.get())
+            targets = set_proposer.curve_targets(tracks, self._set_curve(), self._mix_bars())
         self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:
@@ -871,9 +1206,9 @@ class SetBuilderMixin:
     
     def on_track_selected(self, tree=None):
         tree = tree or self.set_tree
-        rows = self._set_rows if tree is self.set_tree else self._library_rows
+        rows = self._set_rows if tree is self.set_tree else self._selection_rows
         track = self._selected(tree, rows)
-        if track is None:
+        if track is None or track.get("state", "analysed") != "analysed":
             return
         profile = None
         planner = self.transition_planner

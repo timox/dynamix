@@ -123,16 +123,21 @@ A set is a **project folder** under the projects folder chosen in the GUI's Conf
 
 ```
 <projects folder>/<set name>/
-    project.json     options, analysed tracks, set list, step status, results
-    source/          the audio files imported (copied) into the project
+    project.json     options, selection, analysed tracks, proposals, set list, step status, results
     premaster/       corrected copies written by the pre-master pass
     exports/         M3U playlists, transition sheets, JSON, charts
 ```
 
-Your music folders are never written to. The Set Builder tab walks through six steps
-(Analyze → Propose → Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and
-shows what is done, when, and what comes next. The proposed order is a starting point: the
-Tracks tab keeps the whole library next to the set list, with Add / Remove / Up / Down.
+Every track you mixed lives in one **music library folder** (Configuration tab), scanned in
+place and never written to (`library.py`). For each set you pick tracks from the library into
+the project's **selection**; the Set Builder tab then walks through six steps (Select and
+analyze → Propose → Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and shows
+what is done, when, and what comes next. **Propose** computes several variants from the
+selection only (`set_proposer.py`); you use one and adjust it with Up / Down / Remove.
+**Reset project...** starts a set again from scratch and **Clear analysis cache...** forces the
+selected tracks to be analysed again. The **Log** tab shows every message and error
+(`app_log.py`, also written to `<DynaMix home>/logs/dynamix.log`). Projects created before
+this version keep working: their imported `source/` copies become their selection.
 
 - **Analysis cache** (`analysis_store.py`): every per-file result is stored in
   `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows or `~/.dynamix/analysis.sqlite`
@@ -156,11 +161,12 @@ The components are the tempo, the number of percussive events per second, the sh
 percussive energy, the share of low end and the brightness; the tempo and rhythm terms only
 count when the track actually has a beat, so pads and ambient pieces stay low.
 
-Set lists (`create_set_list`, `--playlist`, GUI "Create Set List") first pick tracks that cover
-the whole energy range of the folder for the requested duration, then place them along the
-chosen curve (`build`, `wave`, `peak_middle`, `constant`) while keeping neighbours within a few
-BPM and harmonically compatible (Camelot-wheel logic: same key, relative major/minor, fifth
-neighbours).
+Set lists (`set_proposer.propose`, used by the GUI's Propose button and by `create_set_list` /
+`--playlist`) come from a beam search over the selected tracks: it fits the requested duration
+(crossfade overlaps deducted), follows the chosen curve in time (`build`, `wave`, `peak_middle`,
+`constant`) and keeps neighbours within a few BPM and harmonically compatible (Camelot-wheel
+logic: same key, relative major/minor, fifth neighbours). The GUI shows the best distinct
+variants with their score and weakest transition.
 
 ### Mastering Check and Pre-master Pass
 
