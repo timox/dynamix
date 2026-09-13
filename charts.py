@@ -139,8 +139,9 @@ def set_start_times(profiles: Sequence[Dict], transitions: Optional[Sequence[Dic
     return starts
 
 
-def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]] = None) -> Figure:
-    """Where each track plays in the set, with intro/outro sections and transition scores."""
+def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]] = None,
+                 fx_labels: Optional[Dict[int, str]] = None) -> Figure:
+    """Where each track plays in the set, with intro/outro sections, transition scores and transition FX."""
     n = len(profiles)
     fig = _figure(9.0, max(2.6, 0.55 * n + 1.4))
     ax = fig.add_subplot(1, 1, 1)
@@ -172,6 +173,9 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
             if score < 70:
                 ax.text(x, y_bot - height / 2 - 0.08, f"score {score:.0f}", ha="center", va="top",
                         fontsize=7, color=TEXT2)
+            label = (fx_labels or {}).get(i)
+            if label:
+                ax.text(x, y_top + height / 2 + 0.06, label, ha="center", va="bottom", fontsize=7, color=BLUE)
     total = starts[-1] + float(profiles[-1].get("duration", 0.0)) if n else 0.0
     ax.set_xlim(0, total * 1.45 if total else 1)
     ax.set_ylim(0.3, n + 0.7)

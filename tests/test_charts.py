@@ -46,6 +46,9 @@ class TestCharts(unittest.TestCase):
         self.assertAlmostEqual(starts[1], 208.0 - 0.5)
         self._check(charts.set_timeline(self.profiles, self.transitions), "timeline.png")
 
+    def test_set_timeline_fx_labels(self):
+        self._check(charts.set_timeline(self.profiles, self.transitions, fx_labels={0: "freeze · sample"}), "timeline_fx.png")
+
     def test_track_detail(self):
         median = {"sub": -7, "low": -3, "low_mid": -7, "mid": -10, "high_mid": -15, "high": -20}
         self._check(charts.track_detail(self.profiles[2], median), "track.png")

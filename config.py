@@ -18,6 +18,7 @@ DEFAULTS: Dict[str, Any] = {
     "projects_root": os.path.join(os.path.expanduser("~"), "DynaMix Projects"),
     "mixxx_db": "",                # empty = auto-detect
     "library_folder": "",          # every track you mixed, one folder, scanned in place (library.py)
+    "fx_samples_folder": "",       # FX samples (risers, impacts, sweeps) used by the transition FX
     "set_duration": 60,
     "energy_curve": "build",
     "mix_bars": 8,

@@ -1308,6 +1308,12 @@ class ConfigTabMixin:
         ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_dir(self.cfg_library_var)).grid(row=5, column=2)
         ttk.Label(grid, text="Every track you mixed, in one folder (subfolders included). Scanned in place, never copied.",
                   foreground=MUTED).grid(row=6, column=1, sticky="w", padx=4)
+        ttk.Label(grid, text="FX samples folder:").grid(row=7, column=0, sticky="w", pady=3)
+        self.cfg_fx_samples_var = tk.StringVar(value=cfg.get("fx_samples_folder") or "")
+        ttk.Entry(grid, textvariable=self.cfg_fx_samples_var, width=70).grid(row=7, column=1, sticky="we", padx=4)
+        ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_dir(self.cfg_fx_samples_var)).grid(row=7, column=2)
+        ttk.Label(grid, text="Risers, impacts, sweeps... used by Transition FX (30 s max per sample).",
+                  foreground=MUTED).grid(row=8, column=1, sticky="w", padx=4)
         grid.columnconfigure(1, weight=1)
         
         defaults = ttk.LabelFrame(frame, text="Defaults for new projects")
@@ -1376,6 +1382,7 @@ class ConfigTabMixin:
         cfg.set("projects_root", self.cfg_projects_var.get().strip() or cfg.get("projects_root"))
         cfg.set("mixxx_db", self.cfg_mixxx_var.get().strip())
         cfg.set("library_folder", self.cfg_library_var.get().strip())
+        cfg.set("fx_samples_folder", self.cfg_fx_samples_var.get().strip())
         cfg.set("set_duration", int(self.cfg_duration_var.get()))
         cfg.set("energy_curve", self.cfg_curve_var.get())
         cfg.set("mix_bars", int(self.cfg_bars_var.get()))

@@ -46,6 +46,14 @@ class TestConfig(unittest.TestCase):
         c.save()
         self.assertEqual(Config().get("library_folder"), os.path.join(self.tmp, "Mixes"))
 
+    def test_fx_samples_folder(self):
+        from config import Config
+        c = Config()
+        self.assertEqual(c.get("fx_samples_folder"), "")
+        c.set("fx_samples_folder", os.path.join(self.tmp, "FX"))
+        c.save()
+        self.assertEqual(Config().get("fx_samples_folder"), os.path.join(self.tmp, "FX"))
+
 
 if __name__ == "__main__":
     unittest.main()
