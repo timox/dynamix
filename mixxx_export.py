@@ -279,11 +279,11 @@ def main():
         from set_project import SetProject
         project = SetProject.open(args.project)
         default_name = project.name
-        files = project.source_files()
+        files = project.selection_files()
         if not files:
-            print(f"No audio in {project.source_dir}: import files into the project first.")
+            print(f"No selected tracks in project '{project.name}': pick them in the GUI's Set Builder (Library -> Selection) first.")
             sys.exit(1)
-        manager = PlaylistManager(project.source_dir)
+        manager = PlaylistManager(project.folder)
         print(f"Analyzing project '{project.name}' (cached results are reused) ...")
         manager.analyze_playlist(files, progress_callback=lambda i, n, name, status: print(f"  {i}/{n} {status}: {name}"))
         project.set_tracks(manager.tracks)

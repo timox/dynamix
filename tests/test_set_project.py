@@ -21,7 +21,8 @@ class TestSetProject(unittest.TestCase):
 
     def test_create_layout_and_import(self):
         p = SetProject.create(self.root, "Saturday set", self.music)
-        self.assertTrue(os.path.isdir(p.source_dir) and os.path.isdir(p.premaster_dir) and os.path.isdir(p.exports_dir))
+        self.assertTrue(os.path.isdir(p.premaster_dir) and os.path.isdir(p.exports_dir))
+        self.assertFalse(os.path.isdir(p.source_dir))  # only created by import_audio (projects before v3)
         counts = p.import_folder(self.music)
         self.assertEqual(counts, {"copied": 2, "skipped": 0, "failed": 0})
         self.assertEqual([os.path.basename(f) for f in p.source_files()], ["a.wav", "b.wav"])
@@ -75,7 +76,7 @@ class TestSetProject(unittest.TestCase):
         p = SetProject.create(self.root, "sum")
         p.mark("analyze", count=3)
         lines = p.summary_lines()
-        self.assertTrue(any("[x] Analyze the tracks" in l and "count=3" in l for l in lines))
+        self.assertTrue(any("[x] Select and analyze the tracks" in l and "count=3" in l for l in lines))
         self.assertTrue(lines[-1].startswith("Next:"))
 
 

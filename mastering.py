@@ -763,7 +763,7 @@ def main():
             if os.path.isdir(target) and SetProject.exists(target):
                 project = SetProject.open(target)
                 tracks = project.set_list_tracks() or project.tracks
-                files.extend([t['file_path'] for t in tracks] or project.source_files())
+                files.extend([t['file_path'] for t in tracks] or project.selection_files())
             else:
                 files.extend(collect_files(target))
         if not files:
@@ -807,7 +807,7 @@ def main():
         if os.path.isdir(args.target) and SetProject.exists(args.target):
             project = SetProject.open(args.target)
             tracks = project.set_list_tracks() or project.tracks
-            files = [t['file_path'] for t in tracks] or project.source_files()
+            files = [t['file_path'] for t in tracks] or project.selection_files()
             args.out = args.out or project.premaster_dir
             if args.lufs == -14.0:
                 args.lufs = float(project.options.get("target_lufs", -14.0))
