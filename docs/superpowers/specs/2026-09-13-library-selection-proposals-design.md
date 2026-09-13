@@ -98,7 +98,11 @@ Règles `SetProject` :
 - `remove_from_selection(paths)` retire les chemins de `selection`, de `tracks` et de `set_list`, met `proposals` à `null` et invalide depuis `analyze`.
 - `set_proposals(data)` enregistre les propositions.
 - `use_proposal(index)` fait `set_order(variants[index].order)` : il marque l'étape `setlist` comme faite, avec `curve` et `score` dans ses détails, et invalide ce qui suit.
-- `selection_files()` remplace `source_files()` pour l'analyse. `source_files()` est conservé pour la migration.
+- `selection_files()` remplace `source_files()` pour l'analyse : il renvoie les chemins sélectionnés qui existent sur le disque. `source_files()` est conservé pour la migration. `mixxx_export.py --project` analyse aussi `selection_files()`.
+- `set_tracks(tracks)` enregistre aussi `failed` : les fichiers sélectionnés présents sur le disque mais sans fiche d'analyse.
+- `selection_rows()` renvoie une ligne par morceau sélectionné, avec sa fiche si elle existe et un `state` : `analysed`, `pending`, `failed` ou `missing`.
+- `proposal_tracks()` renvoie `(fiches utilisables, noms des morceaux exclus)`. Seuls les morceaux à l'état `analysed` sont utilisables.
+- `forget_analysis()` est appelé après le vidage du cache. Il vide `tracks` et `failed`, met `proposals` à `null`, marque `analyze` comme non fait et invalide la suite. `set_list` garde ses chemins, qui réapparaissent après la réanalyse.
 
 ### Migration v2 → v3
 
@@ -121,6 +125,8 @@ def propose(tracks: List[Dict], target_seconds: float, curve: str = "build",
 def energy_target(position: float, curve: str) -> float   # position 0..1 -> 0..1
 def transition_cost(a: Dict, b: Dict) -> float
 def overlap_seconds(track: Dict, mix_bars: int) -> float
+def curve_targets(tracks: List[Dict], curve: str, mix_bars: int = 8) -> Optional[List[float]]
+    # énergie visée de chaque morceau d'un ordre donné (graphique Overview), None si courbe inconnue
 ```
 
 **Courbe fonction du temps.** Soient `lo` et `hi` les énergies min et max de la sélection (`PlaylistManager._energy_value`). L'énergie visée pour un morceau est `lo + (hi - lo) * energy_target(p, curve)`, où `p` est la position de son milieu temporel dans le set divisée par la durée de référence. La durée de référence est la plus petite des deux valeurs entre la cible et la durée effective de toute la sélection.
@@ -148,7 +154,7 @@ Coût d'énergie d'un morceau : `abs(énergie - visée) / (hi - lo)`. Il vaut 0 
 1. Un état est une séquence partielle, avec son coût cumulé (énergie + transitions) et sa durée effective.
 2. Initialisation : un état par morceau. On garde les `beam_width` meilleurs.
 3. Extension : on ajoute chaque morceau non utilisé dont l'ajout garde la durée effective ≤ `target × (1 + tolerance)`.
-4. Un état qui ne peut plus être étendu est **terminé**. Son coût final est le coût cumulé plus `2.0 × |cible - effective| / cible`. Cette pénalité n'est pas appliquée quand la sélection entière est plus courte que la cible et que l'état utilise tous les morceaux.
+4. Un état qui ne peut plus être étendu est **terminé**. Son coût final est son coût moyen par morceau (coût cumulé / nombre de morceaux) plus `2.0 × |cible - effective| / cible`. Avec le coût cumulé, les sets courts seraient toujours favorisés. Cette pénalité n'est pas appliquée quand la sélection entière est plus courte que la cible et que l'état utilise tous les morceaux.
 5. À chaque profondeur, on garde les `beam_width` meilleurs états non terminés. Pour comparer des états de longueurs différentes, le tri se fait sur le coût moyen par morceau. Les états terminés vont dans un pool.
 6. Si deux coûts sont égaux, on départage par l'ordre des chemins, pour rester déterministe.
 
@@ -156,7 +162,7 @@ Coût d'énergie d'un morceau : `abs(énergie - visée) / (hi - lo)`. Il vaut 0 
 
 **Score affiché.**
 
-- `transition_scores[i]` vaut `compatibility_from_features(ordre[i], ordre[i+1])["score"]`, arrondi.
+- `transition_scores[i]` vaut `compatibility_from_features(ordre[i], ordre[i+1])["overall_score"]`, arrondi.
 - `score` est la moyenne des transitions, arrondie. Il vaut 100 s'il n'y a qu'un morceau.
 - `worst` est la transition au score minimal.
 
@@ -183,7 +189,7 @@ def read_duration(path: str) -> Optional[float]
 - `scan` utilise `set_project.audio_files_in(folder, recursive=True)`. Chaque entrée contient `file_path`, `filename`, `duration`, `bpm`, `key`, `energy_level` et `analysed`.
 - La durée vient des features en cache si elles existent. Sinon elle vient de `read_duration` : `soundfile.info(path).duration`, qui renvoie `None` en cas d'erreur, y compris un format non supporté.
 - BPM, tonalité et énergie viennent de `get_store().get(path, "features")`.
-- Le GUI lance `scan` dans un thread et remplit la table par lots de 50.
+- Le GUI lance `scan` dans un thread, affiche la progression dans la barre d'état tous les 50 fichiers et remplit la table à la fin.
 
 ## 3. Réinitialisation, cache et journal
 
@@ -279,6 +285,7 @@ Le GUI pose `root.report_callback_exception`, qui fait de même. Les nouveaux mo
 | `playlist_manager.py` | extraction de `transition_cost`, suppression de `_select_for_duration`, `create_set_list` délègue à `set_proposer` |
 | `analysis_store.py` | `clear_paths` |
 | `config.py` | clé `library_folder` |
+| `mixxx_export.py` | `--project` analyse `selection_files()` |
 | `set_builder.py` | onglet Tracks en 3 colonnes, propositions, boutons reset et cache, champ bibliothèque et « Clear whole cache… » en Configuration |
 | `gui.py` | `app_log.install` au démarrage, `report_callback_exception`, onglet Log |
 | `README.md`, `GUI_README.md` | nouveau flux |
