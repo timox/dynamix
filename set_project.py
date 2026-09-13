@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Set project: one folder per set, with the audio brought into it.
+Set project: one folder per set.
 
     <projects root>/<name>/
-        project.json     options, tracks, set list, step states, results
-        source/          the audio files imported for this set (copies)
+        project.json     selection, tracks, proposals, set list, step states, results
         premaster/       corrected copies written by the pre-master pass
         exports/         M3U playlists, transition sheets, JSON, charts
+        source/          (projects created before version 3 only) imported copies
 
-The music folder you started from is never written to. The GUI and the
-command-line tools read and update project.json, so you always know where
-you are and never redo a step.
+The tracks of a set are picked in the music library (one folder holding every
+track, see library.py) and referenced by absolute path: nothing is copied and
+the library is never written to. The GUI and the command-line tools read and
+update project.json, so you always know where you are and never redo a step.
 """
 
 import datetime as _dt
@@ -25,7 +26,7 @@ AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.aiff', '.
 
 STEPS: List[Tuple[str, str, bool]] = [
     # key, label, required
-    ("analyze", "Analyze the tracks", True),
+    ("analyze", "Select and analyze the tracks", True),
     ("setlist", "Create the set list", True),
     ("transitions", "Plan the transitions", True),
     ("premaster", "Pre-master the set (optional)", False),
@@ -34,8 +35,8 @@ STEPS: List[Tuple[str, str, bool]] = [
 ]
 
 HINTS: Dict[str, str] = {
-    "analyze": "Click 'Analyze' to measure BPM, key and energy of every imported track (cached: only new files take time).",
-    "setlist": "Click 'Propose' for an automatic order, then adjust it with Add / Remove / Up / Down in the Tracks tab.",
+    "analyze": "Pick tracks in the Library, add them to the Selection, then 'Analyze selection' (cached tracks are instant).",
+    "setlist": "Click 'Propose', compare the variants, then 'Use this proposal' and adjust the order.",
     "transitions": "Click 'Plan Transitions' to compute intro/outro sections and the transition sheet.",
     "premaster": "Optional: 'Pre-master Set' writes level-matched, phase-repaired copies into the project's premaster folder; later steps then use those copies.",
     "playlist": "Optional: 'Create Playlist' writes the set order as an M3U file into the project's exports folder.",
@@ -100,7 +101,7 @@ class SetProject:
         self.folder = os.path.abspath(folder)
         self.path = os.path.join(self.folder, self.FILENAME)
         self.data: Dict = {
-            "version": 2,
+            "version": 3,
             "name": os.path.basename(self.folder),
             "created": _now(),
             "updated": _now(),
@@ -115,8 +116,11 @@ class SetProject:
                 "fix_phase": True,
                 "mono_bass_hz": 120.0,
             },
-            "tracks": [],          # analysed track records (one per source file)
-            "set_list": [],        # ordered file paths of the proposal / edited set
+            "selection": [],       # absolute paths of the tracks picked in the library
+            "tracks": [],          # analysed track records (selected files only)
+            "failed": [],          # selected files whose analysis failed
+            "proposals": None,     # {params, created, variants[]} from set_proposer
+            "set_list": [],        # ordered file paths of the chosen proposal / edited set
             "steps": {key: {"done": False, "at": None, "details": {}} for key, _, _ in STEPS},
             "transitions": None,
             "premaster": None,
@@ -136,8 +140,7 @@ class SetProject:
         project.data["source_folder"] = os.path.abspath(source_folder) if source_folder else ""
         if options:
             project.data["options"].update(options)
-        for sub in (cls.SOURCE_DIR, cls.PREMASTER_DIR, cls.EXPORTS_DIR):
-            os.makedirs(os.path.join(folder, sub), exist_ok=True)
+        project.ensure_dirs()
         project.save()
         return project
 
@@ -170,7 +173,7 @@ class SetProject:
         return os.path.join(self.folder, self.EXPORTS_DIR)
 
     def ensure_dirs(self) -> None:
-        for d in (self.source_dir, self.premaster_dir, self.exports_dir):
+        for d in (self.premaster_dir, self.exports_dir):
             os.makedirs(d, exist_ok=True)
 
     # ------------------------------------------------------------- persistence
@@ -186,7 +189,16 @@ class SetProject:
                 self.data["options"].update(value)
             else:
                 self.data[key] = value
+        self._migrate()
         return self
+
+    def _migrate(self) -> None:
+        """Version 2 projects: the imported copies in source/ become the selection."""
+        if int(self.data.get("version") or 0) >= 3:
+            return
+        if not self.data.get("selection"):
+            self.data["selection"] = self.source_files()
+        self.data["version"] = 3
 
     def save(self) -> str:
         self.data["updated"] = _now()
@@ -203,7 +215,7 @@ class SetProject:
         Copy audio files into source/ (skipping identical existing copies).
         Returns counts {'copied', 'skipped', 'failed'}.
         """
-        self.ensure_dirs()
+        os.makedirs(self.source_dir, exist_ok=True)
         counts = {"copied": 0, "skipped": 0, "failed": 0}
         known = {entry["original"]: entry for entry in self.data["imported"]}
         for i, src in enumerate(files):
@@ -262,6 +274,100 @@ class SetProject:
         self.data["tracks"] = [dict(t) for t in tracks]
         known = {t["file_path"] for t in self.data["tracks"]}
         self.data["set_list"] = [p for p in self.data["set_list"] if p in known]
+        self.data["failed"] = [p for p in self.selection_files() if p not in known]
+
+    # ------------------------------------------------------------- selection (picked in the library)
+    @property
+    def selection(self) -> List[str]:
+        return self.data["selection"]
+
+    def selection_files(self) -> List[str]:
+        """Selected files that exist on disk (what gets analysed)."""
+        return [p for p in self.data["selection"] if os.path.isfile(p)]
+
+    def add_to_selection(self, paths: List[str]) -> int:
+        """Append new paths (in the given order). Returns how many were added."""
+        added = 0
+        for p in paths:
+            if p not in self.data["selection"]:
+                self.data["selection"].append(p)
+                added += 1
+        if added:
+            self.data["proposals"] = None
+            self.mark("analyze", done=False)
+            self.invalidate_from("analyze")
+        return added
+
+    def remove_from_selection(self, paths: List[str]) -> int:
+        """Drop paths from the selection, the analysed tracks and the set list."""
+        gone = set(paths) & set(self.data["selection"])
+        if not gone:
+            return 0
+        self.data["selection"] = [p for p in self.data["selection"] if p not in gone]
+        self.data["tracks"] = [t for t in self.data["tracks"] if t["file_path"] not in gone]
+        self.data["failed"] = [p for p in self.data.get("failed", []) if p not in gone]
+        self.data["set_list"] = [p for p in self.data["set_list"] if p not in gone]
+        self.data["proposals"] = None
+        self.invalidate_from("analyze")
+        return len(gone)
+
+    def selection_rows(self) -> List[Dict]:
+        """One row per selected file: its analysed record when there is one, plus a 'state'."""
+        by_path = {t["file_path"]: t for t in self.data["tracks"]}
+        failed = set(self.data.get("failed") or [])
+        rows = []
+        for p in self.data["selection"]:
+            row = dict(by_path[p]) if p in by_path else {"file_path": p, "filename": os.path.basename(p)}
+            if not os.path.isfile(p):
+                row["state"] = "missing"
+            elif p in by_path:
+                row["state"] = "analysed"
+            elif p in failed:
+                row["state"] = "failed"
+            else:
+                row["state"] = "pending"
+            rows.append(row)
+        return rows
+
+    def proposal_tracks(self) -> Tuple[List[Dict], List[str]]:
+        """(analysed selected tracks whose file exists, file names of the selected tracks left out)."""
+        usable, skipped = [], []
+        for row in self.selection_rows():
+            if row["state"] == "analysed":
+                usable.append({k: v for k, v in row.items() if k != "state"})
+            else:
+                skipped.append(row["filename"])
+        return usable, skipped
+
+    def forget_analysis(self) -> None:
+        """After clearing the analysis cache: the selection must be analysed again."""
+        self.data["tracks"] = []
+        self.data["failed"] = []
+        self.data["proposals"] = None
+        self.mark("analyze", done=False)
+        self.invalidate_from("analyze")
+
+    # ------------------------------------------------------------- proposals
+    def set_proposals(self, params: Dict, variants: List[Dict]) -> None:
+        """Keep the variants returned by set_proposer.propose (without their track records)."""
+        self.data["proposals"] = {
+            "params": dict(params),
+            "created": _now(),
+            "variants": [{k: v for k, v in variant.items() if k != "tracks"} for variant in variants],
+        }
+
+    def proposal_variants(self) -> List[Dict]:
+        return (self.data.get("proposals") or {}).get("variants") or []
+
+    def use_proposal(self, index: int) -> List[str]:
+        """Copy a proposal into the set list (later steps are invalidated). Returns the set list."""
+        variants = self.proposal_variants()
+        if not 0 <= index < len(variants):
+            raise IndexError(f"No proposal #{index + 1}")
+        variant = variants[index]
+        self.set_order(variant["order"])
+        self.mark("setlist", count=len(self.data["set_list"]), curve=variant["curve"], score=variant["score"])
+        return self.data["set_list"]
 
     def track(self, file_path: str) -> Optional[Dict]:
         for t in self.data["tracks"]:
@@ -334,6 +440,55 @@ class SetProject:
                 mapping[r["input"]] = r["output"]
         return mapping
 
+    # ------------------------------------------------------------- reset
+    @staticmethod
+    def _files_under(path: str) -> List[str]:
+        if os.path.isfile(path):
+            return [path]
+        found = []
+        for root, _dirs, names in os.walk(path):
+            found.extend(os.path.join(root, n) for n in names)
+        return found
+
+    def _count(self, folders: List[str]) -> Dict[str, int]:
+        files = [f for d in folders if os.path.isdir(d) for f in self._files_under(d)]
+        return {"files": len(files), "bytes": sum(os.path.getsize(f) for f in files)}
+
+    def reset_preview(self) -> Dict[str, Dict[str, int]]:
+        """What reset() would delete: {'outputs': premaster/ + exports/, 'imported': source/}."""
+        return {"outputs": self._count([self.premaster_dir, self.exports_dir]),
+                "imported": self._count([self.source_dir])}
+
+    def reset(self, delete_imported: bool = False) -> Dict[str, int]:
+        """
+        Start the set again from an empty selection. Keeps the name, options, notes
+        and the analysis cache; empties premaster/ and exports/ (and source/ when
+        delete_imported). Returns {'files_deleted', 'bytes_deleted'}.
+        """
+        folders = [self.premaster_dir, self.exports_dir] + ([self.source_dir] if delete_imported else [])
+        result = {"files_deleted": 0, "bytes_deleted": 0}
+        for folder in folders:
+            if not os.path.isdir(folder):
+                continue
+            for name in os.listdir(folder):
+                path = os.path.join(folder, name)
+                files = self._files_under(path)
+                size = sum(os.path.getsize(f) for f in files)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                result["files_deleted"] += len(files)
+                result["bytes_deleted"] += size
+        self.data.update(selection=[], tracks=[], failed=[], proposals=None, set_list=[],
+                         transitions=None, premaster=None)
+        if delete_imported:
+            self.data["imported"] = []
+        for key, _, _ in STEPS:
+            self.mark(key, done=False)
+        self.save()
+        return result
+
     # ------------------------------------------------------------- steps
     def mark(self, step: str, done: bool = True, **details) -> None:
         state = self.data["steps"].setdefault(step, {"done": False, "at": None, "details": {}})
@@ -369,7 +524,8 @@ class SetProject:
         lines = [f"Set project: {self.name}", f"Folder: {self.folder}",
                  f"Source music folder: {self.data.get('source_folder') or '-'}",
                  f"Updated: {self.data['updated']}",
-                 f"Imported files: {len(self.data['imported'])} | analysed: {len(self.tracks)} | in set list: {len(self.data['set_list'])}"]
+                 f"Selected: {len(self.data['selection'])} | analysed: {len(self.tracks)} | failed: {len(self.data.get('failed') or [])}"
+                 f" | proposals: {len(self.proposal_variants())} | in set list: {len(self.data['set_list'])}"]
         for key, label, required in STEPS:
             state = self.step_state(key)
             mark = "[x]" if state["done"] else ("[ ]" if required else "[ ] (optional)")
