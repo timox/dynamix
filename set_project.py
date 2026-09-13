@@ -5,6 +5,7 @@ Set project: one folder per set.
     <projects root>/<name>/
         project.json     selection, tracks, proposals, set list, step states, results
         premaster/       corrected copies written by the pre-master pass
+        fx/              copies with transition FX (freeze, filters, echo, samples)
         exports/         M3U playlists, transition sheets, JSON, charts
         source/          (projects created before version 3 only) imported copies
 
@@ -95,6 +96,7 @@ class SetProject:
     FILENAME = "project.json"
     SOURCE_DIR = "source"
     PREMASTER_DIR = "premaster"
+    FX_DIR = "fx"
     EXPORTS_DIR = "exports"
 
     def __init__(self, folder: str, autoload: bool = True):
@@ -124,6 +126,7 @@ class SetProject:
             "steps": {key: {"done": False, "at": None, "details": {}} for key, _, _ in STEPS},
             "transitions": None,
             "premaster": None,
+            "fx": {"transitions": {}, "render": None},  # FX recipes per track pair, and the last render
             "notes": "",
         }
         if autoload and os.path.exists(self.path):
@@ -169,6 +172,10 @@ class SetProject:
         return os.path.join(self.folder, self.PREMASTER_DIR)
 
     @property
+    def fx_dir(self) -> str:
+        return os.path.join(self.folder, self.FX_DIR)
+
+    @property
     def exports_dir(self) -> str:
         return os.path.join(self.folder, self.EXPORTS_DIR)
 
@@ -187,6 +194,9 @@ class SetProject:
                     self.data["steps"][step_key].update(state)
             elif key == "options":
                 self.data["options"].update(value)
+            elif key == "fx":
+                self.data["fx"] = {"transitions": dict((value or {}).get("transitions") or {}),
+                                   "render": (value or {}).get("render")}
             else:
                 self.data[key] = value
         self._migrate()
@@ -447,6 +457,90 @@ class SetProject:
                 mapping[r["input"]] = r["output"]
         return mapping
 
+    # ------------------------------------------------------------- transition FX
+    @staticmethod
+    def fx_key(a: str, b: str) -> str:
+        return f"{a}|{b}"
+
+    def fx_for_pair(self, a: str, b: str) -> Optional[Dict]:
+        """The FX entry {nudge_ms, effects} of the transition a -> b, or None."""
+        return self.data["fx"]["transitions"].get(self.fx_key(a, b))
+
+    def fx_transition(self, a: str, b: str) -> Dict:
+        """The FX entry of a -> b, created empty when missing."""
+        return self.data["fx"]["transitions"].setdefault(self.fx_key(a, b), {"nudge_ms": 0.0, "effects": []})
+
+    def _fx_changed(self) -> None:
+        self.data["fx"]["render"] = None
+        self.mark("fx", done=False)
+
+    def set_fx_effects(self, a: str, b: str, effects: List[Dict]) -> None:
+        self.fx_transition(a, b)["effects"] = [dict(fx) for fx in effects]
+        self._fx_changed()
+
+    def set_fx_nudge(self, a: str, b: str, nudge_ms: float) -> None:
+        self.fx_transition(a, b)["nudge_ms"] = float(nudge_ms)
+        self._fx_changed()
+
+    def remove_fx(self, a: str, b: str) -> None:
+        if self.data["fx"]["transitions"].pop(self.fx_key(a, b), None) is not None:
+            self._fx_changed()
+
+    def set_list_pairs(self) -> List[Tuple[str, str]]:
+        lst = self.data["set_list"]
+        return list(zip(lst, lst[1:]))
+
+    def active_fx_pairs(self) -> List[Tuple[str, str]]:
+        """Neighbouring set-list pairs with at least one enabled effect, in set order."""
+        active = []
+        for a, b in self.set_list_pairs():
+            entry = self.fx_for_pair(a, b)
+            if entry and any(fx.get("enabled", True) for fx in entry.get("effects") or []):
+                active.append((a, b))
+        return active
+
+    def inactive_fx_pairs(self) -> List[Tuple[str, str]]:
+        """Pairs that have effects but are no longer neighbours in the set list."""
+        neighbours = set(self.set_list_pairs())
+        out = []
+        for key, entry in self.data["fx"]["transitions"].items():
+            a, _, b = key.partition("|")
+            if entry.get("effects") and (a, b) not in neighbours:
+                out.append((a, b))
+        return out
+
+    def set_fx_render(self, results: List[Dict]) -> None:
+        self.data["fx"]["render"] = {"at": _now(), "results": [dict(r) for r in results]}
+
+    def fx_map(self) -> Dict[str, Dict]:
+        """original file path -> FX render result, for copies that exist on disk."""
+        render = self.data["fx"].get("render") or {}
+        return {r["source"]: r for r in render.get("results") or [] if r.get("output") and os.path.exists(r["output"])}
+
+    def rendered_profiles(self, profiles: List[Dict]) -> Tuple[List[Dict], Dict[str, int]]:
+        """
+        Profiles pointing at the file to play: the FX copy (with its rendered intro/outro positions),
+        else the pre-mastered copy, else the original. Returns (profiles, {'fx': n, 'premaster': n}).
+        """
+        fx, premaster = self.fx_map(), self.premaster_map()
+        out, counts = [], {"fx": 0, "premaster": 0}
+        for p in profiles:
+            src = p.get("file_path")
+            if src in fx:
+                r = fx[src]
+                q = dict(p, file_path=r["output"], filename=os.path.basename(r["output"]))
+                for key in ("intro_start", "intro_end", "outro_start", "outro_end", "duration"):
+                    if key in r:
+                        q[key] = r[key]
+                counts["fx"] += 1
+            elif src in premaster:
+                q = dict(p, file_path=premaster[src], filename=os.path.basename(premaster[src]))
+                counts["premaster"] += 1
+            else:
+                q = dict(p)
+            out.append(q)
+        return out, counts
+
     # ------------------------------------------------------------- reset
     @staticmethod
     def _files_under(path: str) -> List[str]:
@@ -462,8 +556,8 @@ class SetProject:
         return {"files": len(files), "bytes": sum(os.path.getsize(f) for f in files)}
 
     def reset_preview(self) -> Dict[str, Dict[str, int]]:
-        """What reset() would delete: {'outputs': premaster/ + exports/, 'imported': source/}."""
-        return {"outputs": self._count([self.premaster_dir, self.exports_dir]),
+        """What reset() would delete: {'outputs': premaster/ + fx/ + exports/, 'imported': source/}."""
+        return {"outputs": self._count([self.premaster_dir, self.fx_dir, self.exports_dir]),
                 "imported": self._count([self.source_dir])}
 
     def reset(self, delete_imported: bool = False) -> Dict[str, int]:
@@ -472,7 +566,7 @@ class SetProject:
         and the analysis cache; empties premaster/ and exports/ (and source/ when
         delete_imported). Returns {'files_deleted', 'bytes_deleted'}.
         """
-        folders = [self.premaster_dir, self.exports_dir] + ([self.source_dir] if delete_imported else [])
+        folders = [self.premaster_dir, self.fx_dir, self.exports_dir] + ([self.source_dir] if delete_imported else [])
         result = {"files_deleted": 0, "bytes_deleted": 0}
         for folder in folders:
             if not os.path.isdir(folder):
@@ -488,7 +582,7 @@ class SetProject:
                 result["files_deleted"] += len(files)
                 result["bytes_deleted"] += size
         self.data.update(selection=[], tracks=[], failed=[], proposals=None, set_list=[],
-                         transitions=None, premaster=None)
+                         transitions=None, premaster=None, fx={"transitions": {}, "render": None})
         if delete_imported:
             self.data["imported"] = []
         for key, _, _ in STEPS:
@@ -514,6 +608,8 @@ class SetProject:
             self.data["transitions"] = None
         if step in ("analyze", "setlist", "transitions"):
             self.data["premaster"] = None
+        if step in ("analyze", "setlist", "transitions", "premaster"):
+            self.data["fx"]["render"] = None  # the recipes are kept
 
     def step_state(self, step: str) -> Dict:
         return self.data["steps"].get(step, {"done": False, "at": None, "details": {}})
