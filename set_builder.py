@@ -486,12 +486,7 @@ class SetBuilderMixin:
         self.library_caption.config(text=caption)
 
     def rescan_library(self):
-        """Scan the library folder in the background (headers and cache only, no audio decoding).
-
-        The worker thread only touches the plain `state` dict below (no Tk calls); the main
-        thread polls it via `self.root.after(...)`, so every widget update happens on the main
-        thread, whether or not the worker gets ahead of it.
-        """
+        """Scan the library folder in the background (headers and cache only, no audio decoding)."""
         folder = (self.config.get("library_folder") or "").strip()
         if not folder:
             self._library_entries = []
@@ -501,35 +496,25 @@ class SetBuilderMixin:
             return
         self._library_scanning = True
         self._refresh_library_table()
-        state = {"done": False, "entries": [], "error": None, "status": None}
 
         def progress(i, n, name):
             if i % 50 == 0 or i == n:
-                state["status"] = f"Scanning library {i}/{n}: {name}"
+                self.root.after(0, self.update_status, f"Scanning library {i}/{n}: {name}")
 
         def work():
             try:
-                state["entries"] = library.scan(folder, progress=progress)
+                entries = library.scan(folder, progress=progress)
             except Exception as e:
-                state["error"] = e
-            state["done"] = True
+                entries = []
+                self._report_error(f"Library scan failed: {e}", e)
 
-        def poll():
-            status, state["status"] = state["status"], None
-            if status:
-                self.update_status(status)
-            if not state["done"]:
-                self.root.after(50, poll)
-                return
-            if state["error"] is not None:
-                self._report_error(f"Library scan failed: {state['error']}", state["error"])
-            self._library_scanning = False
-            self._library_entries = state["entries"]
-            self._refresh_library_table()
-            self.update_status(f"Library: {len(state['entries'])} tracks in {folder}")
-
+            def done():
+                self._library_scanning = False
+                self._library_entries = entries
+                self._refresh_library_table()
+                self.update_status(f"Library: {len(entries)} tracks in {folder}")
+            self.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
-        self.root.after(50, poll)
 
     def _merge_into_library(self, tracks):
         """Show freshly analysed values in the library table without rescanning."""

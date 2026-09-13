@@ -60,43 +60,64 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def scenario():
+        global app
+        app = gui.DynaMixGUI(root, log_buffer=buffer)
+        project = SetProject.create(app.config.projects_root, "smoke")
+        app.load_project(project.folder)
+        pump(seconds=0.5)
+
+        logging.getLogger("dynamix.smoke").warning("smoke warning")
+        check(pump(lambda: app.notebook.tab(app.log_frame, "text").startswith("Log ("), 2.0),
+              "the Log tab title counts new warnings")
+        app.notebook.select(app.log_frame)
+        check(pump(lambda: app.notebook.tab(app.log_frame, "text") == "Log", 2.0), "opening the Log tab resets the counter")
+        check("smoke warning" in app.log_text.get("1.0", tk.END), "the Log tab shows the records")
+        app.notebook.select(0)
+
+        check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
+
+        check(pump(lambda: not app._library_scanning and len(app._library_rows) == 2, 10.0),
+              "the library lists the 2 tracks of the library folder")
+        app.library_filter_var.set("two")
+        check(len(app._library_rows) == 1, "the filter narrows the library")
+        app.library_filter_var.set("")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        check(len(app.project.selection) == 2, "both tracks are selected")
+        check([r["state"] for r in app._selection_rows] == ["pending", "pending"], "new selection rows are pending")
+        app.selection_tree.selection_set("C1")
+        app.selection_remove()
+        check(len(app.project.selection) == 1, "remove drops a track from the selection")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        check(len(app.project.selection) == 2, "adding again keeps one entry per track")
+
+        # --- checks added by later tasks go above this line ---
+
+
+app = None
+failure = [None]
+
+
+def run():
+    try:
+        scenario()
+    except Exception as e:
+        failure[0] = e
+    finally:
+        root.quit()
+
+
 root = tk.Tk()
 root.withdraw()
 root.report_callback_exception = lambda t, e, tb: app_log.log_exception(t, e, tb, "Error in the interface")
 errors = []
 try:
-    app = gui.DynaMixGUI(root, log_buffer=buffer)
-    project = SetProject.create(app.config.projects_root, "smoke")
-    app.load_project(project.folder)
-    pump(seconds=0.5)
-
-    logging.getLogger("dynamix.smoke").warning("smoke warning")
-    check(pump(lambda: app.notebook.tab(app.log_frame, "text").startswith("Log ("), 2.0),
-          "the Log tab title counts new warnings")
-    app.notebook.select(app.log_frame)
-    check(pump(lambda: app.notebook.tab(app.log_frame, "text") == "Log", 2.0), "opening the Log tab resets the counter")
-    check("smoke warning" in app.log_text.get("1.0", tk.END), "the Log tab shows the records")
-    app.notebook.select(0)
-
-    check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
-
-    check(pump(lambda: not app._library_scanning and len(app._library_rows) == 2, 10.0),
-          "the library lists the 2 tracks of the library folder")
-    app.library_filter_var.set("two")
-    check(len(app._library_rows) == 1, "the filter narrows the library")
-    app.library_filter_var.set("")
-    app.library_tree.selection_set(app.library_tree.get_children())
-    app.selection_add()
-    check(len(app.project.selection) == 2, "both tracks are selected")
-    check([r["state"] for r in app._selection_rows] == ["pending", "pending"], "new selection rows are pending")
-    app.selection_tree.selection_set("C1")
-    app.selection_remove()
-    check(len(app.project.selection) == 1, "remove drops a track from the selection")
-    app.library_tree.selection_set(app.library_tree.get_children())
-    app.selection_add()
-    check(len(app.project.selection) == 2, "adding again keeps one entry per track")
-
-    # --- checks added by later tasks go above this line ---
+    root.after(0, run)
+    root.mainloop()
+    if failure[0] is not None:
+        raise failure[0]
 finally:
     errors = buffer.records(logging.ERROR)
     try:
