@@ -112,6 +112,20 @@ def scenario():
         check(len(app.project.set_list) == 2 and app.project.is_done("setlist"), "the proposal became the set list")
         check(app.project.options["energy_curve"] != "all", "'all' is not saved as the project's energy curve")
 
+        open(os.path.join(app.project.exports_dir, "old.m3u"), "w").close()
+        result = app._do_reset()
+        check(result == {"files_deleted": 1, "bytes_deleted": 0}, f"reset deletes the exports, got {result}")
+        check(app.project.selection == [] and app._selection_rows == [] and app.project.set_list == [],
+              "reset empties the selection and the set list")
+        app.library_tree.selection_set(app.library_tree.get_children())
+        app.selection_add()
+        from analysis_store import get_store
+        first = app.project.selection[0]
+        get_store().put(first, "features", {"duration": 2.0, "bpm": 120.0})
+        check(app._do_clear_analysis_cache(list(app.project.selection)) == 1, "the selection's cache entries are removed")
+        check(get_store().get(first, "features") is None, "the cache entry is gone")
+        check(pump(lambda: not app._library_scanning, 10.0), "the library is rescanned after clearing the cache")
+
         # --- checks added by later tasks go above this line ---
 
 

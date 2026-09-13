@@ -26,7 +26,7 @@ from mastering import check_files, format_check_summary, premaster_files, format
 from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
-from set_project import SetProject, STEPS, list_projects, audio_files_in
+from set_project import SetProject, STEPS, list_projects
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
@@ -61,8 +61,9 @@ class SetBuilderMixin:
         self.project_combo.pack(side=tk.LEFT, padx=4)
         self.project_combo.bind("<<ComboboxSelected>>", lambda e: self.open_selected_project())
         ttk.Button(head, text="New project...", command=self.new_project).pack(side=tk.LEFT, padx=4)
-        ttk.Button(head, text="Import audio...", command=self.import_audio).pack(side=tk.LEFT, padx=4)
         ttk.Button(head, text="Project summary", command=self.show_project_summary).pack(side=tk.LEFT, padx=4)
+        ttk.Button(head, text="Reset project...", command=self.reset_project).pack(side=tk.LEFT, padx=(16, 4))
+        ttk.Button(head, text="Clear analysis cache...", command=self.clear_analysis_cache).pack(side=tk.LEFT, padx=4)
         self.project_path_label = ttk.Label(frame, text="No project open. Create one with 'New project...' (the Configuration tab sets where projects live).",
                                             foreground=MUTED, anchor="w")
         self.project_path_label.pack(fill=tk.X, padx=14)
@@ -293,40 +294,91 @@ class SetBuilderMixin:
             return
         self.load_project(project.folder)
         self.refresh_project_list()
-        if messagebox.askyesno("Import audio", "Import the audio files of a music folder into this project now?"):
-            self.import_audio()
-    
-    def import_audio(self):
-        if self.project is None:
-            messagebox.showinfo("Project", "Create or open a project first")
-            return
-        folder = filedialog.askdirectory(title="Music folder to import (files are COPIED into the project, originals untouched)")
-        if not folder:
-            return
-        files = audio_files_in(folder)
-        if not files:
-            messagebox.showwarning("Warning", "No audio files found in that folder")
+        if not (self.config.get("library_folder") or "").strip():
+            messagebox.showinfo("Music library", "Set your music library folder in the Configuration tab, "
+                                                 "then pick the tracks of this set in the Library.")
+
+    def reset_project(self):
+        if not self._require_project():
             return
         project = self.project
-        
-        def work():
-            counts = project.import_folder(folder, progress=lambda i, n, name, status: self.root.after(
-                0, self.update_status, f"Importing {i}/{n} ({status}): {name}"))
-            
-            def done():
-                if counts["copied"]:
-                    project.mark("analyze", done=False)
-                    project.invalidate_from("analyze")
-                    project.save()
-                self.load_project(project.folder)
-                self.update_status(f"Import done: {counts['copied']} copied, {counts['skipped']} already there, {counts['failed']} failed")
-                if counts["copied"] and messagebox.askyesno("Analyze", "Analyze the imported tracks now?"):
-                    self.analyze_playlist()
-            self.root.after(0, done)
-        
-        self.update_status(f"Importing {len(files)} files from {folder} ...")
-        threading.Thread(target=work, daemon=True).start()
-    
+        preview = project.reset_preview()
+        outputs, imported = preview["outputs"], preview["imported"]
+        win = tk.Toplevel(self.root)
+        win.title("Reset project")
+        win.transient(self.root)
+        win.resizable(False, False)
+        text = (f"Reset '{project.name}' to an empty set?\n\n"
+                f"Deleted: the selection ({len(project.selection)} tracks), the analysed track list, the proposals, "
+                f"the set list, the transitions and pre-master results, and {outputs['files']} files "
+                f"({outputs['bytes'] / 1e6:.1f} MB) in premaster/ and exports/.\n\n"
+                "Kept: the project name, its options and notes, the analysis cache and your library.")
+        ttk.Label(win, text=text, justify=tk.LEFT, wraplength=520).pack(padx=16, pady=(16, 8), anchor="w")
+        delete_imported = tk.BooleanVar(value=False)
+        if imported["files"]:
+            ttk.Checkbutton(win, text=f"Also delete the imported copies in source/ ({imported['files']} files, "
+                                      f"{imported['bytes'] / 1e6:.1f} MB)", variable=delete_imported).pack(padx=16, anchor="w")
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=tk.X, padx=16, pady=16)
+
+        def confirm():
+            choice = bool(delete_imported.get())
+            win.destroy()
+            self._do_reset(choice)
+        ttk.Button(buttons, text="Reset project", command=confirm).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=6)
+        win.grab_set()
+
+    def _do_reset(self, delete_imported=False):
+        project = self.project
+        try:
+            result = project.reset(delete_imported=delete_imported)
+        except OSError as e:
+            self._report_error(f"Reset failed (is a file open in another program?): {e}", e)
+            self.load_project(project.folder)
+            return None
+        message = (f"Project '{project.name}' reset: {result['files_deleted']} files deleted "
+                   f"({result['bytes_deleted'] / 1e6:.1f} MB)")
+        log.info(message)
+        self.load_project(project.folder)
+        self.update_status(message)
+        return result
+
+    def clear_analysis_cache(self):
+        if not self._require_project():
+            return
+        paths = list(self.project.selection)
+        if not paths:
+            messagebox.showinfo("Clear analysis cache", "The selection is empty: nothing to clear.\n"
+                                                        "(The Configuration tab can clear the whole cache.)")
+            return
+        if not messagebox.askyesno("Clear analysis cache",
+                                   f"Forget the analysis results (features, intro/outro, mastering, bands) of the "
+                                   f"{len(paths)} selected tracks?\n\nThey will be analysed again. The selection is kept; "
+                                   "the set list comes back after 'Analyze selection'.", icon="warning"):
+            return
+        self._do_clear_analysis_cache(paths)
+
+    def _do_clear_analysis_cache(self, paths):
+        removed = get_store().clear_paths(paths)
+        message = f"Analysis cache: {removed} results removed for {len(paths)} selected tracks"
+        log.info(message)
+        self._after_cache_cleared()
+        self.update_status(message)
+        return removed
+
+    def _after_cache_cleared(self):
+        """Cached analyses are gone: the project must analyse its selection again."""
+        if self.project is not None:
+            self.project.forget_analysis()
+            self.playlist_manager.tracks = []
+            self.current_set_list = None
+            self.transition_planner = None
+            self._save_project()
+            self._refresh_tables()
+            self._render_overview()
+        self.rescan_library()
+
     def load_project(self, folder):
         """Open a project folder and restore its state (no audio work)."""
         try:
