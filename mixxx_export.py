@@ -273,7 +273,8 @@ def main():
         manager = PlaylistManager(args.playlist)
         print(f"Analyzing {args.playlist} (cached results are reused) ...")
         manager.analyze_playlist(progress_callback=lambda i, n, name, status: print(f"  {i}/{n} {status}: {name}"))
-        tracks = manager.create_set_list(duration_minutes=args.set_duration or 60, energy_curve=args.energy_curve or "build")
+        tracks = manager.create_set_list(duration_minutes=args.set_duration or 60, energy_curve=args.energy_curve or "build",
+                                         mix_bars=args.mix_bars)
     else:
         from playlist_manager import PlaylistManager
         from set_project import SetProject
@@ -295,7 +296,7 @@ def main():
         else:
             duration = args.set_duration or int(project.options.get("set_duration", 60))
             curve = args.energy_curve or project.options.get("energy_curve", "build")
-            tracks = manager.create_set_list(duration_minutes=duration, energy_curve=curve)
+            tracks = manager.create_set_list(duration_minutes=duration, energy_curve=curve, mix_bars=args.mix_bars)
             project.set_set_list(tracks)
             project.options.update({"set_duration": duration, "energy_curve": curve})
             project.invalidate_from("setlist")
@@ -333,9 +334,11 @@ def main():
         os.makedirs(args.save_charts, exist_ok=True)
         targets = None
         if project is not None:
-            from playlist_manager import PlaylistManager
-            values = [PlaylistManager._energy_value(t) for t in tracks]
-            targets = PlaylistManager._target_curve(values, project.options.get("energy_curve", "build"))
+            import set_proposer
+            # the curve the set list was built for (a used proposal records it), else the project's option
+            curve = ((project.step_state("setlist").get("details") or {}).get("curve")
+                     or project.options.get("energy_curve", "build"))
+            targets = set_proposer.curve_targets(tracks, {"build_up": "build"}.get(curve, curve), args.mix_bars)
         charts.save(charts.set_overview(planner.profiles, targets), os.path.join(args.save_charts, "set_overview.png"))
         charts.save(charts.set_timeline(planner.profiles, planner.transitions), os.path.join(args.save_charts, "set_map.png"))
         from mastering import playlist_tone_target

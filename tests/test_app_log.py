@@ -50,6 +50,12 @@ class TestAppLog(unittest.TestCase):
         self.assertIn((logging.ERROR, "broken thing"), messages)
         self.assertNotIn((logging.ERROR, "partial"), messages)  # no newline yet
 
+    def test_streams_expose_encoding_and_errors(self):
+        self.assertIsInstance(sys.stdout.encoding, str)
+        self.assertIsInstance(sys.stderr.errors, str)
+        self.assertIsInstance(sys.stdout.errors, str)
+        self.assertIsInstance(sys.stderr.encoding, str)
+
     def test_thread_exception_is_logged_with_traceback(self):
         def boom():
             raise ZeroDivisionError("nope")

@@ -106,6 +106,16 @@ class _StreamToLog:
     def isatty(self) -> bool:
         return False
 
+    @property
+    def encoding(self) -> str:
+        value = getattr(self.original, "encoding", None)
+        return value if isinstance(value, str) else "utf-8"
+
+    @property
+    def errors(self) -> str:
+        value = getattr(self.original, "errors", None)
+        return value if isinstance(value, str) else "strict"
+
 
 def log_exception(exc_type, exc_value, exc_traceback, where: str = "Unhandled error") -> None:
     logging.getLogger(LOGGER_NAME).error("%s: %s", where, exc_value, exc_info=(exc_type, exc_value, exc_traceback))

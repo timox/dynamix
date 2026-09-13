@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
@@ -134,6 +135,7 @@ class PlaylistManager:
                 
             except Exception as e:
                 print(f"Error analyzing {file_path}: {e}")
+                logging.getLogger("dynamix.analysis").warning("Analysis failed for %s: %s", os.path.basename(file_path), e)
                 status = 'failed'
                 self.last_run['failed'] += 1
             if progress_callback:
@@ -218,7 +220,7 @@ class PlaylistManager:
         return [tracks[i] for i in order]
 
     def create_set_list(self, duration_minutes: int = 60,
-                       energy_curve: str = 'build') -> List[Dict]:
+                       energy_curve: str = 'build', mix_bars: int = 8) -> List[Dict]:
         """
         Best set list for the duration, drawn from the analysed tracks: the first
         variant of set_proposer.propose (the GUI shows several).
@@ -226,13 +228,14 @@ class PlaylistManager:
         Args:
             duration_minutes: Target set duration in minutes (crossfades overlap)
             energy_curve: 'build', 'wave', 'peak_middle', 'constant' ('build_up' = 'build')
+            mix_bars: Length of each crossfade in bars (sets the overlap between tracks)
 
         Returns: List of tracks for the set, in playing order
         """
         if not self.tracks:
             raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
         curve = {'build_up': 'build'}.get(energy_curve, energy_curve)
-        return propose(list(self.tracks), duration_minutes * 60, curve=curve, variants=1)[0]['tracks']
+        return propose(list(self.tracks), duration_minutes * 60, curve=curve, mix_bars=mix_bars, variants=1)[0]['tracks']
     
     def analyze_playlist_compatibility(self) -> pd.DataFrame:
         """
