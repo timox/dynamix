@@ -569,6 +569,23 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
     actions['limiter_max_reduction_db'] = float(20 * np.log10(max(np.min(np.abs(limited).max(axis=1) + 1e-9) / max(np.max(np.abs(x)), 1e-9), 1e-9))) if len(x) else 0.0
     x = limited
 
+    write_audio(output_path, x, fs)
+
+    after = analyze_mastering(output_path)
+    return {'input': path, 'output': output_path, 'before': before, 'after': after, 'actions': actions}
+
+
+def output_path_for(path: str, out_dir: str, fmt: str = 'same') -> str:
+    """Where a processed copy of path goes in out_dir (libsndfile cannot write M4A/AAC/AIFF: FLAC instead)."""
+    base, ext = os.path.splitext(os.path.basename(path))
+    out_ext = ext if fmt == 'same' else f".{fmt}"
+    if out_ext.lower() in ('.m4a', '.aac', '.aiff', '.aif'):
+        out_ext = '.flac'
+    return os.path.join(out_dir, base + out_ext)
+
+
+def write_audio(output_path: str, x: np.ndarray, fs: int) -> None:
+    """Write float audio: 24-bit PCM for WAV/AIFF, constant-bitrate MP3, the format's default otherwise."""
     ext = os.path.splitext(output_path)[1].lower()
     subtype = 'PCM_24' if ext in ('.wav', '.aiff', '.aif') else None
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -576,9 +593,6 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
         sf.write(output_path, x, fs, format='MP3', bitrate_mode='CONSTANT', compression_level=0.0)
     else:
         sf.write(output_path, x, fs, subtype=subtype)
-
-    after = analyze_mastering(output_path)
-    return {'input': path, 'output': output_path, 'before': before, 'after': after, 'actions': actions}
 
 
 def analyze_mastering_cached(path: str) -> Dict:
@@ -690,11 +704,7 @@ def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, 
         if 'error' in report:
             results.append({'input': path, 'error': report['error']})
             continue
-        base, ext = os.path.splitext(os.path.basename(path))
-        out_ext = ext if fmt == 'same' else f".{fmt}"
-        if out_ext.lower() in ('.m4a', '.aac', '.aiff', '.aif'):  # libsndfile cannot write these
-            out_ext = '.flac'
-        output_path = os.path.join(out_dir, base + out_ext)
+        output_path = output_path_for(path, out_dir, fmt)
         try:
             results.append(premaster_track(path, output_path, target_lufs, ceiling_db, tone_target,
                                            report=report, repair_phase=repair_phase, mono_bass_hz=mono_bass_hz))
