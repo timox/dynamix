@@ -4,6 +4,7 @@ DynaMix GUI - Graphical User Interface for all DynaMix tools
 A comprehensive GUI application for audio analysis and DJ tools
 """
 
+import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 import os
@@ -22,12 +23,13 @@ from export_tools import ExportTools
 from mix_enhanced import EnhancedMixAnalyzer
 from set_builder import SetBuilderMixin, ConfigTabMixin
 from config import Config
+from log_tab import LogTabMixin
 
 
-class DynaMixGUI(SetBuilderMixin, ConfigTabMixin):
+class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
     """Main GUI application for DynaMix"""
     
-    def __init__(self, root):
+    def __init__(self, root, log_buffer=None):
         self.root = root
         self.root.title("DynaMix - DJ Audio Analysis Tool")
         self.root.geometry("1200x800")
@@ -38,6 +40,7 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin):
         self.current_playlist_dir = None
         self.analysis_results = {}
         self.config = Config()
+        self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
         
         # Status bar (created first: tabs may report while they load a project)
         self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -55,6 +58,7 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin):
         self.create_audio_effects_tab()
         self.create_export_tab()
         self.create_config_tab()
+        self.create_log_tab()
     
     def update_status(self, message: str):
         """Update status bar"""
@@ -684,8 +688,13 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin):
 
 def main():
     """Main entry point for GUI"""
+    import app_log
+    from analysis_store import dynamix_home
+    log_buffer = app_log.install(os.path.join(dynamix_home(), "logs"))
     root = tk.Tk()
-    app = DynaMixGUI(root)
+    root.report_callback_exception = lambda exc_type, exc, tb: app_log.log_exception(exc_type, exc, tb, "Error in the interface")
+    app = DynaMixGUI(root, log_buffer=log_buffer)
+    logging.getLogger("dynamix.gui").info("DynaMix started")
     root.mainloop()
 
 

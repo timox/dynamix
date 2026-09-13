@@ -8,6 +8,7 @@ transitions, optionally pre-mastered, and exported to Mixxx. Every step is
 recorded in the project so the panel always shows where you are.
 """
 
+import logging
 import os
 import threading
 import tkinter as tk
@@ -26,6 +27,7 @@ from set_project import SetProject, STEPS, list_projects, audio_files_in
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
+log = logging.getLogger("dynamix.gui")
 
 
 class SetBuilderMixin:
@@ -334,7 +336,12 @@ class SetBuilderMixin:
             messagebox.showinfo("Project", "Create or open a project first ('New project...')")
             return False
         return True
-    
+
+    def _report_error(self, message, exc=None):
+        """Log an error (with its traceback) and show it; safe to call from a worker thread."""
+        log.error(message, exc_info=exc)
+        self.root.after(0, messagebox.showerror, "Error", message)
+
     def _planner_from_project(self):
         data = self.project.data.get("transitions") if self.project else None
         if not data or not data.get("tracks"):
@@ -514,7 +521,7 @@ class SetBuilderMixin:
                     self.update_status(f"Analyzed {len(manager.tracks)} tracks ({run['cached']} from cache, {run['analyzed']} new, {run['failed']} failed)")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Analysis failed: {str(e)}")
+                self._report_error(f"Analysis failed: {e}", e)
         
         self.update_status(f"Analyzing {len(files)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -542,7 +549,7 @@ class SetBuilderMixin:
             total = sum(float(t.get("duration") or 0) for t in set_list) / 60
             self.update_status(f"Proposed set list: {len(set_list)} tracks, {total:.0f} min, curve '{curve}'. Adjust it in the Tracks tab if needed.")
         except Exception as e:
-            messagebox.showerror("Error", f"Set list creation failed: {str(e)}")
+            self._report_error(f"Set list creation failed: {e}", e)
     
     def _set_tracks_or_warn(self):
         tracks = self.project.set_list_tracks() if self.project else []
@@ -575,7 +582,7 @@ class SetBuilderMixin:
                     self._show_transition_window("set list")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Transition planning failed: {str(e)}")
+                self._report_error(f"Transition planning failed: {e}", e)
         
         self.update_status(f"Planning transitions for {len(tracks)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -598,7 +605,7 @@ class SetBuilderMixin:
                 flagged = sum(1 for r in reports if r.get("flags"))
                 self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Mastering check failed: {str(e)}")
+                self._report_error(f"Mastering check failed: {e}", e)
         
         self.update_status(f"Checking mastering of {len(files)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -629,7 +636,7 @@ class SetBuilderMixin:
                 self.root.after(0, self._show_text_window, "Band Analysis", summary, "band_analysis.txt")
                 self.root.after(0, self.update_status, f"Band analysis done: {len(needs_mix)}/{len(reports)} tracks need a mix revision")
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Band analysis failed: {str(e)}")
+                self._report_error(f"Band analysis failed: {e}", e)
         
         self.update_status(f"Band analysis of {len(tracks)} tracks ...")
         threading.Thread(target=work, daemon=True).start()
@@ -674,7 +681,7 @@ class SetBuilderMixin:
                     self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir}")
                 self.root.after(0, done)
             except Exception as e:
-                self.root.after(0, messagebox.showerror, "Error", f"Pre-master failed: {str(e)}")
+                self._report_error(f"Pre-master failed: {e}", e)
         
         self.update_status(f"Pre-mastering {len(files)} tracks into {out_dir} ...")
         self.set_notebook.select(self.premaster_frame)
