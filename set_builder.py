@@ -901,7 +901,7 @@ class SetBuilderMixin:
         try:
             ExportTools.export_to_m3u(tracks, filename)
         except Exception as e:
-            messagebox.showerror("Error", f"Playlist creation failed: {str(e)}")
+            self._report_error(f"Playlist creation failed: {e}", e)
             return
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
@@ -935,7 +935,7 @@ class SetBuilderMixin:
         try:
             report = MixxxExporter(db_path).export(profiles, playlist_name=playlist_name.strip() or None)
         except Exception as e:
-            messagebox.showerror("Error", f"Mixxx export failed: {str(e)}")
+            self._report_error(f"Mixxx export failed: {e}", e)
             return
         summary = format_report(report)
         if premastered:
