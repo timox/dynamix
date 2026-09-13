@@ -3,8 +3,9 @@ import json
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
-from audio_utils import AudioAnalyzer, key_compatibility_score, analyze_track_compatibility
+from audio_utils import AudioAnalyzer, analyze_track_compatibility
 from analysis_store import get_store
+from set_proposer import energy_value, propose, transition_cost
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -143,10 +144,7 @@ class PlaylistManager:
     @staticmethod
     def _energy_value(track: Dict) -> float:
         """Perceived energy level when available, raw RMS energy otherwise."""
-        level = track.get('energy_level')
-        if level:
-            return float(level)
-        return float(track.get('avg_energy') or 0.0)
+        return energy_value(track)
 
     @staticmethod
     def _target_curve(values: List[float], curve: str) -> List[float]:
@@ -208,15 +206,7 @@ class PlaylistManager:
                 # how far from the energy the curve asks for at this slot (0..1)
                 cost = abs(self._energy_value(track) - target) / span
                 if previous is not None:
-                    if bpm_transitions and previous.get('has_beat', True) and track.get('has_beat', True):
-                        bpm_a = float(previous.get('bpm') or 0)
-                        bpm_b = float(track.get('bpm') or 0)
-                        if bpm_a and bpm_b:
-                            jump = abs(bpm_b - bpm_a)
-                            cost += 0.03 * max(0.0, jump - 3.0)  # free within 3 BPM
-                    if key_compatibility:
-                        score = key_compatibility_score(previous.get('key', ''), track.get('key', ''))
-                        cost += (100.0 - score) / 100.0 * 0.5
+                    cost += transition_cost(previous, track, bpm=bpm_transitions, key=key_compatibility)
                 elif bpm_transitions:
                     cost += 0.001 * float(track.get('bpm') or 0)  # start with the slower one on ties
                 if best_cost is None or cost < best_cost:
@@ -227,48 +217,22 @@ class PlaylistManager:
 
         return [tracks[i] for i in order]
 
-    def _select_for_duration(self, target_seconds: float) -> List[Dict]:
-        """Pick a subset that fits the duration while covering the whole energy range."""
-        tracks = sorted(self.tracks, key=self._energy_value)
-        total = sum(float(t.get('duration') or 0) for t in tracks)
-        if total <= target_seconds or len(tracks) <= 1:
-            return tracks
-        avg = total / len(tracks)
-        count = max(1, min(len(tracks), int(target_seconds // max(avg, 1.0))))
-        # evenly spaced picks across the energy-sorted list keep low, mid and high tracks
-        picks = sorted(set(int(round(i)) for i in np.linspace(0, len(tracks) - 1, count)))
-        selected = [tracks[i] for i in picks]
-        # trim if the picked tracks are longer than average
-        while len(selected) > 1 and sum(float(t.get('duration') or 0) for t in selected) > target_seconds:
-            selected.pop(len(selected) // 2)
-        return selected
-
-    def create_set_list(self, duration_minutes: int = 60, 
+    def create_set_list(self, duration_minutes: int = 60,
                        energy_curve: str = 'build') -> List[Dict]:
         """
-        Create a set list with specified duration
-        
+        Best set list for the duration, drawn from the analysed tracks: the first
+        variant of set_proposer.propose (the GUI shows several).
+
         Args:
-            duration_minutes: Target set duration in minutes
-            energy_curve: Energy curve type
-            
-        Returns: List of tracks for the set
+            duration_minutes: Target set duration in minutes (crossfades overlap)
+            energy_curve: 'build', 'wave', 'peak_middle', 'constant' ('build_up' = 'build')
+
+        Returns: List of tracks for the set, in playing order
         """
         if not self.tracks:
             raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
-            
-        target_duration = duration_minutes * 60  # Convert to seconds
-        
-        # Choose the tracks first (so the whole energy range is represented),
-        # then order the selection along the requested curve.
-        selected = self._select_for_duration(target_duration)
-        all_tracks = self.tracks
-        try:
-            self.tracks = selected
-            set_list = self.suggest_playlist_order(energy_curve=energy_curve)
-        finally:
-            self.tracks = all_tracks
-        return set_list
+        curve = {'build_up': 'build'}.get(energy_curve, energy_curve)
+        return propose(list(self.tracks), duration_minutes * 60, curve=curve, variants=1)[0]['tracks']
     
     def analyze_playlist_compatibility(self) -> pd.DataFrame:
         """

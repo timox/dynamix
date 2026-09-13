@@ -390,25 +390,21 @@ class TestEnergyBasedSet(unittest.TestCase):
             self.assertEqual(energies, sorted(energies))
     
     def test_create_energy_based_set_wave(self):
-        """Test energy-based set creation with wave profile"""
+        """Test energy-based set creation with wave profile (two waves over time, starting low)"""
         manager = Mock()
-        manager.tracks = [
-            {'duration': 240.0, 'avg_energy': 0.3},
-            {'duration': 245.0, 'avg_energy': 0.8},
-            {'duration': 242.0, 'avg_energy': 0.2},
-            {'duration': 238.0, 'avg_energy': 0.9},
-        ]
-        
-        set_list = create_energy_based_set(manager, target_duration=10, energy_profile='wave')
-        
-        self.assertIsInstance(set_list, list)
-        
-        # Check alternating pattern
-        if len(set_list) > 1:
-            energies = [track['avg_energy'] for track in set_list]
-            self.assertGreater(energies[1], energies[0])  # Second > First
-            if len(energies) > 2:
-                self.assertLess(energies[2], energies[1])  # Third < Second
+        energies = [0.55, 0.10, 0.90, 0.35, 0.75, 0.20, 0.95, 0.45, 0.05, 0.65, 0.30, 0.85]
+        manager.tracks = [{'duration': 300.0, 'avg_energy': e} for e in energies]
+
+        # 60 minutes: all 12 tracks fit (12 x 300 s - 11 x 16 s crossfades = 3424 s)
+        set_list = create_energy_based_set(manager, target_duration=60, energy_profile='wave')
+
+        self.assertEqual(len(set_list), 12)
+        e = [track['avg_energy'] for track in set_list]
+        # the curve peaks around tracks 4 and 10 and dips around tracks 1, 7 and 12
+        self.assertGreater(e[3], e[0])
+        self.assertGreater(e[3], e[6])
+        self.assertGreater(e[9], e[6])
+        self.assertGreater(e[9], e[11])
 
 class TestErrorHandling(unittest.TestCase):
     """Test error handling scenarios"""

@@ -17,6 +17,7 @@ from analysis_store import dynamix_home, get_store
 DEFAULTS: Dict[str, Any] = {
     "projects_root": os.path.join(os.path.expanduser("~"), "DynaMix Projects"),
     "mixxx_db": "",                # empty = auto-detect
+    "library_folder": "",          # every track you mixed, one folder, scanned in place (library.py)
     "set_duration": 60,
     "energy_curve": "build",
     "mix_bars": 8,
