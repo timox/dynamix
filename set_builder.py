@@ -19,6 +19,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import charts
 import library
+import set_proposer
 from analysis_store import get_store, dynamix_home
 from config import Config, format_environment_report
 from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
@@ -174,6 +175,24 @@ class SetBuilderMixin:
         # column 3: proposals and the set list
         right_col = ttk.Frame(lists)
         lists.add(right_col, weight=1)
+        prop_frame = ttk.LabelFrame(right_col, text="Proposals (from the analysed selection)")
+        prop_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+        prop_bar = ttk.Frame(prop_frame)
+        prop_bar.pack(fill=tk.X, padx=4, pady=2)
+        ttk.Label(prop_bar, text="Duration (min):").pack(side=tk.LEFT)
+        ttk.Spinbox(prop_bar, from_=15, to=240, textvariable=self.set_duration_var, width=5).pack(side=tk.LEFT, padx=3)
+        ttk.Label(prop_bar, text="Curve:").pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Combobox(prop_bar, textvariable=self.energy_curve_var, values=list(set_proposer.CURVES) + ["all"],
+                     width=11, state="readonly").pack(side=tk.LEFT, padx=3)
+        ttk.Button(prop_bar, text="Propose", command=self.create_set_list).pack(side=tk.LEFT, padx=3)
+        prop_body = ttk.Frame(prop_frame)
+        prop_body.pack(fill=tk.X, padx=4)
+        self.proposal_tree = self._make_tree(prop_body, ("#", "Curve", "Tracks", "Duration", "Score", "Worst"),
+                                             {"#": 30, "Curve": 90, "Tracks": 50, "Duration": 120, "Score": 50, "Worst": 90},
+                                             height=4)
+        self.proposal_tree.bind("<<TreeviewSelect>>", lambda e: self.preview_proposal())
+        self.proposal_tree.bind("<Double-1>", lambda e: self.use_selected_proposal())
+        ttk.Button(prop_frame, text="Use this proposal", command=self.use_selected_proposal).pack(anchor="w", padx=4, pady=4)
         set_frame = ttk.Frame(right_col)
         set_frame.pack(fill=tk.BOTH, expand=True)
         self.set_caption = ttk.Label(set_frame, text="Set list (playing order)", foreground=MUTED, anchor="w")
@@ -352,7 +371,8 @@ class SetBuilderMixin:
             return
         self.project.options.update({
             "set_duration": int(self.set_duration_var.get()),
-            "energy_curve": self.energy_curve_var.get(),
+            "energy_curve": (self.energy_curve_var.get() if self.energy_curve_var.get() in set_proposer.CURVES
+                             else self.project.options.get("energy_curve", "build")),
             "target_lufs": float(self.premaster_lufs_var.get()),
             "tone_match": bool(self.premaster_tone_var.get()),
             "fix_phase": bool(self.premaster_phase_var.get()),
@@ -392,7 +412,7 @@ class SetBuilderMixin:
             parts = []
             if state.get("at"):
                 parts.append(state["at"].replace("T", " ")[:16])
-            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "file", "playlist", "cues"):
+            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "score", "file", "playlist", "cues"):
                 if k in details:
                     parts.append(f"{k} {details[k]}" if k != "manual" else "edited by hand")
             w["detail"].config(text=" · ".join(parts))
@@ -527,7 +547,7 @@ class SetBuilderMixin:
 
     def _refresh_tables(self):
         self._previewing = False
-        for tree in (self.selection_tree, self.set_tree):
+        for tree in (self.selection_tree, self.set_tree, self.proposal_tree):
             for item in tree.get_children():
                 tree.delete(item)
         self._selection_rows, self._set_rows = [], []
@@ -542,6 +562,8 @@ class SetBuilderMixin:
         for i, t in enumerate(self.project.set_list_tracks(), 1):
             self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(t, i, mastering.get(t["file_path"])))
             self._set_rows.append(t)
+        for i, variant in enumerate(self.project.proposal_variants(), 1):
+            self.proposal_tree.insert("", tk.END, iid=f"P{i}", values=self._proposal_values(i, variant))
         counts = collections.Counter(r["state"] for r in self._selection_rows)
         others = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()) if state != "analysed")
         sel_seconds = sum(float(r.get("duration") or 0) for r in self._selection_rows)
@@ -613,7 +635,7 @@ class SetBuilderMixin:
         self.update_status(message)
 
     def set_add(self):
-        if not self._require_project():
+        if not self._require_project() or self._end_preview():
             return
         rows = [r for r in self._selected_many(self.selection_tree, self._selection_rows) if r["state"] == "analysed"]
         if not rows:
@@ -627,7 +649,7 @@ class SetBuilderMixin:
         self._after_manual_edit()
     
     def set_remove(self):
-        if not self._require_project():
+        if not self._require_project() or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
@@ -636,7 +658,7 @@ class SetBuilderMixin:
         self._after_manual_edit()
     
     def set_move(self, delta):
-        if not self._require_project():
+        if not self._require_project() or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
@@ -695,29 +717,122 @@ class SetBuilderMixin:
         threading.Thread(target=work, daemon=True).start()
     
     def create_set_list(self):
-        """Propose an order (the library stays; edit the proposal afterwards)."""
+        """Compute proposals from the analysed selection (worker thread); the set list changes on 'Use this proposal'."""
         if not self._require_project():
             return
-        manager = self.playlist_manager
-        if manager is None or not manager.tracks:
-            messagebox.showwarning("Warning", "Analyze the tracks first (step 1)")
+        project = self.project
+        tracks, skipped = project.proposal_tracks()
+        if not tracks:
+            messagebox.showwarning("Warning", "No analysed tracks in the selection: add tracks, then click 'Analyze selection'")
             return
-        try:
-            duration = int(self.set_duration_var.get())
-            curve = self.energy_curve_var.get()
-            set_list = manager.create_set_list(duration_minutes=duration, energy_curve=curve)
-            self.project.set_set_list(set_list)
-            self.project.invalidate_from("setlist")
-            self.project.mark("setlist", count=len(set_list), duration=duration, curve=curve)
-            self.current_set_list = list(set_list)
-            self.transition_planner = None
-            self._save_project()
-            self._refresh_tables()
-            self._render_overview()
-            total = sum(float(t.get("duration") or 0) for t in set_list) / 60
-            self.update_status(f"Proposed set list: {len(set_list)} tracks, {total:.0f} min, curve '{curve}'. Adjust it in the Tracks tab if needed.")
-        except Exception as e:
-            self._report_error(f"Set list creation failed: {e}", e)
+        if skipped:
+            log.warning("Proposals: %d selected tracks left out (not analysed or missing): %s", len(skipped), ", ".join(skipped))
+        duration = int(self.set_duration_var.get())
+        curve = self.energy_curve_var.get()
+        mix_bars = self._mix_bars()
+
+        def work():
+            try:
+                if curve == "all":
+                    variants = [set_proposer.propose(tracks, duration * 60, curve=c, mix_bars=mix_bars, variants=1)[0]
+                                for c in set_proposer.CURVES]
+                    variants.sort(key=lambda v: (-v["score"], v["cost"]))
+                else:
+                    variants = set_proposer.propose(tracks, duration * 60, curve=curve, mix_bars=mix_bars, variants=3)
+            except Exception as e:
+                self._report_error(f"Proposal failed: {e}", e)
+                return
+
+            def done():
+                if self.project is not project:
+                    return  # another project was opened meanwhile
+                project.set_proposals({"duration_min": duration, "curve": curve, "mix_bars": mix_bars}, variants)
+                self._save_project()
+                self._refresh_tables()
+                message = (f"Proposals: {len(variants)} variants for {duration} min ({curve}) from {len(tracks)} tracks, "
+                           f"best score {max(v['score'] for v in variants)}")
+                log.info(message)
+                self.update_status(message + " - select one to preview it, then 'Use this proposal'")
+                self.proposal_tree.selection_set("P1")
+            self.root.after(0, done)
+
+        self.update_status(f"Computing proposals from {len(tracks)} tracks ...")
+        threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _proposal_values(number, variant):
+        worst = variant.get("worst")
+        duration = f"{SetBuilderMixin._fmt_time(variant['effective_seconds'])} / {SetBuilderMixin._fmt_time(variant['target_seconds'])}"
+        return [number, variant["curve"], len(variant["order"]), duration, variant["score"],
+                f"{worst['index'] + 1}→{worst['index'] + 2} · {worst['score']}" if worst else "-"]
+
+    def _selected_proposal(self):
+        """(variant, index) of the selected row of the Proposals table, else (None, None)."""
+        sel = self.proposal_tree.selection()
+        if not sel or self.project is None:
+            return None, None
+        index = int(sel[0][1:]) - 1
+        variants = self.project.proposal_variants()
+        return (variants[index], index) if 0 <= index < len(variants) else (None, None)
+
+    def preview_proposal(self):
+        """Show the selected proposal in the set list table (greyed) and the Overview, without saving."""
+        variant, index = self._selected_proposal()
+        if variant is None:
+            return
+        by_path = {t["file_path"]: t for t in self.project.tracks}
+        tracks = [by_path[p] for p in variant["order"] if p in by_path]
+        for item in self.set_tree.get_children():
+            self.set_tree.delete(item)
+        mastering = self._mastering_by_path()
+        for i, t in enumerate(tracks, 1):
+            self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(t, i, mastering.get(t["file_path"])),
+                                 tags=("preview",))
+        self._set_rows = tracks
+        self._previewing = True
+        self.set_caption.config(text=f"Preview of proposal {index + 1} ({variant['curve']}, score {variant['score']}): "
+                                     f"{len(tracks)} tracks, {self._fmt_time(variant['effective_seconds'])} — "
+                                     "'Use this proposal' to keep it")
+        self._clear_frame(self.overview_frame)
+        self._show_figure(self.overview_frame,
+                          charts.set_overview(tracks, set_proposer.curve_targets(tracks, variant["curve"], self._mix_bars())))
+
+    def use_selected_proposal(self):
+        if not self._require_project():
+            return
+        variant, index = self._selected_proposal()
+        if variant is None:
+            messagebox.showinfo("Proposals", "Select a proposal first (click 'Propose' when the list is empty)")
+            return
+        self.project.use_proposal(index)
+        self.current_set_list = self.project.set_list_tracks() or None
+        self.transition_planner = None
+        self._save_project()
+        self._refresh_tables()
+        self._render_overview()
+        message = (f"Proposal {index + 1} ({variant['curve']}, score {variant['score']}) is now the set list: "
+                   f"{len(self.project.set_list)} tracks")
+        log.info(message)
+        self.update_status(message)
+
+    def _end_preview(self):
+        """If a proposal preview is showing, show the set list again and return True (the edit is skipped)."""
+        if not self._previewing:
+            return False
+        self._refresh_tables()
+        self._render_overview()
+        self.update_status("Preview closed: the set list is shown again (click again to edit it)")
+        return True
+
+    def _mix_bars(self):
+        return int(self.project.options.get("mix_bars", 8)) if self.project else 8
+
+    def _set_curve(self):
+        """Curve of the current set list: the one of the proposal it came from, else the chosen curve."""
+        details = {}
+        if self.project is not None:
+            details = self.project.step_state("setlist").get("details") or {}
+        return details.get("curve") or self.energy_curve_var.get()
     
     def _set_tracks_or_warn(self):
         tracks = self.project.set_list_tracks() if self.project else []
@@ -1015,12 +1130,12 @@ class SetBuilderMixin:
     def _render_overview(self):
         tracks = self.current_set_list or (self.playlist_manager.tracks if self.playlist_manager else [])
         if not tracks:
+            self._clear_frame(self.overview_frame, "Analyze the selection and build a set list to see the energy curve and the set map.")
             return
         self._clear_frame(self.overview_frame)
         targets = None
         if self.current_set_list:
-            values = [PlaylistManager._energy_value(t) for t in tracks]
-            targets = PlaylistManager._target_curve(values, self.energy_curve_var.get())
+            targets = set_proposer.curve_targets(tracks, self._set_curve(), self._mix_bars())
         self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:

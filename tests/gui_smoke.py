@@ -93,6 +93,25 @@ def scenario():
         app.selection_add()
         check(len(app.project.selection) == 2, "adding again keeps one entry per track")
 
+        fake = [{"file_path": p, "filename": os.path.basename(p), "duration": 300.0, "bpm": 120.0 + i, "key": "A minor",
+                 "energy_level": 3.0 + i, "has_beat": True} for i, p in enumerate(app.project.selection)]
+        app.project.set_tracks(fake)
+        app.project.mark("analyze", count=len(fake))
+        app._refresh_tables()
+        check([r["state"] for r in app._selection_rows] == ["analysed", "analysed"], "analysed rows are shown as analysed")
+        app.energy_curve_var.set("all")
+        app.set_duration_var.set(15)
+        app.create_set_list()
+        check(pump(lambda: len(app.project.proposal_variants()) == 4, 15.0), "curve 'all' gives one proposal per curve")
+        check(pump(lambda: app._previewing, 3.0), "the first proposal is previewed")
+        app.set_move(1)
+        check(not app._previewing, "an edit closes the preview first")
+        app.proposal_tree.selection_set("P2")
+        check(pump(lambda: app._previewing, 3.0), "selecting a proposal previews it")
+        app.use_selected_proposal()
+        check(len(app.project.set_list) == 2 and app.project.is_done("setlist"), "the proposal became the set list")
+        check(app.project.options["energy_curve"] != "all", "'all' is not saved as the project's energy curve")
+
         # --- checks added by later tasks go above this line ---
 
 
