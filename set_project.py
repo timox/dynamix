@@ -748,7 +748,7 @@ class SetProject:
                     proposals=len(self.proposal_variants()), set_list=len(self.data['set_list']))]
         for key, label, required in STEPS:
             state = self.step_state(key)
-            mark = "[x]" if state["done"] else ("[ ]" if required else tr("[ ] (optional)"))
+            mark = "[x]" if state["done"] else "[ ]"  # optional steps say so in their label
             when = f" - {state['at']}" if state.get("at") else ""
             details = state.get("details") or {}
             extra = ", ".join(f"{k}={v}" for k, v in details.items() if k in ("count", "out_dir", "playlist", "db", "file", "cues"))

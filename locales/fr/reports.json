@@ -13,7 +13,6 @@
   "Source music folder: {folder}": "Dossier de musique source : {folder}",
   "Updated: {when}": "Mis à jour : {when}",
   "Selected: {selected} | analysed: {analysed} | failed: {failed} | proposals: {proposals} | in set list: {set_list}": "Sélectionnés : {selected} | analysés : {analysed} | en échec : {failed} | propositions : {proposals} | dans la set list : {set_list}",
-  "[ ] (optional)": "[ ] (facultatif)",
   "DRY RUN - nothing was written to Mixxx.": "SIMULATION - rien n'a été écrit dans Mixxx.",
   "Mixxx database: {path}": "Base de données Mixxx : {path}",
   "Backup: {path}": "Sauvegarde : {path}",

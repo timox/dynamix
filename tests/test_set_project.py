@@ -69,6 +69,8 @@ class TestSetProject(unittest.TestCase):
         lines = p.summary_lines()
         self.assertTrue(any("[x] Select and analyze the tracks" in l and "count=3" in l for l in lines))
         self.assertTrue(lines[-1].startswith("Next:"))
+        self.assertTrue(any(l.strip() == "[ ] Add transition FX (optional)" for l in lines))
+        self.assertFalse(any(l.count("(optional)") > 1 for l in lines))          # not said twice
 
 
 if __name__ == "__main__":
