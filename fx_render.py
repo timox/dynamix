@@ -56,29 +56,40 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             active.append((i, entry))
     involved = sorted({i for i, _ in active} | {i + 1 for i, _ in active})
     audio, rates, beats, cues, problems = {}, {}, {}, {}, []
+    unusable = set()
     for i in involved:
         prof = profiles[i]
+        name = prof.get("filename") or os.path.basename(prof["file_path"])
         base = bases.get(prof["file_path"], prof["file_path"])
-        data, rates[i] = load_audio(base)
-        audio[i] = tfx.to_stereo(data)
-        beats[i], warning = _beats_for(prof, grids, len(audio[i]) / rates[i])
+        try:
+            data, rates[i] = load_audio(base)
+            audio[i] = tfx.to_stereo(data)
+            beats[i], warning = _beats_for(prof, grids, len(audio[i]) / rates[i])
+        except Exception as exc:  # missing or unreadable file, beat analysis failure
+            unusable.add(i)
+            problems.append(f"{name}: cannot be read ({exc})")
+            continue
         if warning:
-            problems.append(f"{prof.get('filename') or os.path.basename(prof['file_path'])}: {warning}")
+            problems.append(f"{name}: {warning}")
         cues[i] = _cues(prof)
     steps = len(active) + len(involved)
     done = 0
+    rendered = set()
     for i, entry in active:
         a, b = i, i + 1
         done += 1
         if progress:
             progress(done, steps, f"{profiles[a].get('filename', '')} -> {profiles[b].get('filename', '')}")
+        if a in unusable or b in unusable:
+            problems.append(f"transition {a + 1}: skipped (a track cannot be read)")
+            continue
         ctx = tfx.make_context(audio[a], rates[a], beats[a], cues[a]["outro_start"], cues[a]["outro_end"],
                                audio[b], rates[b], beats[b], cues[b]["intro_start"], entry.get("nudge_ms", 0.0))
         b_start = int(round(ctx.b_offset * rates[b]))
         b_len = len(ctx.b)
         try:
             tfx.apply_effects(ctx, _active(entry["effects"]))
-        except (ValueError, OSError) as exc:
+        except Exception as exc:
             problems.append(f"transition {a + 1}: {exc}")
             continue
         a_start = int(round(ctx.a_offset * rates[a]))
@@ -88,9 +99,10 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
         cues[b]["intro_start"] = ctx.junction_b
         cues[b]["intro_end"] = max(cues[b]["intro_end"], ctx.junction_b)
         problems.extend(ctx.warnings)
+        rendered.update((a, b))
     results = []
     os.makedirs(out_dir, exist_ok=True)
-    for i in involved:
+    for i in sorted(rendered):
         prof = profiles[i]
         done += 1
         if progress:

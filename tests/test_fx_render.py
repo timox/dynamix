@@ -83,6 +83,17 @@ class TestRenderSet(unittest.TestCase):
         self.assertGreater(len(clip), SR * 5)
         self.assertEqual(warnings, [])
 
+    def test_unreadable_base_skips_only_its_transitions(self):
+        from fx_render import render_set
+        fx = dict(self.fx)
+        fx[(self.paths[1], self.paths[2])] = {"effects": [dict(tfx.new_effect("filter"), beats=4)]}
+        bases = {self.paths[0]: os.path.join(self.tmp, "gone.wav")}
+        results, problems = render_set(self.profiles, lambda a, b: fx.get((a, b)), bases, os.path.join(self.tmp, "fx"),
+                                       grids={p: self.grid for p in self.paths})
+        self.assertEqual([r["source"] for r in results], [self.paths[1], self.paths[2]])
+        self.assertTrue(any("t0.wav" in p and "cannot be read" in p for p in problems))
+        self.assertTrue(any("transition 1" in p and "skipped" in p for p in problems))
+
     def test_track_without_rhythm_uses_a_regular_grid(self):
         from fx_render import _beats_for
         beats, warning = _beats_for(dict(self.profiles[0], has_beat=False), {self.paths[0]: self.grid}, 12.0)
