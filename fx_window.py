@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-"Transition FX" window of the Set Builder: per transition, a stack of effects
+"FX" tab of the Set Builder: per transition, a stack of effects
 (freeze / roll, filter sweep, echo, FX sample) with their settings, a looped
 preview while tweaking, and "Apply all FX" which renders the copies into fx/.
 """
@@ -24,7 +24,7 @@ from fx_render import render_preview, render_set
 
 log = logging.getLogger("dynamix.fx")
 MUTED = "#52514e"
-PLAN_CHANGED = "The transitions or the set list changed: close and reopen Transition FX"
+PLAN_CHANGED = "The transitions or the set list changed: plan the transitions again (step 3)"
 NO_SAMPLE_FILE = "Choose a file for the Sample effect: click a sample in the list"
 
 FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample"}
@@ -110,11 +110,12 @@ def _fmt(seconds: float) -> str:
     return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
 
 
-class TransitionFxWindow(tk.Toplevel):
-    """Needs `app` with: root, project, config, update_status, _report_error, _save_project, _render_overview."""
+class TransitionFxPanel(ttk.Frame):
+    """FX tab of the Set Builder, for the project and transition plan it was built with.
+    Needs `app` with: root, project, config, update_status, _report_error, _save_project, _render_overview."""
 
-    def __init__(self, app, player=None):
-        super().__init__(app.root)
+    def __init__(self, parent, app, player=None):
+        super().__init__(parent)
         self.app = app
         self.project = app.project
         self.player = player or Player()
@@ -129,12 +130,9 @@ class TransitionFxWindow(tk.Toplevel):
         self._preview_seq = 0
         self._applying = False
         self._plan_at_open = self._plan_signature()
-        self.title(f"Transition FX - {self.project.name}")
-        self.geometry("1250x700")
         self._build()
         self.refresh_transitions()
         self.scan_samples()
-        self.protocol("WM_DELETE_WINDOW", self.close)
 
     # ------------------------------------------------------------------ layout
     def _build(self):
@@ -606,7 +604,7 @@ class TransitionFxWindow(tk.Toplevel):
                 self.samples = entries
                 if self.fx_index is not None and self.effects()[self.fx_index]["type"] == "sample":
                     self.show_settings()
-            self.after(0, done)
+            self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
 
     def audition_sample(self):
@@ -674,7 +672,7 @@ class TransitionFxWindow(tk.Toplevel):
                 sf.write(path, clip, sr, subtype="PCM_16")
             except Exception as e:
                 self.app._report_error(f"Preview failed: {e}", e)
-                self.after(0, self.status, "Preview failed (see the Log)")
+                self.app.root.after(0, self.status, "Preview failed (see the Log)")
                 return
 
             def done():
@@ -690,7 +688,7 @@ class TransitionFxWindow(tk.Toplevel):
                     log.warning("Preview: %s", w)
                 self.status(("Looping the preview" if looping else "Preview opened in the default player")
                             + (f" - {warnings[0]}" if warnings else ""))
-            self.after(0, done)
+            self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
 
     def stop_preview(self):

@@ -187,7 +187,9 @@ def scenario():
                 self.stops += 1
 
         player = FakePlayer()
+        root.deiconify()  # the FX tab must be mapped: Tk drops the events generated on unmapped widgets
         win = app.open_fx_window(player=player)
+        pump(seconds=0.3)
         check(win is not None, "the Transition FX window opens once transitions are planned")
         check(pump(lambda: len(win.samples) == 1, 5.0), "the FX samples folder is scanned")
         win.trans_tree.selection_set("T0")
@@ -237,9 +239,31 @@ def scenario():
         check(not win._applying, "Apply all FX refuses to render with a changed plan")
         planned["outro_start"] -= 0.5
         check(not win._plan_changed(), "the restored plan matches the FX window again")
+        check(app.set_notebook.select() == str(app.fx_tab), "Transition FX opens the FX tab")
+        win.start_preview()
         stops_before = player.stops
-        win.close()
-        check(player.stops > stops_before, "closing the window stops the preview")
+        app.set_notebook.select(0)
+        check(pump(lambda: player.stops > stops_before and not win._previewing, 2.0), "leaving the FX tab stops the preview")
+        planned["outro_start"] += 0.5
+        app.set_notebook.select(app.fx_tab)
+        check(pump(lambda: app.fx_panel is not None and app.fx_panel is not win, 2.0), "the FX tab is rebuilt for a changed plan")
+        planned["outro_start"] -= 0.5
+        app.set_notebook.select(0)
+
+        app.show_project_summary()
+        check(pump(lambda: len(app.reports_tree.get_children()) == 1, 2.0), "the project summary is listed in the Log reports")
+        report_path = app.reports_tree.selection()[0]
+        check(os.path.isfile(report_path) and os.path.dirname(report_path) == os.path.join(app.project.exports_dir, "reports"),
+              "the report is saved in exports/reports")
+        check(app.notebook.select() == str(app.log_frame), "a new report opens the Log tab")
+        check("smoke" in app.report_text.get("1.0", tk.END), "the report text is shown")
+        app.log_level_var.set("Reports")
+        app._log_rebuild()
+        check(not app.log_body.winfo_manager(), "the Reports filter hides the log stream")
+        app.log_level_var.set("All")
+        app._log_rebuild()
+        check(app.log_body.winfo_manager() == "pack", "All shows the log stream again")
+        app.notebook.select(0)
 
         # --- checks added by later tasks go above this line ---
 

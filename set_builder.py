@@ -27,7 +27,7 @@ from band_analysis import analyze_bands_cached, format_band_summary, mix_recomme
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
 from set_project import SetProject, STEPS, list_projects
-from fx_window import TransitionFxWindow
+from fx_window import TransitionFxPanel
 from transition_planner import TransitionPlanner
 
 MUTED = "#52514e"
@@ -41,6 +41,7 @@ class SetBuilderMixin:
     def create_playlist_tab(self):
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Set Builder")
+        self.set_builder_frame = frame
         self.project = None
         self.playlist_manager = None
         self.current_set_list = None
@@ -219,7 +220,13 @@ class SetBuilderMixin:
                        (self.track_frame, "Select a track in the Tracks tab to see its energy envelope, intro/outro and tone balance."),
                        (self.premaster_frame, "Run 'Pre-master Set' to see what was changed on every track.")):
             ttk.Label(f, text=msg, foreground=MUTED, wraplength=600).pack(padx=20, pady=20, anchor="w")
-        
+        self.fx_tab = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.fx_tab, text="FX")
+        self.fx_panel = None
+        self._fx_player = None
+        self.set_notebook.bind("<<NotebookTabChanged>>", lambda e: self._fx_tab_changed(), add="+")
+        self.notebook.bind("<<NotebookTabChanged>>", lambda e: self._fx_tab_changed(), add="+")
+
         self.refresh_project_list()
         projects = list_projects(self.config.projects_root)
         if projects:
@@ -381,6 +388,7 @@ class SetBuilderMixin:
             self._save_project()
             self._refresh_tables()
             self._render_overview()
+            self._refresh_fx_tab()
         self.rescan_library()
 
     def load_project(self, folder):
@@ -420,6 +428,8 @@ class SetBuilderMixin:
         self._clear_frame(self.overview_frame, "Analyze the tracks and build a set list to see the energy curve and the set map.")
         self._render_overview()
         self._render_premaster()
+        self._refresh_fx_tab()
+        self._reports_refresh()
         self.update_status(f"Project '{project.name}' loaded")
     
     def _save_project(self):
@@ -483,7 +493,7 @@ class SetBuilderMixin:
     def show_project_summary(self):
         if not self._require_project():
             return
-        self._show_text_window("Set project", "\n".join(self.project.summary_lines()), "set_summary.txt")
+        self.add_report("Project summary", "\n".join(self.project.summary_lines()))
     
     # ------------------------------------------------------------------ tables
     def _mastering_by_path(self):
@@ -940,7 +950,8 @@ class SetBuilderMixin:
                     self._save_project()
                     self._refresh_tables()
                     self._render_overview()
-                    self._show_transition_window("set list")
+                    self._refresh_fx_tab()
+                    self._transition_report()
                 self.root.after(0, done)
             except Exception as e:
                 self._report_error(f"Transition planning failed: {e}", e)
@@ -962,7 +973,7 @@ class SetBuilderMixin:
                 reports = check_files(files, progress=lambda i, n, name: self.root.after(
                     0, self.update_status, f"Mastering check {i}/{n}: {name}"))
                 summary = format_check_summary(reports)
-                self.root.after(0, self._show_text_window, "Mastering Report", summary, "mastering_report.txt")
+                self.root.after(0, self.add_report, "Mastering Report", summary)
                 flagged = sum(1 for r in reports if r.get("flags"))
                 self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
             except Exception as e:
@@ -994,7 +1005,7 @@ class SetBuilderMixin:
                 if needs_mix:
                     summary = (f"MIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix)
                                + "\n\n" + summary)
-                self.root.after(0, self._show_text_window, "Band Analysis", summary, "band_analysis.txt")
+                self.root.after(0, self.add_report, "Band Analysis", summary)
                 self.root.after(0, self.update_status, f"Band analysis done: {len(needs_mix)}/{len(reports)} tracks need a mix revision")
             except Exception as e:
                 self._report_error(f"Band analysis failed: {e}", e)
@@ -1043,8 +1054,11 @@ class SetBuilderMixin:
                         return
                     self._save_project()
                     self._render_premaster()
+                    self._refresh_fx_tab()
+                    self.add_report("Pre-master", summary, show=False)
                     self.set_notebook.select(self.premaster_frame._notebook_tab)
-                    self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir}")
+                    self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir} "
+                                       "(report in the Log tab)")
                 self.root.after(0, done)
             except Exception as e:
                 self._report_error(f"Pre-master failed: {e}", e)
@@ -1078,13 +1092,53 @@ class SetBuilderMixin:
         return labels
 
     def open_fx_window(self, player=None):
+        """Workflow step 5: show the FX tab (returns its panel, None without a transition plan)."""
         if not self._require_project():
             return None
-        data = self.project.data.get("transitions")
-        if not data or len(data.get("tracks") or []) < 2:
+        if player is not None:
+            self._fx_player = player
+            if self.fx_panel is not None:
+                self.fx_panel.player = player
+        panel = self._refresh_fx_tab()
+        self.set_notebook.select(self.fx_tab)
+        if panel is None:
             messagebox.showwarning("Warning", "Plan the transitions first (step 3)")
+        return panel
+
+    def _refresh_fx_tab(self):
+        """Keep the FX tab in step with the open project and its transition plan; returns the panel or None."""
+        panel = self.fx_panel
+        if panel is not None and panel.winfo_exists():
+            if panel.project is self.project and not panel._plan_changed():
+                return panel
+            if panel._applying:
+                return panel  # its render finishes and is discarded if it is stale
+            panel.close()
+        self.fx_panel = None
+        for child in self.fx_tab.winfo_children():
+            child.destroy()
+        data = self.project.data.get("transitions") if self.project else None
+        if not data or len(data.get("tracks") or []) < 2:
+            ttk.Label(self.fx_tab, text="Plan the transitions first (step 3): the FX are set per transition of the set list.",
+                      foreground=MUTED, wraplength=600).pack(padx=20, pady=20, anchor="w")
             return None
-        return TransitionFxWindow(self, player=player)
+        self.fx_panel = TransitionFxPanel(self.fx_tab, self, player=self._fx_player)
+        self.fx_panel.pack(fill=tk.BOTH, expand=True)
+        return self.fx_panel
+
+    def _fx_tab_visible(self):
+        try:
+            return (self.notebook.select() == str(self.set_builder_frame)
+                    and self.set_notebook.select() == str(self.fx_tab))
+        except tk.TclError:
+            return False
+
+    def _fx_tab_changed(self):
+        if self._fx_tab_visible():
+            if self.project is not None:
+                self._refresh_fx_tab()
+        elif self.fx_panel is not None and self.fx_panel._previewing:
+            self.fx_panel.stop_preview()
     
     def create_playlist_from_directory(self):
         """Write the set list (or the library order) as an M3U into exports/."""
@@ -1112,7 +1166,7 @@ class SetBuilderMixin:
         self.update_status(f"Playlist saved: {len(tracks)} tracks{note} -> {filename}")
         messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
     
-    def export_to_mixxx(self, log_widget=None):
+    def export_to_mixxx(self):
         if not self._require_project():
             return
         planner = self.transition_planner
@@ -1145,67 +1199,21 @@ class SetBuilderMixin:
             summary = f"Using {self._copies_note(counts)}.\n" + summary
         self.project.mark("mixxx", playlist=playlist_name, cues=report["cues_written"], db=os.path.basename(os.path.dirname(db_path)))
         self._save_project()
-        if log_widget is not None:
-            log_widget.insert(tk.END, "\n\nMIXXX EXPORT\n" + "-" * 60 + "\n" + summary + "\n")
-            log_widget.see(tk.END)
+        self.add_report("Mixxx Export", summary)
         self.update_status(f"Mixxx export: {report['cues_written']} cues written, {len(report['missing'])} tracks missing")
-        messagebox.showinfo("Export to Mixxx", summary)
     
     # ------------------------------------------------------------------ windows & charts
-    def _show_text_window(self, title, text_content, save_name="report.txt"):
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.geometry("900x600")
-        toolbar = ttk.Frame(win)
-        toolbar.pack(fill=tk.X, padx=10, pady=5)
-        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
-        
-        def save():
-            filename = filedialog.asksaveasfilename(title="Save", initialdir=self.project.exports_dir if self.project else None,
-                                                    initialfile=save_name, defaultextension=".txt",
-                                                    filetypes=[("Text", "*.txt"), ("All files", "*.*")])
-            if filename:
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(text.get("1.0", tk.END))
-                self.update_status(f"Saved: {filename}")
-        ttk.Button(toolbar, text="Save...", command=save).pack(side=tk.RIGHT, padx=5)
-        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        text.insert(tk.END, text_content)
-        return text
-    
-    def _show_transition_window(self, source):
+    def _transition_report(self):
+        """The transition sheet as a report in the Log tab, and its data as exports/transitions.json."""
         planner = self.transition_planner
-        title = f"DynaMix Transition Sheet - {self.project.name}"
-        win = tk.Toplevel(self.root)
-        win.title("Transition Plan")
-        win.geometry("900x600")
-        toolbar = ttk.Frame(win)
-        toolbar.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(toolbar, text=f"{len(planner.profiles)} tracks, {len(planner.transitions)} transitions ({source})").pack(side=tk.LEFT, padx=5)
-        text = scrolledtext.ScrolledText(win, wrap=tk.NONE, font=("Consolas", 10))
-        ttk.Button(toolbar, text="Export to Mixxx...", command=lambda: self.export_to_mixxx(text)).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(toolbar, text="Transition FX...", command=self.open_fx_window).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(toolbar, text="Save JSON...", command=self.save_transition_json).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(toolbar, text="Save Sheet...", command=lambda: self.save_transition_sheet(title)).pack(side=tk.RIGHT, padx=5)
-        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        text.insert(tk.END, planner.to_text(title))
-        self.update_status(f"Transitions planned: {len(planner.transitions)}")
-    
-    def save_transition_sheet(self, title):
-        filename = filedialog.asksaveasfilename(title="Save Transition Sheet", initialdir=self.project.exports_dir,
-                                                initialfile="transitions.txt", defaultextension=".txt",
-                                                filetypes=[("Text", "*.txt"), ("All files", "*.*")])
-        if filename:
-            self.transition_planner.save_text(filename, title)
-            self.update_status(f"Transition sheet saved: {filename}")
-    
-    def save_transition_json(self):
-        filename = filedialog.asksaveasfilename(title="Save Transition Data", initialdir=self.project.exports_dir,
-                                                initialfile="transitions.json", defaultextension=".json",
-                                                filetypes=[("JSON", "*.json"), ("All files", "*.*")])
-        if filename:
-            self.transition_planner.save_json(filename)
-            self.update_status(f"Transition data saved: {filename}")
+        note = ""
+        try:
+            path = planner.save_json(os.path.join(self.project.exports_dir, "transitions.json"))
+            note = f" (data: {path})"
+        except Exception as e:
+            self._report_error(f"Cannot save transitions.json: {e}", e)
+        self.add_report("Transition Sheet", planner.to_text(f"DynaMix Transition Sheet - {self.project.name}"))
+        self.update_status(f"Transitions planned: {len(planner.transitions)}{note}")
     
     def _clear_frame(self, container, placeholder=None):
         for child in container.winfo_children():
@@ -1253,9 +1261,8 @@ class SetBuilderMixin:
             return
         self._clear_frame(self.premaster_frame)
         self._show_figure(self.premaster_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
-        text = scrolledtext.ScrolledText(self.premaster_frame, height=10, font=("Consolas", 9), wrap=tk.NONE)
-        text.pack(fill=tk.X, padx=2, pady=(0, 8))
-        text.insert(tk.END, pm.get("summary", ""))
+        ttk.Label(self.premaster_frame, text="The detailed pre-master report is in the Log tab.",
+                  foreground=MUTED).pack(anchor="w", padx=4, pady=(0, 8))
     
     def on_track_selected(self, tree=None):
         tree = tree or self.set_tree

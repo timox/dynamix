@@ -143,7 +143,7 @@ this version keep working: their imported `source/` copies become their selectio
 **Transition FX** (`transition_fx.py`, `fx_render.py`, `fx_window.py`): per transition, a stack of
 freeze / roll, filter sweeps (high-pass, low-pass, band-pass with resonance), tempo-synced echo
 and FX samples (fitted to the outgoing track's tempo from the BPM written in their file name, by
-varispeed or time-stretch), placed in beats around the junction. The Transition FX window previews a
+varispeed or time-stretch), placed in beats around the junction. The FX tab of the Set Builder previews a
 transition in a loop while you tweak it; **Apply all FX** renders copies into the project's
 `fx/` folder (effects that outlast the outgoing track continue at the start of the next one).
 Settings are kept per track pair in `project.json`, so reordering the set keeps them; the
@@ -493,7 +493,8 @@ python gui.py
 
 - **Set Builder Tab**: library, selection, set proposals, transitions, pre-master, transition FX, playlist and Mixxx export
 - **Configuration Tab**: paths, defaults for new projects and environment check
-- **Log Tab**: everything DynaMix prints, with the errors and their tracebacks
+- **Log Tab**: the project's reports (mastering, band analysis, transition sheet, pre-master, Mixxx export,
+  saved in `exports/reports/`) and everything DynaMix prints, with the errors and their tracebacks
 
 The single-track, two-track, DJ tools, audio effects and export tools remain available from the command line
 and as Python modules (see below). See [GUI_README.md](GUI_README.md) for the details.

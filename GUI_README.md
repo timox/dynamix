@@ -26,7 +26,8 @@ python gui.py
   figures of each, and a "Next:" hint:
     1. Select and analyze (BPM, key, energy; cached per file)
     2. Propose a set list (several variants from the selection; use one)
-    3. Plan Transitions (intro/outro sections, transition sheet)
+    3. Plan Transitions (intro/outro sections; the transition sheet is a
+       report in the Log tab, its data goes to exports/transitions.json)
     4. Pre-master Set (optional, into the project's premaster folder)
     5. Transition FX (optional, copies with FX into the project's fx folder)
     6. Create Playlist (optional, M3U into exports/)
@@ -42,8 +43,7 @@ python gui.py
   transition). Click a variant to preview it; **Use this proposal** copies it
   into the set list, which **Up / Down / Remove** and **Add to set list ▶**
   then edit by hand. Select a selection or set row to open it in the Track tab.
-- **Transition FX** window (workflow step 5, or the button of the transition
-  sheet): pick a transition, then stack effects on it — **Freeze** (loops the
+- **FX tab** (workflow step 5 opens it): pick a transition, then stack effects on it — **Freeze** (loops the
   last beats of the outgoing track, with a roll such as 4×1 → 2×2 → 1×4, an
   optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
   low-pass or band-pass sweep with resonance, closing the outgoing track or
@@ -59,18 +59,19 @@ python gui.py
   export then use those copies, with the cue positions of the rendered files.
   The project's `fx/` (and `premaster/`) folder must be part of the Mixxx
   library (Mixxx music directories) for the export to match the copies.
-- **Log tab**: everything DynaMix prints and every error with its traceback,
-  filterable by level, also written to `<DynaMix home>/logs/dynamix.log`
-  (**Open log folder**). The tab title counts new warnings and errors.
+  The tab follows the open project and its transition plan (it is rebuilt
+  after a new plan); leaving the tab stops the looped preview.
 - **Overview**: set energy curve against the target, tempo, and the set map
 - **Track**: energy envelope with intro/outro, loudness figures, stereo
   phase and bass width, tone balance, then the band tracking chart (band
   envelopes over time, low-mid masking map, resonance spectrum with EQ
   suggestions and, when needed, "mix revision recommended")
-- **Band Analysis** button: the same diagnostics as a text report for the
-  whole set, with the list of tracks that need a mix revision
-- **Pre-master**: loudness and true peak before -> after, actions per track
-- **Project summary** button: text summary of the project and its steps
+- **Band Analysis** button: the same diagnostics as a report for the whole
+  set, with the list of tracks that need a mix revision
+- **Pre-master**: loudness and true peak before -> after (the actions per
+  track are in the Pre-master report of the Log tab)
+- **Project summary**, **Mastering Report**, **Band Analysis**: reports, shown
+  in the Log tab
 
 ### 2. Configuration Tab
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
@@ -83,8 +84,16 @@ python gui.py
   analysis cache). Refresh after installing something.
 
 ### 3. Log Tab
-- Everything DynaMix prints and every error with its traceback (see the Log
-  tab of the Set Builder section above).
+- **Reports** (top): the reports of the open project — Project summary,
+  Mastering Report, Band Analysis, Transition Sheet, Pre-master, Mixxx Export.
+  Each one is saved as `exports/reports/<date time> <title>.txt` (**Open
+  reports folder**), listed with its time; click one to read it. A new report
+  opens the Log tab (except the Pre-master one, whose chart stays in view).
+  **Reset project** deletes them with the other exports.
+- **Log** (bottom): everything DynaMix prints and every error with its
+  traceback, also written to `<DynaMix home>/logs/dynamix.log` (**Open log
+  folder**). The tab title counts new warnings and errors.
+- **Show**: All / Reports (hides the log) / Warnings and errors / Errors.
 
 The former Track Analysis, Two-Track Analysis, DJ Tools, Audio Effects and
 Export Tools tabs are gone from the GUI: the Set Builder covers the analysis
