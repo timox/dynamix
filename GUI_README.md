@@ -10,23 +10,7 @@ python gui.py
 
 ## GUI Tabs Overview
 
-### 1. Track Analysis Tab
-- **Purpose**: Analyze individual audio tracks
-- **Features**:
-  - Browse and select audio files
-  - View comprehensive track analysis (BPM, key, energy, sections, etc.)
-  - Visualize energy profiles and beat grids
-  - Export analysis results
-
-### 2. Two-Track Analysis Tab
-- **Purpose**: Compare and analyze compatibility between two tracks
-- **Features**:
-  - Select two tracks for comparison
-  - View compatibility scores (BPM, key, energy)
-  - Get mix recommendations
-  - See optimal exit/entry points
-
-### 3. Set Builder Tab
+### 1. Set Builder Tab
 - **Purpose**: Build a set as a project, step by step, without ever redoing work
 - **Projects**: a set is a folder under the projects folder (see the
   Configuration tab): `project.json`, `premaster/` (corrected copies) and
@@ -88,7 +72,7 @@ python gui.py
 - **Pre-master**: loudness and true peak before -> after, actions per track
 - **Project summary** button: text summary of the project and its steps
 
-### 3 bis. Configuration Tab
+### 2. Configuration Tab
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
   = auto-detect), the music library folder, the FX samples folder, and where
   DynaMix keeps its cache and configuration
@@ -98,39 +82,20 @@ python gui.py
   libsndfile with MP3 support, librosa, numba, FFmpeg, Mixxx database,
   analysis cache). Refresh after installing something.
 
-### 4. DJ Tools Tab
-- **Purpose**: Access DJ performance tools
-- **Features**:
-  - Detect cue points
-  - Suggest loops
-  - Analyze performance zones
-  - Generate DJ notes
-  - Batch analyze directories
+### 3. Log Tab
+- Everything DynaMix prints and every error with its traceback (see the Log
+  tab of the Set Builder section above).
 
-### 5. Audio Effects Tab
-- **Purpose**: Advanced audio effects analysis
-- **Features**:
-  - Analyze dynamics (compression, dynamic range)
-  - Frequency spectrum analysis
-  - Transient response analysis
-  - Detect clipping and phasing issues
-
-### 6. Export Tools Tab
-- **Purpose**: Export analysis results in various formats
-- **Features**:
-  - Export to JSON, CSV, M3U
-  - Export to Rekordbox XML
-  - Export to Traktor NML
-  - Export text reports
-  - View export log
+The former Track Analysis, Two-Track Analysis, DJ Tools, Audio Effects and
+Export Tools tabs are gone from the GUI: the Set Builder covers the analysis
+of the set's tracks and its export, and the modules remain usable from the
+command line (see README.md).
 
 ## Usage Tips
 
-1. **File Selection**: Use the "Browse" buttons to select audio files or directories
-2. **Analysis**: Click "Analyze" buttons to start processing (may take time for large files)
-3. **Visualizations**: Charts and graphs appear automatically after analysis
-4. **Export**: Use the Export Tools tab to save results in your preferred format
-5. **Status Bar**: Check the bottom status bar for current operation status
+1. **Analysis**: analysis runs in the background and is cached per file
+2. **Status Bar**: check the bottom status bar for the current operation
+3. **Errors**: the Log tab keeps every warning and error with its traceback
 
 ## Keyboard Shortcuts
 

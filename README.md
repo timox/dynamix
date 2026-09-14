@@ -483,7 +483,7 @@ dynamix/
 
 ## 🖥️ Graphical User Interface
 
-DynaMix now includes a comprehensive GUI application for easy access to all tools:
+DynaMix includes a GUI application to build a set as a project:
 
 ```bash
 python gui.py
@@ -491,14 +491,12 @@ python gui.py
 
 ### GUI Features
 
-- **Track Analysis Tab**: Analyze individual tracks with visualizations
-- **Two-Track Analysis Tab**: Compare and analyze compatibility between two tracks
-- **Playlist Manager Tab**: Manage and analyze entire music collections
-- **DJ Tools Tab**: Access all DJ performance tools (cue points, loops, zones, notes)
-- **Audio Effects Tab**: Analyze audio effects, dynamics, and frequency spectrum
-- **Export Tools Tab**: Export results in multiple formats (JSON, CSV, M3U, Rekordbox, Traktor)
+- **Set Builder Tab**: library, selection, set proposals, transitions, pre-master, transition FX, playlist and Mixxx export
+- **Configuration Tab**: paths, defaults for new projects and environment check
+- **Log Tab**: everything DynaMix prints, with the errors and their tracebacks
 
-The GUI provides an intuitive interface for all DynaMix features without needing to use the command line.
+The single-track, two-track, DJ tools, audio effects and export tools remain available from the command line
+and as Python modules (see below). See [GUI_README.md](GUI_README.md) for the details.
 
 ## 🆕 Additional Tools and Functions
 
