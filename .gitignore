@@ -332,3 +332,6 @@ test_settings.py
 # DynaMix user data
 .dynamix-set.json
 .dynamix/
+
+# README screenshots
+!docs/images/*.png
