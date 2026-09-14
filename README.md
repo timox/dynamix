@@ -12,6 +12,8 @@ samples) and exports the playlist with its cues into Mixxx.
 > Because the project is built for Mixxx first, it may later be renamed (for example
 > *DynaMixxx*); the name DynaMix is kept for now.
 
+![DynaMix: the Set Builder workflow on the left, the FX tab with the transition chart (A fading out, B fading in, a freeze roll) on the right](docs/images/dynamix-fx-tab.png)
+
 ## About this fork
 
 DynaMix started as a fork of [makalin/dynamix](https://github.com/makalin/dynamix) by
@@ -23,9 +25,10 @@ the work is organised around set projects with a guided workflow, and most of th
 (music library and selection, set proposals, transition planning and Mixxx export, mastering
 check and pre-master pass, band analysis, transition FX with a preview and a transition chart,
 analysis cache, reports and log, a rebuilt GUI, a test suite). It follows its own direction,
-does not track the upstream repository and is not meant to be merged back. The analysis
-modules inherited from the original project are still here (see
-[Tools inherited from the original project](#tools-inherited-from-the-original-project)).
+does not track the upstream repository and is not meant to be merged back. The tools of the
+original project that the set workflow does not use (two-track analysis, DJ notes, audio effects
+analysis, Rekordbox / Traktor export) have been removed; only the track analysis it relies on
+(`audio_utils.py`, `playlist_manager.py`) remains.
 
 ## Installation
 
@@ -171,22 +174,6 @@ python mixxx_export.py --m3u my_set.m3u --sheet transitions.txt
 python mixxx_export.py --m3u my_set.m3u --no-mixxx               # plan only; --dry-run to preview the export
 ```
 
-## Tools inherited from the original project
-
-These modules come from makalin/dynamix. They still work from the command line or as Python
-modules, but they are not part of the set workflow and their tabs were removed from the GUI:
-
-| Module | What it does |
-| --- | --- |
-| `mix_analiz.py` | the original two-track energy analysis (`python mix_analiz.py a.mp3 b.mp3`) |
-| `mix_enhanced.py` | two-track compatibility and mix points, playlist analysis (`--playlist`, `--visualize`) |
-| `dj_tools.py` | cue points, loop suggestions, performance zones, DJ notes (`--batch`) |
-| `audio_effects.py` | dynamics, spectrum, transients, clipping and phasing analysis |
-| `export_tools.py` | JSON, CSV, M3U, Rekordbox XML and Traktor NML export |
-| `audio_utils.py`, `playlist_manager.py` | BPM, key, sections and playlist analysis, still used by the set workflow |
-
-`examples.py` shows these APIs.
-
 ## Project layout
 
 ```
@@ -202,6 +189,8 @@ mixxx_export.py       Mixxx cues and playlist
 mastering.py, band_analysis.py       mastering check, pre-master pass, band analysis
 transition_fx.py, fx_render.py       FX engine, rendering of copies and previews
 charts.py             matplotlib charts
+audio_utils.py, playlist_manager.py  track analysis (BPM, key, energy, sections), analysis of the selection
+export_tools.py       M3U playlist
 analysis_store.py, config.py         analysis cache and configuration
 check_install.py, install_windows.bat, run_gui.bat   installation helpers
 docs/                 design specs and implementation plans
@@ -214,9 +203,6 @@ tests/                unit tests and the GUI smoke test
 python -m unittest discover -s tests     # unit tests
 python tests/gui_smoke.py                # drives the GUI end to end (opens a window briefly)
 ```
-
-The older tests of the inherited modules (`tests/test_audio_utils.py`, `tests/test_dj_tools.py`)
-currently fail (13 tests) and are not maintained.
 
 ## License
 

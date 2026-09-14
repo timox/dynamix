@@ -218,10 +218,6 @@ set_lists/
 *_export.*
 !mixxx_export.py
 playlist_*.m3u
-playlist_*.xml
-playlist_*.nml
-rekordbox_*.xml
-traktor_*.nml
 
 # GUI related files
 *.pyc

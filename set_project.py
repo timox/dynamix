@@ -19,7 +19,7 @@ import datetime as _dt
 import json
 import os
 import shutil
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -222,51 +222,6 @@ class SetProject:
         return self.path
 
     # ------------------------------------------------------------- audio import
-    def import_audio(self, files: List[str], progress: Optional[Callable[[int, int, str, str], None]] = None) -> Dict[str, int]:
-        """
-        Copy audio files into source/ (skipping identical existing copies).
-        Returns counts {'copied', 'skipped', 'failed'}.
-        """
-        os.makedirs(self.source_dir, exist_ok=True)
-        counts = {"copied": 0, "skipped": 0, "failed": 0}
-        known = {entry["original"]: entry for entry in self.data["imported"]}
-        for i, src in enumerate(files):
-            src = os.path.abspath(src)
-            name = os.path.basename(src)
-            dest = os.path.join(self.source_dir, name)
-            status = "copied"
-            try:
-                size = os.path.getsize(src)
-                # same name from another folder: keep both by suffixing
-                if os.path.exists(dest) and known.get(src, {}).get("path") != dest:
-                    base, ext = os.path.splitext(name)
-                    n = 2
-                    while os.path.exists(os.path.join(self.source_dir, f"{base} ({n}){ext}")):
-                        n += 1
-                    if src not in known:
-                        dest = os.path.join(self.source_dir, f"{base} ({n}){ext}")
-                if os.path.exists(dest) and os.path.getsize(dest) == size:
-                    status = "skipped"
-                else:
-                    shutil.copy2(src, dest)
-                if src not in known:
-                    entry = {"original": src, "path": dest, "size": size}
-                    self.data["imported"].append(entry)
-                    known[src] = entry
-            except OSError as exc:
-                status = "failed"
-                print(f"Import failed for {src}: {exc}")
-            counts[status] += 1
-            if progress:
-                progress(i + 1, len(files), name, status)
-        self.save()
-        return counts
-
-    def import_folder(self, folder: str, recursive: bool = True, progress=None) -> Dict[str, int]:
-        if not self.data.get("source_folder"):
-            self.data["source_folder"] = os.path.abspath(folder)
-        return self.import_audio(audio_files_in(folder, recursive), progress)
-
     def source_files(self) -> List[str]:
         """Audio files currently in source/ (what gets analysed)."""
         if not os.path.isdir(self.source_dir):
@@ -436,17 +391,6 @@ class SetProject:
     def set_list_tracks(self) -> List[Dict]:
         by_path = {t["file_path"]: t for t in self.data["tracks"]}
         return [by_path[p] for p in self.data["set_list"] if p in by_path]
-
-    def library_tracks(self) -> List[Dict]:
-        """All analysed tracks, with an 'in_set' flag and 'set_position' (1-based or None)."""
-        order = {p: i + 1 for i, p in enumerate(self.data["set_list"])}
-        out = []
-        for t in self.data["tracks"]:
-            row = dict(t)
-            row["set_position"] = order.get(t["file_path"])
-            row["in_set"] = row["set_position"] is not None
-            out.append(row)
-        return out
 
     def premaster_map(self) -> Dict[str, str]:
         """original file path -> pre-mastered copy, for copies that exist on disk."""

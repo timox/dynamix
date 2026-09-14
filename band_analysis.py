@@ -21,7 +21,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy import signal
-from scipy.ndimage import median_filter, maximum_filter1d
 
 BANDS: List[Tuple[str, float, float]] = [
     ("sub", 20, 60), ("low", 60, 120), ("low_mid", 120, 200), ("mud", 200, 500),

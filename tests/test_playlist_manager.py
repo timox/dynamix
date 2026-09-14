@@ -8,14 +8,13 @@ import unittest
 import tempfile
 import os
 import sys
-import json
 import pandas as pd
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from playlist_manager import PlaylistManager, create_energy_based_set
+from playlist_manager import PlaylistManager
 
 class TestPlaylistManager(unittest.TestCase):
     """Test cases for PlaylistManager class"""
@@ -233,179 +232,6 @@ class TestPlaylistManager(unittest.TestCase):
             energies = [track['avg_energy'] for track in set_list]
             self.assertEqual(energies, sorted(energies))
     
-    def test_export_playlist_json(self):
-        """Test playlist export to JSON"""
-        # Create mock tracks
-        self.manager.tracks = [
-            {
-                'file_path': 'track1.mp3',
-                'filename': 'track1.mp3',
-                'duration': 240.0,
-                'bpm': 125.0,
-                'key': 'C major',
-                'avg_energy': 0.3
-            }
-        ]
-        
-        # Export to JSON
-        output_file = os.path.join(self.temp_dir, "playlist.json")
-        self.manager.export_playlist(output_file, format='json')
-        
-        # Check file exists
-        self.assertTrue(os.path.exists(output_file))
-        
-        # Check JSON content
-        with open(output_file, 'r') as f:
-            data = json.load(f)
-        
-        self.assertIsInstance(data, list)
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['filename'], 'track1.mp3')
-    
-    def test_export_playlist_csv(self):
-        """Test playlist export to CSV"""
-        # Create mock tracks
-        self.manager.tracks = [
-            {
-                'file_path': 'track1.mp3',
-                'filename': 'track1.mp3',
-                'duration': 240.0,
-                'bpm': 125.0,
-                'key': 'C major',
-                'avg_energy': 0.3
-            }
-        ]
-        
-        # Export to CSV
-        output_file = os.path.join(self.temp_dir, "playlist.csv")
-        self.manager.export_playlist(output_file, format='csv')
-        
-        # Check file exists
-        self.assertTrue(os.path.exists(output_file))
-        
-        # Check CSV content
-        df = pd.read_csv(output_file)
-        self.assertEqual(len(df), 1)
-        self.assertEqual(df.iloc[0]['filename'], 'track1.mp3')
-    
-    def test_export_invalid_format(self):
-        """Test export with invalid format"""
-        self.manager.tracks = [{'filename': 'track1.mp3'}]
-        
-        with self.assertRaises(ValueError):
-            self.manager.export_playlist("output.txt", format='invalid')
-    
-    def test_load_playlist_json(self):
-        """Test loading playlist from JSON"""
-        # Create test JSON file
-        test_data = [
-            {
-                'file_path': 'track1.mp3',
-                'filename': 'track1.mp3',
-                'duration': 240.0,
-                'bpm': 125.0,
-                'key': 'C major',
-                'avg_energy': 0.3
-            }
-        ]
-        
-        json_file = os.path.join(self.temp_dir, "test_playlist.json")
-        with open(json_file, 'w') as f:
-            json.dump(test_data, f)
-        
-        # Load playlist
-        self.manager.load_playlist(json_file)
-        
-        self.assertEqual(len(self.manager.tracks), 1)
-        self.assertEqual(self.manager.tracks[0]['filename'], 'track1.mp3')
-    
-    def test_load_playlist_csv(self):
-        """Test loading playlist from CSV"""
-        # Create test CSV file
-        test_data = pd.DataFrame([
-            {
-                'file_path': 'track1.mp3',
-                'filename': 'track1.mp3',
-                'duration': 240.0,
-                'bpm': 125.0,
-                'key': 'C major',
-                'avg_energy': 0.3
-            }
-        ])
-        
-        csv_file = os.path.join(self.temp_dir, "test_playlist.csv")
-        test_data.to_csv(csv_file, index=False)
-        
-        # Load playlist
-        self.manager.load_playlist(csv_file)
-        
-        self.assertEqual(len(self.manager.tracks), 1)
-        self.assertEqual(self.manager.tracks[0]['filename'], 'track1.mp3')
-    
-    def test_load_invalid_file(self):
-        """Test loading invalid file format"""
-        with self.assertRaises(ValueError):
-            self.manager.load_playlist("invalid.txt")
-
-class TestEnergyBasedSet(unittest.TestCase):
-    """Test cases for energy-based set creation"""
-    
-    def test_create_energy_based_set_peak_middle(self):
-        """Test energy-based set creation with peak_middle profile"""
-        # Create mock playlist manager
-        manager = Mock()
-        manager.tracks = [
-            {'duration': 240.0, 'avg_energy': 0.3},
-            {'duration': 245.0, 'avg_energy': 0.6},
-            {'duration': 242.0, 'avg_energy': 0.8},
-            {'duration': 238.0, 'avg_energy': 0.4},
-            {'duration': 246.0, 'avg_energy': 0.9},
-        ]
-        
-        # Create set with peak_middle profile
-        set_list = create_energy_based_set(manager, target_duration=10, energy_profile='peak_middle')
-        
-        self.assertIsInstance(set_list, list)
-        
-        # Check total duration doesn't exceed target
-        total_duration = sum(track['duration'] for track in set_list)
-        self.assertLessEqual(total_duration, 600)  # 10 minutes = 600 seconds
-    
-    def test_create_energy_based_set_build_up(self):
-        """Test energy-based set creation with build_up profile"""
-        manager = Mock()
-        manager.tracks = [
-            {'duration': 240.0, 'avg_energy': 0.3},
-            {'duration': 245.0, 'avg_energy': 0.6},
-            {'duration': 242.0, 'avg_energy': 0.8},
-        ]
-        
-        set_list = create_energy_based_set(manager, target_duration=10, energy_profile='build_up')
-        
-        self.assertIsInstance(set_list, list)
-        
-        # Check that energy increases (build_up profile)
-        if len(set_list) > 1:
-            energies = [track['avg_energy'] for track in set_list]
-            self.assertEqual(energies, sorted(energies))
-    
-    def test_create_energy_based_set_wave(self):
-        """Test energy-based set creation with wave profile (two waves over time, starting low)"""
-        manager = Mock()
-        energies = [0.55, 0.10, 0.90, 0.35, 0.75, 0.20, 0.95, 0.45, 0.05, 0.65, 0.30, 0.85]
-        manager.tracks = [{'duration': 300.0, 'avg_energy': e} for e in energies]
-
-        # 60 minutes: all 12 tracks fit (12 x 300 s - 11 x 16 s crossfades = 3424 s)
-        set_list = create_energy_based_set(manager, target_duration=60, energy_profile='wave')
-
-        self.assertEqual(len(set_list), 12)
-        e = [track['avg_energy'] for track in set_list]
-        # the curve peaks around tracks 4 and 10 and dips around tracks 1, 7 and 12
-        self.assertGreater(e[3], e[0])
-        self.assertGreater(e[3], e[6])
-        self.assertGreater(e[9], e[6])
-        self.assertGreater(e[9], e[11])
-
 class TestErrorHandling(unittest.TestCase):
     """Test error handling scenarios"""
     
@@ -415,13 +241,6 @@ class TestErrorHandling(unittest.TestCase):
         
         with self.assertRaises(ValueError):
             manager.suggest_playlist_order()
-    
-    def test_export_playlist_without_tracks(self):
-        """Test exporting playlist without tracks"""
-        manager = PlaylistManager()
-        
-        with self.assertRaises(ValueError):
-            manager.export_playlist("output.json")
     
     def test_create_set_list_without_tracks(self):
         """Test creating set list without tracks"""

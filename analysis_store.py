@@ -115,15 +115,6 @@ class AnalysisStore:
             return False
         return True
 
-    def kinds_for(self, path: str) -> Dict[str, bool]:
-        """Which kinds are cached and fresh for this file."""
-        result = {}
-        with self._connect() as conn:
-            rows = conn.execute("SELECT kind FROM analyses WHERE path = ?", (os.path.abspath(path),)).fetchall()
-        for (kind,) in rows:
-            result[kind] = self.has(path, kind)
-        return result
-
     def stats(self) -> Dict[str, Any]:
         with self._connect() as conn:
             entries = conn.execute("SELECT COUNT(*) FROM analyses").fetchone()[0]

@@ -12,7 +12,6 @@ next to a label; thin marks, hairline solid grid, no dual axes.
 import os
 from typing import Dict, List, Optional, Sequence
 
-import matplotlib
 from matplotlib.figure import Figure
 import numpy as np
 
@@ -340,13 +339,6 @@ def _mastering_balance_axes(ax, report: Dict, set_median: Optional[Dict[str, flo
     ax.set_yticklabels(labels, fontsize=8)
     ax.set_xlabel("Band level vs. set median (dB)" if set_median else "Band level vs. this track's average (dB)")
     ax.set_title("Tone balance (blue = more than the set, red = less)", loc="left", fontsize=10)
-
-
-def mastering_balance(report: Dict, set_median: Optional[Dict[str, float]] = None) -> Figure:
-    fig = _figure(7.0, 3.2)
-    ax = fig.add_subplot(1, 1, 1)
-    _mastering_balance_axes(ax, report, set_median)
-    return _finish(fig)
 
 
 # ------------------------------------------------------------------ pre-master

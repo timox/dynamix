@@ -776,11 +776,12 @@ class TransitionFxPanel(ttk.Frame):
                     envs.append(tfx.peak_envelope(tfx.to_stereo(audio[i0:i1]), sr, t0=i0 / sr))
             except Exception as e:
                 log.warning("Transition chart: cannot read the audio: %s", e)
+                reason = str(e)  # `e` is deleted at the end of the except block, before failed() runs
 
                 def failed():
                     self._waves_loading.discard(key)
                     if self.winfo_exists() and self.pair_index == index:
-                        self._chart_message(f"Cannot read the audio of this transition: {e}")
+                        self._chart_message(f"Cannot read the audio of this transition: {reason}")
                 self.app.root.after(0, failed)
                 return
 

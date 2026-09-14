@@ -27,7 +27,7 @@ from analysis_store import get_store
 
 
 def compatibility_from_features(f1: Dict, f2: Dict) -> Dict:
-    """Same scoring as audio_utils.analyze_track_compatibility, without reloading audio."""
+    """Compatibility of two analysed tracks (BPM 40 %, key 30 %, energy 30 %) from their features."""
     bpm1 = float(f1.get('bpm') or 0)
     bpm2 = float(f2.get('bpm') or 0)
     bpm_diff = abs(bpm1 - bpm2)

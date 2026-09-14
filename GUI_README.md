@@ -105,9 +105,8 @@ python gui.py
 - **Show**: All / Reports (hides the log) / Warnings and errors / Errors.
 
 The Track Analysis, Two-Track Analysis, DJ Tools, Audio Effects and Export
-Tools tabs of the original project were removed: the Set Builder covers the
-analysis of the set's tracks and its export, and those modules remain usable
-from the command line (see README.md).
+Tools tabs of the original project were removed with their code: the Set
+Builder covers the analysis of the set's tracks and its export.
 
 ## Usage Tips
 

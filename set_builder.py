@@ -21,7 +21,7 @@ import charts
 import library
 import set_proposer
 from analysis_store import get_store, dynamix_home
-from config import Config, format_environment_report
+from config import format_environment_report
 from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
 from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
@@ -211,7 +211,6 @@ class SetBuilderMixin:
         self.set_tree.tag_configure("preview", foreground=MUTED)
         self.set_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.set_tree))
         self.set_tree.bind("<Double-1>", lambda e: self.set_remove())
-        self.playlist_tree = self.set_tree  # older code paths
         
         self.overview_frame = self._scrollable_tab("Overview")
         self.track_frame = self._scrollable_tab("Track")
@@ -416,8 +415,6 @@ class SetBuilderMixin:
         self.playlist_manager = manager
         self.current_set_list = project.set_list_tracks() or None
         self.transition_planner = self._planner_from_project()
-        self.transition_source_dir = project.exports_dir
-        self.current_playlist_dir = project.folder
 
         self.project_path_label.config(text=f"{project.folder}   ·   {len(project.selection)} selected tracks   ·   "
                                             f"library: {self.config.get('library_folder') or 'not set (Configuration tab)'}")
@@ -641,10 +638,6 @@ class SetBuilderMixin:
                                            + (f" ({others})" if others else ""))
         set_seconds = sum(float(t.get("duration") or 0) for t in self._set_rows)
         self.set_caption.config(text=f"Set list: {len(self._set_rows)} tracks, {self._fmt_time(set_seconds)} — playing order")
-    
-    def _populate_playlist_tree(self, tracks, caption=None):
-        """Compatibility with older code paths: refresh both tables."""
-        self._refresh_tables()
     
     def _selected(self, tree, rows):
         sel = tree.selection()
@@ -1296,7 +1289,8 @@ class SetBuilderMixin:
             try:
                 report = analyze_bands_cached(path, bpm=bpm)
             except Exception as exc:
-                self.root.after(0, lambda: placeholder.config(text=f"Band analysis failed: {exc}"))
+                message = f"Band analysis failed: {exc}"  # `exc` is deleted before the callback runs
+                self.root.after(0, lambda: placeholder.config(text=message))
                 return
             
             def show():

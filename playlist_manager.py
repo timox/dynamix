@@ -1,14 +1,11 @@
 import os
-import json
 import logging
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple
-from audio_utils import AudioAnalyzer, analyze_track_compatibility
+from typing import List, Dict
+from audio_utils import AudioAnalyzer
 from analysis_store import get_store
 from set_proposer import energy_value, propose, transition_cost
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Output folders DynaMix creates inside a music folder; never scanned as tracks.
 PREMASTER_DIRNAME = "premaster"
@@ -47,32 +44,6 @@ class PlaylistManager:
                     audio_files.append(os.path.join(root, file))
                     
         return audio_files
-    
-    def quick_playlist(self, directory: str = None) -> List[Dict]:
-        """
-        Build a playlist from the audio files of a directory without analyzing
-        them. Entries are sorted by file name and carry the same keys as
-        analyzed tracks (with neutral values) so every exporter accepts them.
-        Returns: List of track dictionaries
-        """
-        entries = []
-        for file_path in sorted(self.scan_directory(directory), key=lambda p: os.path.basename(p).lower()):
-            entries.append({
-                'file_path': file_path,
-                'filename': os.path.basename(file_path),
-                'duration': 0.0,
-                'bpm': 0.0,
-                'bpm_confidence': 0.0,
-                'key': '',
-                'key_confidence': 0.0,
-                'avg_energy': 0.0,
-                'max_energy': 0.0,
-                'energy_std': 0.0,
-                'beat_count': 0,
-                'section_count': 0,
-                'drop_count': 0,
-            })
-        return entries
     
     @staticmethod
     def track_record(file_path: str, features: Dict) -> Dict:
@@ -237,130 +208,3 @@ class PlaylistManager:
         curve = {'build_up': 'build'}.get(energy_curve, energy_curve)
         return propose(list(self.tracks), duration_minutes * 60, curve=curve, mix_bars=mix_bars, variants=1)[0]['tracks']
     
-    def analyze_playlist_compatibility(self) -> pd.DataFrame:
-        """
-        Analyze compatibility between all track pairs in playlist
-        Returns: DataFrame with compatibility matrix
-        """
-        if not self.tracks:
-            raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
-            
-        compatibility_matrix = []
-        
-        for i, track1 in enumerate(self.tracks):
-            for j, track2 in enumerate(self.tracks):
-                if i != j:
-                    try:
-                        compatibility = analyze_track_compatibility(
-                            track1['file_path'], 
-                            track2['file_path']
-                        )
-                        
-                        compatibility_matrix.append({
-                            'track1': track1['filename'],
-                            'track2': track2['filename'],
-                            'bpm_compatibility': compatibility['bpm_compatibility'],
-                            'key_compatibility': compatibility['key_compatibility'],
-                            'energy_compatibility': compatibility['energy_compatibility'],
-                            'overall_score': compatibility['overall_score']
-                        })
-                    except Exception as e:
-                        print(f"Error analyzing compatibility: {e}")
-                        continue
-                        
-        return pd.DataFrame(compatibility_matrix)
-    
-    def plot_playlist_analysis(self):
-        """Create comprehensive playlist analysis visualization"""
-        if not self.tracks:
-            raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
-            
-        df = pd.DataFrame(self.tracks)
-        
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        
-        # BPM distribution
-        axes[0, 0].hist(df['bpm'], bins=20, alpha=0.7, edgecolor='black')
-        axes[0, 0].set_title('BPM Distribution')
-        axes[0, 0].set_xlabel('BPM')
-        axes[0, 0].set_ylabel('Number of Tracks')
-        
-        # Energy distribution
-        axes[0, 1].hist(df['avg_energy'], bins=20, alpha=0.7, edgecolor='black')
-        axes[0, 1].set_title('Energy Distribution')
-        axes[0, 1].set_xlabel('Average Energy')
-        axes[0, 1].set_ylabel('Number of Tracks')
-        
-        # Key distribution
-        key_counts = df['key'].value_counts()
-        axes[1, 0].bar(range(len(key_counts)), key_counts.values)
-        axes[1, 0].set_title('Key Distribution')
-        axes[1, 0].set_xlabel('Musical Key')
-        axes[1, 0].set_ylabel('Number of Tracks')
-        axes[1, 0].set_xticks(range(len(key_counts)))
-        axes[1, 0].set_xticklabels(key_counts.index, rotation=45)
-        
-        # Duration vs Energy scatter
-        axes[1, 1].scatter(df['duration'], df['avg_energy'], alpha=0.6)
-        axes[1, 1].set_title('Duration vs Energy')
-        axes[1, 1].set_xlabel('Duration (seconds)')
-        axes[1, 1].set_ylabel('Average Energy')
-        
-        plt.tight_layout()
-        plt.show()
-    
-    def export_playlist(self, output_path: str, format: str = 'json'):
-        """
-        Export playlist analysis to file
-        
-        Args:
-            output_path: Output file path
-            format: 'json' or 'csv'
-        """
-        if not self.tracks:
-            raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
-            
-        df = pd.DataFrame(self.tracks)
-        
-        if format.lower() == 'json':
-            df.to_json(output_path, orient='records', indent=2)
-        elif format.lower() == 'csv':
-            df.to_csv(output_path, index=False)
-        else:
-            raise ValueError("Format must be 'json' or 'csv'")
-            
-        print(f"Playlist exported to {output_path}")
-    
-    def load_playlist(self, file_path: str):
-        """Load playlist from exported file"""
-        if file_path.endswith('.json'):
-            with open(file_path, 'r') as f:
-                self.tracks = json.load(f)
-        elif file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-            self.tracks = df.to_dict('records')
-        else:
-            raise ValueError("File must be .json or .csv")
-            
-        print(f"Loaded {len(self.tracks)} tracks from {file_path}")
-
-def create_energy_based_set(playlist_manager: PlaylistManager, 
-                           target_duration: int = 60,
-                           energy_profile: str = 'peak_middle') -> List[Dict]:
-    """
-    Create a set list with a specific energy profile
-    
-    Args:
-        playlist_manager: Initialized playlist manager (analyzed tracks)
-        target_duration: Set duration in minutes
-        energy_profile: 'peak_middle', 'build_up' (or 'build'), 'wave', 'constant'
-        
-    Returns: List of tracks for the set
-    """
-    if not playlist_manager.tracks:
-        raise ValueError("No tracks analyzed")
-    
-    curve = {'build_up': 'build'}.get(energy_profile, energy_profile)
-    ordering = PlaylistManager.__new__(PlaylistManager)
-    ordering.tracks = list(playlist_manager.tracks)
-    return ordering.create_set_list(duration_minutes=target_duration, energy_curve=curve)

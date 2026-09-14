@@ -19,20 +19,14 @@ class TestSetProject(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_create_layout_and_import(self):
+    def test_create_layout(self):
         p = SetProject.create(self.root, "Saturday set", self.music)
         self.assertTrue(os.path.isdir(p.premaster_dir) and os.path.isdir(p.exports_dir))
-        self.assertFalse(os.path.isdir(p.source_dir))  # only created by import_audio (projects before v3)
-        counts = p.import_folder(self.music)
-        self.assertEqual(counts, {"copied": 2, "skipped": 0, "failed": 0})
-        self.assertEqual([os.path.basename(f) for f in p.source_files()], ["a.wav", "b.wav"])
-        # importing again copies nothing
-        self.assertEqual(p.import_folder(self.music)["skipped"], 2)
-        self.assertEqual(len(p.data["imported"]), 2)
+        self.assertFalse(os.path.isdir(p.source_dir))  # only in projects made before v3
+        self.assertEqual(p.source_files(), [])
         self.assertEqual(list_projects(self.root), [p.folder])
         q = SetProject.open(p.path)
         self.assertEqual(q.name, "Saturday set")
-        self.assertEqual(q.data["source_folder"], os.path.abspath(self.music))
 
     def test_create_twice_fails(self):
         SetProject.create(self.root, "x")
@@ -56,9 +50,6 @@ class TestSetProject(unittest.TestCase):
         self.assertEqual(p.move_in_set("/m/c.wav", -1), 0)  # already first
         p.remove_from_set("/m/a.wav")
         self.assertEqual(p.set_list, ["/m/c.wav", "/m/b.wav"])
-        lib = p.library_tracks()
-        self.assertEqual([(t["file_path"], t["set_position"]) for t in lib],
-                         [("/m/a.wav", None), ("/m/b.wav", 2), ("/m/c.wav", 1)])
         p.add_to_set("/m/unknown.wav")  # ignored
         self.assertEqual(len(p.set_list), 2)
         p.set_order(["/m/b.wav", "/m/c.wav", "/m/zzz.wav"])

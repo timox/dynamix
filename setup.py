@@ -61,13 +61,9 @@ setup(
     keywords="audio analysis dj mixing music transition bpm key detection",
     packages=find_packages(),
     py_modules=[
-        "mix_analiz",
-        "mix_enhanced", 
         "audio_utils",
-        "audio_effects",
         "export_tools",
         "playlist_manager",
-        "dj_tools",
         "transition_planner",
         "mixxx_export",
         "mastering",
@@ -78,7 +74,6 @@ setup(
         "config",
         "set_builder",
         "gui",
-        "examples",
         "app_log",
         "library",
         "set_proposer",
@@ -134,10 +129,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "dynamix=mix_enhanced:main",
-            "dynamix-basic=mix_analiz:main",
-            "dynamix-dj=dj_tools:main",
-            "dynamix-examples=examples:main",
+            "dynamix=gui:main",
             "dynamix-mixxx=mixxx_export:main",
             "dynamix-master=mastering:main",
             "dynamix-gui=gui:main",
@@ -159,9 +151,6 @@ setup(
             "LICENSE",
             "requirements.txt",
             "requirements-dev.txt",
-        ]),
-        ("share/dynamix/examples", [
-            "examples.py",
         ]),
         ("share/dynamix/docs", [
             "docs/README.md",

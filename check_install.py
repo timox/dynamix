@@ -27,7 +27,6 @@ REQUIRED_PACKAGES = [
     ("numpy", "numpy"),
     ("matplotlib", "matplotlib"),
     ("pandas", "pandas"),
-    ("seaborn", "seaborn"),
     ("scipy", "scipy"),
     ("scikit-learn", "sklearn"),
     ("soundfile", "soundfile"),
@@ -125,7 +124,6 @@ def check_end_to_end():
 
         matplotlib.use("Agg")
         from audio_utils import AudioAnalyzer
-        from dj_tools import DJTools
 
         sr = 22050
         t = np.linspace(0, 12, 12 * sr, endpoint=False)
@@ -136,12 +134,10 @@ def check_end_to_end():
 
         analyzer = AudioAnalyzer(path)
         features = analyzer.get_audio_features()
-        dj = DJTools(path)
-        cues = dj.detect_cue_points()
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
         report(True, "End-to-end analysis",
-               f"BPM {features['bpm']:.1f}, key {features['key']}, {len(cues)} cue points")
+               f"BPM {features['bpm']:.1f}, key {features['key']}, energy level {features.get('energy_level', 0):.1f}")
         return True
     except Exception as exc:  # noqa: BLE001
         report(False, "End-to-end analysis", f"{type(exc).__name__}: {exc}")

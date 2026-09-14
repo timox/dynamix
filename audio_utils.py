@@ -1,7 +1,6 @@
 import librosa
 import numpy as np
-import matplotlib.pyplot as plt
-from typing import Tuple, Optional, List
+from typing import Tuple, List
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -300,40 +299,6 @@ class AudioAnalyzer:
         
         return features
     
-    def plot_comprehensive_analysis(self):
-        """Create a comprehensive visualization of all analyses"""
-        fig, axes = plt.subplots(4, 1, figsize=(15, 12))
-        
-        # Energy profile
-        times, rms = self.analyze_energy_profile()
-        axes[0].plot(times, rms, label='RMS Energy')
-        axes[0].set_title('Energy Profile')
-        axes[0].set_ylabel('Energy')
-        axes[0].legend()
-        
-        # Beat grid
-        beat_times, beat_strengths = self.analyze_beat_grid()
-        axes[1].vlines(beat_times, 0, beat_strengths, alpha=0.5, label='Beats')
-        axes[1].set_title('Beat Grid')
-        axes[1].set_ylabel('Beat Strength')
-        axes[1].legend()
-        
-        # Chromagram (key analysis)
-        chroma = librosa.feature.chroma_cqt(y=self.y, sr=self.sr)
-        librosa.display.specshow(chroma, sr=self.sr, x_axis='time', y_axis='chroma', ax=axes[2])
-        axes[2].set_title('Chroma Features (Key Analysis)')
-        
-        # Sections
-        sections = self.detect_sections()
-        for section_name, start, end in sections:
-            axes[3].axvspan(start, end, alpha=0.3, label=section_name)
-        axes[3].set_title('Detected Sections')
-        axes[3].set_xlabel('Time (s)')
-        axes[3].legend()
-        
-        plt.tight_layout()
-        plt.show()
-
 _PITCH_CLASSES = {'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3, 'E': 4, 'F': 5, 'F#': 6, 'GB': 6,
                   'G': 7, 'G#': 8, 'AB': 8, 'A': 9, 'A#': 10, 'BB': 10, 'B': 11}
 
@@ -390,75 +355,3 @@ def energy_compatibility_score(f1: dict, f2: dict) -> float:
     max_energy = max(e1, e2)
     return max(0.0, 100.0 - abs(e1 - e2) / max_energy * 100.0) if max_energy > 0 else 100.0
 
-
-def analyze_track_compatibility(track1_path: str, track2_path: str) -> dict:
-    """
-    Analyze compatibility between two tracks for mixing
-    Returns: Dictionary with compatibility metrics
-    """
-    analyzer1 = AudioAnalyzer(track1_path)
-    analyzer2 = AudioAnalyzer(track2_path)
-    
-    features1 = analyzer1.get_audio_features()
-    features2 = analyzer2.get_audio_features()
-    
-    compatibility = {}
-    
-    # BPM compatibility
-    bpm_diff = abs(features1['bpm'] - features2['bpm'])
-    compatibility['bpm_compatibility'] = max(0, 100 - (bpm_diff * 2))
-    compatibility['bpm_difference'] = bpm_diff
-    
-    # Key compatibility (Camelot-wheel logic)
-    compatibility['key_compatibility'] = key_compatibility_score(features1['key'], features2['key'])
-    
-    # Energy compatibility (perceived energy level, loudness independent)
-    compatibility['energy_compatibility'] = energy_compatibility_score(features1, features2)
-    
-    # Overall compatibility score
-    compatibility['overall_score'] = (
-        compatibility['bpm_compatibility'] * 0.4 +
-        compatibility['key_compatibility'] * 0.3 +
-        compatibility['energy_compatibility'] * 0.3
-    )
-    
-    return compatibility
-
-def suggest_mix_points(track1_path: str, track2_path: str) -> dict:
-    """
-    Suggest optimal mix points for two tracks
-    Returns: Dictionary with mix suggestions
-    """
-    analyzer1 = AudioAnalyzer(track1_path)
-    analyzer2 = AudioAnalyzer(track2_path)
-    
-    # Get features
-    features1 = analyzer1.get_audio_features()
-    features2 = analyzer2.get_audio_features()
-    
-    # Analyze energy profiles
-    times1, rms1 = analyzer1.analyze_energy_profile()
-    times2, rms2 = analyzer2.analyze_energy_profile()
-    
-    # Find energy valleys in track 1 (good exit points)
-    rolling_avg1 = np.convolve(rms1, np.ones(20)/20, mode='same')
-    valleys1 = []
-    for i, (time, energy, avg) in enumerate(zip(times1, rms1, rolling_avg1)):
-        if energy < avg * 0.8 and time > 30:  # Avoid very early valleys
-            valleys1.append(time)
-    
-    # Find energy peaks in track 2 (good entry points)
-    rolling_avg2 = np.convolve(rms2, np.ones(20)/20, mode='same')
-    peaks2 = []
-    for i, (time, energy, avg) in enumerate(zip(times2, rms2, rolling_avg2)):
-        if energy > avg * 1.2 and time < features2['duration'] - 30:  # Avoid very late peaks
-            peaks2.append(time)
-    
-    suggestions = {
-        'track1_exit_points': valleys1[:5],  # Top 5 exit points
-        'track2_entry_points': peaks2[:5],   # Top 5 entry points
-        'recommended_mix_duration': min(16, features1['duration'] * 0.1),  # 10% of track or 16 bars
-        'bpm_sync_required': abs(features1['bpm'] - features2['bpm']) > 5
-    }
-    
-    return suggestions 
