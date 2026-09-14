@@ -302,9 +302,21 @@ def scenario():
               "typing only checks the sequence in the information lines, nothing is stored yet")
         check(win._apply_text("sequence") and win.effects()[-1]["sequence"] == "d81b0 u42b1 d11b1",
               "Apply stores the typed sequence")
+        field.mark_set("insert", "1.1")
+        check(win._scratch_nudge(1) == "break" and field.get("1.0", "end-1c") == "d91b0 u42b1 d11b1"
+              and field.index("insert") == "1.1", "the up arrow steps the factor under the cursor, the cursor stays")
+        field.mark_set("insert", "1.3")
+        check(win._scratch_nudge(1) is None, "the arrow does not change the fixed b")
+        win._draw_scratch_curve()
+        check(win._scratch_steps and field.tag_ranges("current") and len(win._scratch_figure.axes) == 2,
+              "the curve follows the typed sequence and the command under the cursor is highlighted")
+        field.delete("1.1")
+        field.insert("1.1", "8")
+        win._apply_text("sequence")
         field.insert("end", " oops")
         win._typing("sequence")
         check("Sequence error" in win.scratch_info.cget("text"), "an error in the typed sequence is shown before applying")
+        check(field.tag_ranges("bad") and field.get(*field.tag_ranges("bad")[:2]) == "oops", "a wrong command is marked in the field")
         check(not win._apply_text("sequence") and win.effects()[-1]["sequence"] == "d81b0 u42b1 d11b1",
               "an unreadable sequence is refused and the applied one is kept")
         win._form_vars["sequence"].set("zz")

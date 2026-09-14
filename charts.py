@@ -508,6 +508,45 @@ _BLOCK_COLORS = {"scratch_down": BLUE, "scratch_up": BLUE_DARK, "catchup": BLUE_
                  "release": BLUE_LIGHT, "wet": BLUE, "sample": BLUE}
 
 
+def scratch_head(plan: Dict, head: Dict, length_s: float, highlight: Optional[int] = None,
+                 fig: Optional[Figure] = None) -> Figure:
+    """
+    A scratch seen as a turntable: the playback speed (negative = backwards) and where the read position is against
+    the track without the effect, one shaded band per command (the highlighted one in blue) and the catch-up.
+    plan: transition_fx.scratch_plan; head: transition_fx.scratch_head; fig: a figure to draw again (an editor's).
+    """
+    if fig is None:
+        fig = _figure(4.2, 2.9)
+    else:
+        fig.clear()
+    speed_ax = fig.add_subplot(2, 1, 1)
+    offset_ax = fig.add_subplot(2, 1, 2, sharex=speed_ax)
+    t = head["t"]
+    for ax in (speed_ax, offset_ax):
+        _style(ax)
+        for n, step in enumerate(plan["steps"]):
+            color = BLUE_LIGHT if n == highlight else ("#f1f0ec" if n % 2 == 0 else SURFACE)
+            ax.axvspan(step["start"], step["end"], color=color, alpha=0.55 if n == highlight else 1.0, linewidth=0, zorder=0)
+        ax.axhline(0.0, color=GRAY, linewidth=0.8, zorder=1)
+        ax.set_xlim(0.0, max(1e-3, length_s))
+    speed_ax.plot(t, head["speed"], color=BLUE, linewidth=1.4)
+    speed_ax.set_ylabel(tr("speed"), fontsize=8)
+    peak = max(1.2, float(np.max(np.abs(head["speed"]))) * 1.1) if len(head["speed"]) else 1.2
+    speed_ax.set_ylim(-peak, peak)
+    speed_ax.tick_params(labelbottom=False)
+    for n, step in enumerate(plan["steps"]):
+        if step["end"] - step["start"] > length_s / 14:
+            speed_ax.text((step["start"] + step["end"]) / 2, peak * 0.97, step["text"], ha="center", va="top", fontsize=7,
+                          family="monospace", color=BLUE_DARK if n == highlight else TEXT2, clip_on=True)
+    if plan["catch_up_speed"] is not None and length_s - plan["sequence_end"] > length_s / 14:
+        speed_ax.text((plan["sequence_end"] + length_s) / 2, -peak * 0.95, tr("catch-up ×{speed:.2f}", speed=plan["catch_up_speed"]),
+                      ha="center", va="bottom", fontsize=7, color=STATUS_CRITICAL if plan["warnings"] else TEXT2, clip_on=True)
+    offset_ax.plot(t, head["offset"], color=BLUE_DARK, linewidth=1.4)
+    offset_ax.set_ylabel(tr("ahead / behind (s)"), fontsize=8)
+    offset_ax.set_xlabel(tr("seconds of the effect"), fontsize=8)
+    return _finish(fig)
+
+
 def _waveform(ax, env: Optional[Dict], shift: float, x0: float, x1: float, color: str,
               gain=None, faint: Optional[str] = None) -> bool:
     """Peak waveform scaled to the view; with `gain` (t -> 0..1) the heard part is drawn over a faint full one."""

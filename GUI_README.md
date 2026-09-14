@@ -85,7 +85,12 @@ python gui.py
   a speed 8 times slower in 1 s), confined to 2 to 16 beats: the rest of the
   effect catches up at a constant speed so the track lands where it would be
   (the settings show the catch-up speed and warn when it gets extreme); it
-  may run over into the next track). **▶ Preview (loop)** plays the transition
+  may run over into the next track. The sequence field works like a tracker:
+  ↑ / ↓ step the character under the cursor, typing replaces characters
+  (Insert toggles), wrong commands are underlined in red; a curve under it
+  shows the speed and how far ahead or behind the track the read position is,
+  follows what you type and highlights the command under the cursor — click
+  the curve to reach a command). **▶ Preview (loop)** plays the transition
   in a loop and re-renders it when a setting changes; **Nudge (ms)** shifts the
   junction by ear. **Apply all FX** writes copies into `fx/` (the library and
   the pre-mastered copies are never modified); the playlist and the Mixxx

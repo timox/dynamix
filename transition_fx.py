@@ -570,26 +570,76 @@ def parse_scratch(sequence: str) -> List[Dict]:
     commas or new lines between commands are optional. Returns [{'kind': 'd'|'u', 'factor', 'seconds', 'backward',
     'text'}]; raises ValueError naming the wrong command.
     """
+    steps = []
+    for command in scratch_commands(sequence):
+        if command["error"]:
+            raise ValueError(command["error"])
+        steps.append(command["step"])
+    if not steps:
+        raise ValueError(N_("the sequence is empty"))
+    return steps
+
+
+def scratch_commands(sequence: str) -> List[Dict]:
+    """
+    The commands of a scratch sequence as typed, readable or not, for an editor: [{'start', 'end' (character offsets
+    in the text), 'text', 'error' (None when readable), 'step' (as in parse_scratch, None when unreadable)}].
+    """
     text = sequence or ""
-    steps, position = [], 0
+    commands, position = [], 0
     while True:
         position = _SCRATCH_GAP.match(text, position).end()
         if position >= len(text):
             break
         command = text[position:position + SCRATCH_COMMAND_LENGTH]
         match = _SCRATCH_COMMAND.fullmatch(command)
+        entry = {"start": position, "end": position + len(command), "text": command, "error": None, "step": None}
         if not match:
-            raise ValueError(N_("command '{command}': expected 5 characters like d81b0 (d or u, factor 0-F, seconds 1-F, "
-                                "b, 0 or 1)").format(command=command))
-        seconds = int(match.group(3), 16)
-        if seconds == 0:
-            raise ValueError(N_("command '{command}': the duration must be 1 to F seconds").format(command=command))
-        steps.append({"kind": match.group(1).lower(), "factor": float(max(1, int(match.group(2), 16))),
-                      "seconds": float(seconds), "backward": match.group(4) == "1", "text": command})
+            entry["error"] = N_("command '{command}': expected 5 characters like d81b0 (d or u, factor 0-F, seconds 1-F, "
+                                "b, 0 or 1)").format(command=command)
+        elif int(match.group(3), 16) == 0:
+            entry["error"] = N_("command '{command}': the duration must be 1 to F seconds").format(command=command)
+        else:
+            entry["step"] = {"kind": match.group(1).lower(), "factor": float(max(1, int(match.group(2), 16))),
+                             "seconds": float(int(match.group(3), 16)), "backward": match.group(4) == "1", "text": command}
+        commands.append(entry)
         position += SCRATCH_COMMAND_LENGTH
-    if not steps:
-        raise ValueError(N_("the sequence is empty"))
-    return steps
+    return commands
+
+
+# what each character of a command may be, in order; the arrows of the editor step through them
+_SCRATCH_SLOTS = ("du", "0123456789ABCDEF", "123456789ABCDEF", "b", "01")
+
+
+def scratch_nudge(sequence: str, offset: int, delta: int) -> Optional[str]:
+    """
+    The sequence with the character at `offset` stepped by `delta` within what its place in the command allows (d/u,
+    factor 0-F, seconds 1-F, 0/1), as the arrows of a tracker do; None when that character cannot be stepped.
+    """
+    text = sequence or ""
+    for command in scratch_commands(text):
+        if command["start"] <= offset < command["end"]:
+            slot = _SCRATCH_SLOTS[offset - command["start"]]
+            current = text[offset]
+            index = slot.find(current.lower() if slot == "du" else current.upper())
+            if index < 0 or len(slot) < 2:
+                return None
+            # two choices (d/u, 0/1) toggle; the factor and the seconds stop at their ends
+            index = (index + delta) % 2 if len(slot) == 2 else max(0, min(len(slot) - 1, index + delta))
+            value = slot[index].upper() if slot == "du" and current.isupper() else slot[index]
+            return text[:offset] + value + text[offset + 1:]
+    return None
+
+
+def scratch_head(plan: Dict, sr: int) -> Dict:
+    """
+    Where the read position is during a scratch planned at `sr` values per second: 't' (s), 'speed' and 'offset'
+    (seconds of audio ahead of, or behind, the position without the effect; 0 again at the end).
+    """
+    speed = np.asarray(plan["speed"], dtype=np.float64)
+    t = np.arange(len(speed) + 1) / float(sr)
+    read = np.concatenate([[0.0], np.cumsum(speed)]) / float(sr)
+    return {"t": t, "speed": np.concatenate([speed[:1], speed]) if len(speed) else speed, "offset": read - t}
 
 
 def scratch_plan(sequence: str, length_s: float, sr: int, ramp: str = "exponential") -> Dict:

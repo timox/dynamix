@@ -76,5 +76,9 @@
   "dry": "sec",
   "echo": "écho",
   "choose a sample": "choisir un sample",
-  "sample not found": "sample introuvable"
+  "sample not found": "sample introuvable",
+  "speed": "vitesse",
+  "ahead / behind (s)": "avance / retard (s)",
+  "seconds of the effect": "secondes de l'effet",
+  "catch-up ×{speed:.2f}": "rattrapage ×{speed:.2f}"
 }

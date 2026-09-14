@@ -40,6 +40,42 @@ class TestParse(unittest.TestCase):
         self.assertEqual(tfx.validate_effect(tfx.new_effect("scratch")), [])
 
 
+class TestEditorHelpers(unittest.TestCase):
+    def test_commands_keep_their_place_in_the_text(self):
+        commands = tfx.scratch_commands("d81b0  u40b1\nzz")
+        self.assertEqual([(c["start"], c["end"], c["text"]) for c in commands], [(0, 5, "d81b0"), (7, 12, "u40b1"), (13, 15, "zz")])
+        self.assertEqual([c["error"] is None for c in commands], [True, False, False])
+        self.assertEqual(commands[0]["step"]["factor"], 8.0)
+
+    def test_nudge_steps_each_character_within_its_range(self):
+        self.assertEqual(tfx.scratch_nudge("d81b0 u42b1", 0, 1), "u81b0 u42b1")          # d <-> u
+        self.assertEqual(tfx.scratch_nudge("D81b0", 0, 1), "U81b0")                       # case kept
+        self.assertEqual(tfx.scratch_nudge("d91b0", 1, 1), "dA1b0")                       # hex
+        self.assertEqual(tfx.scratch_nudge("dF1b0", 1, 1), "dF1b0")                       # stops at F
+        self.assertEqual(tfx.scratch_nudge("d01b0", 1, -1), "d01b0")                      # stops at 0
+        self.assertEqual(tfx.scratch_nudge("d81b0", 2, -1), "d81b0")                      # seconds stop at 1
+        self.assertEqual(tfx.scratch_nudge("d8ab0", 2, 1), "d8Bb0")
+        self.assertEqual(tfx.scratch_nudge("d81b0 u42b1", 10, 1), "d81b0 u42b0")         # 0 <-> 1
+        self.assertIsNone(tfx.scratch_nudge("d81b0 u42b1", 3, 1))                          # the b
+        self.assertIsNone(tfx.scratch_nudge("d81b0 u42b1", 5, 1))                          # a space
+        self.assertIsNone(tfx.scratch_nudge("dz1b0", 1, 1))
+
+    def test_head_ends_back_in_place(self):
+        plan = tfx.scratch_plan("d81b0 u81b1", 4.0, 200)
+        head = tfx.scratch_head(plan, 200)
+        self.assertEqual(len(head["t"]), len(head["offset"]))
+        self.assertAlmostEqual(float(head["offset"][-1]), 0.0, places=6)
+        self.assertLess(float(head["offset"][400]), 0.0)                                  # behind after slowing then going back
+
+    def test_chart(self):
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        import charts
+        plan = tfx.scratch_plan("d81b0 u42b1 dF3b1", 8.0, 200)
+        fig = charts.scratch_head(plan, tfx.scratch_head(plan, 200), 8.0, highlight=1)
+        self.assertEqual(len(fig.axes), 2)
+        FigureCanvasAgg(fig).draw()
+
+
 class TestPlan(unittest.TestCase):
     def test_catch_up_lands_exactly(self):
         plan = tfx.scratch_plan("d81b0 u81b0", 4.0, SR)

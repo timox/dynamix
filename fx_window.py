@@ -619,13 +619,173 @@ class TransitionFxPanel(ttk.Frame):
                                "Example: d81b0 u42b1 dF3b1. The rest of the effect catches up so that the track ends "
                                "where it would be."),
                   foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
-        ttk.Label(box, text=tr("While you type, the lines below check the sequence; Apply (or Enter) applies it, then the "
-                               "chart and the preview follow. An unreadable sequence is not applied."),
+        ttk.Label(box, text=tr("In the field, as in a tracker: ↑ / ↓ change the character under the cursor (d/u, factor, "
+                               "seconds, direction) and typing replaces the characters (Insert switches to inserting). "
+                               "Wrong commands are underlined in red. The curve follows what you type and shows the "
+                               "command under the cursor; click the curve to reach a command in the field. "
+                               "Apply (or Enter) applies the sequence, then the transition chart and the preview follow."),
                   foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
         ttk.Button(box, text=tr("✓ Apply the sequence"), command=lambda: self._apply_text("sequence")).pack(anchor="w", padx=4, pady=2)
         self.scratch_info = ttk.Label(box, text="", justify=tk.LEFT, wraplength=380)
         self.scratch_info.pack(anchor="w", padx=4, pady=(2, 4))
+        self._scratch_figure = charts.scratch_head({"steps": [], "catch_up_speed": None, "warnings": []},
+                                                   {"t": [], "speed": [], "offset": []}, 1.0)
+        self._scratch_canvas = FigureCanvasTkAgg(self._scratch_figure, box)
+        self._scratch_canvas.get_tk_widget().config(height=charts.pixel_height(self._scratch_figure))
+        self._scratch_canvas.get_tk_widget().pack(fill=tk.X, padx=4, pady=(0, 4))
+        self._scratch_canvas.mpl_connect("button_press_event", self._scratch_curve_clicked)
+        self._scratch_job, self._scratch_steps = None, []
+        self._scratch_editor(self._text_fields["sequence"][0])
         self._refresh_scratch_info()
+
+    # ------------------------------------------------------------------ scratch sequence editor
+    SCRATCH_TAGS = (("kind", charts.BLUE_DARK), ("factor", charts.BLUE), ("seconds", charts.VIOLET), ("letter_b", MUTED),
+                    ("direction", charts.TEXT))
+
+    def _scratch_editor(self, widget):
+        """Tracker-like keys on the sequence field: arrows step a character, typing overwrites (Insert toggles)."""
+        for tag, color in self.SCRATCH_TAGS:
+            widget.tag_configure(tag, foreground=color)
+        widget.tag_configure("bad", foreground=charts.STATUS_CRITICAL, underline=True)
+        widget.tag_configure("current", background="#dce9f9")
+        widget.tag_raise("bad")
+        self._scratch_overwrite = True
+        widget.bind("<Up>", lambda e: self._scratch_nudge(1))
+        widget.bind("<Down>", lambda e: self._scratch_nudge(-1))
+        widget.bind("<Insert>", lambda e: self._scratch_toggle_overwrite())
+        widget.bind("<KeyPress>", self._scratch_key, add="+")
+        widget.bind("<ButtonRelease-1>", lambda e: self._scratch_editor_changed(), add="+")
+
+    def _scratch_field(self):
+        widget, _ = getattr(self, "_text_fields", {}).get("sequence", (None, None))
+        return widget if widget is not None and widget.winfo_exists() else None
+
+    @staticmethod
+    def _offset(widget, index="insert"):
+        if not widget.compare(index, ">", "1.0"):
+            return 0
+        count = widget.count("1.0", index, "chars")  # a tuple, or an int on recent Pythons
+        return int(count[0] if isinstance(count, tuple) else count or 0)
+
+    def _scratch_nudge(self, delta):
+        widget = self._scratch_field()
+        if widget is None:
+            return None
+        offset = self._offset(widget)
+        changed = tfx.scratch_nudge(widget.get("1.0", "end-1c"), offset, delta)
+        if changed is None:
+            return None  # not a steppable character: the arrow moves the cursor as usual
+        widget.delete(f"1.0 + {offset} chars")
+        widget.insert(f"1.0 + {offset} chars", changed[offset])
+        widget.mark_set("insert", f"1.0 + {offset} chars")
+        self._typing("sequence")
+        return "break"
+
+    def _scratch_toggle_overwrite(self):
+        self._scratch_overwrite = not self._scratch_overwrite
+        self.status(tr("Sequence field: typing replaces the characters") if self._scratch_overwrite
+                    else tr("Sequence field: typing inserts characters"))
+        return "break"
+
+    def _scratch_key(self, event):
+        """In overwrite mode a typed character replaces the one under the cursor (never a space or the end of a line)."""
+        widget = event.widget
+        if not self._scratch_overwrite or not event.char or not event.char.isprintable() or event.char.isspace():
+            return None
+        if event.state & 0x4 or widget.tag_ranges("sel"):  # Ctrl shortcuts and selections work as usual
+            return None
+        under = widget.get("insert")
+        if under and not under.isspace():
+            widget.delete("insert")
+        return None
+
+    def _scratch_editor_changed(self):
+        """Colours of the typed commands, the command under the cursor and, a moment later, the curve."""
+        widget = self._scratch_field()
+        if widget is None:
+            return
+        for tag, _ in self.SCRATCH_TAGS:
+            widget.tag_remove(tag, "1.0", tk.END)
+        widget.tag_remove("bad", "1.0", tk.END)
+        commands = tfx.scratch_commands(widget.get("1.0", "end-1c"))
+        for command in commands:
+            start = command["start"]
+            if command["error"]:
+                widget.tag_add("bad", f"1.0 + {start} chars", f"1.0 + {command['end']} chars")
+                continue
+            for n, (tag, _) in enumerate(self.SCRATCH_TAGS):
+                widget.tag_add(tag, f"1.0 + {start + n} chars", f"1.0 + {start + n + 1} chars")
+        self._scratch_commands = commands
+        if self._scratch_job is not None:
+            self.after_cancel(self._scratch_job)
+        self._scratch_job = self.after(200, self._draw_scratch_curve)
+
+    def _scratch_cursor_command(self):
+        """Index of the command under (or just after) the cursor, among the typed commands."""
+        widget = self._scratch_field()
+        if widget is None:
+            return None
+        offset = self._offset(widget)
+        for n, command in enumerate(getattr(self, "_scratch_commands", [])):
+            if command["start"] <= offset <= command["end"]:
+                return n
+        return None
+
+    def _draw_scratch_curve(self):
+        """The speed and read-position curve of the typed sequence (the applied one while the typed one is unreadable)."""
+        self._scratch_job = None
+        widget, canvas = self._scratch_field(), getattr(self, "_scratch_canvas", None)
+        if widget is None or canvas is None or not canvas.get_tk_widget().winfo_exists():
+            return
+        context = self._scratch_context()
+        if context is None:
+            return
+        fx, length = context
+        typed = widget.get("1.0", "end-1c")
+        highlight = self._scratch_cursor_command()
+        try:
+            plan = tfx.scratch_plan(typed, length, 200, fx.get("ramp", "exponential"))
+        except ValueError:
+            highlight = None
+            try:
+                plan = tfx.scratch_plan(fx["sequence"], length, 200, fx.get("ramp", "exponential"))
+            except ValueError:
+                plan = None
+        widget.tag_remove("current", "1.0", tk.END)
+        if plan is None:
+            self._scratch_steps = []
+            return
+        if highlight is not None and highlight < len(self._scratch_commands):
+            command = self._scratch_commands[highlight]
+            widget.tag_add("current", f"1.0 + {command['start']} chars", f"1.0 + {command['end']} chars")
+        self._scratch_steps = plan["steps"]
+        charts.scratch_head(plan, tfx.scratch_head(plan, 200), length, highlight=highlight, fig=self._scratch_figure)
+        canvas.draw_idle()
+
+    def _scratch_curve_clicked(self, event):
+        """A click on the curve puts the cursor on the command played at that moment."""
+        widget = self._scratch_field()
+        if widget is None or event.xdata is None:
+            return
+        for n, step in enumerate(self._scratch_steps):
+            if step["start"] <= event.xdata < step["end"] and n < len(getattr(self, "_scratch_commands", [])):
+                widget.mark_set("insert", f"1.0 + {self._scratch_commands[n]['start']} chars")
+                widget.see("insert")
+                widget.focus_set()
+                self._scratch_editor_changed()
+                return
+
+    def _scratch_context(self):
+        """(the selected scratch effect with its defaults, its length in seconds), or None."""
+        if self.fx_index is None or self.pair_index is None:
+            return None
+        effects = self.effects()
+        if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "scratch":
+            return None
+        fx = dict(tfx.new_effect("scratch"), **effects[self.fx_index])
+        profile = self.profiles[self.pair_index if fx.get("side") == "outgoing" else self.pair_index + 1]
+        period = 60.0 / float(profile.get("bpm") or tfx.DEFAULT_BPM)
+        return fx, int(fx["length_beats"]) * period
 
     def _text_field(self, parent, key, var):
         """
@@ -675,15 +835,11 @@ class TransitionFxPanel(ttk.Frame):
     def _refresh_scratch_info(self, sequence=None):
         """What the sequence does over the effect (the one being typed when given): length, catch-up, warnings."""
         label = getattr(self, "scratch_info", None)
-        if label is None or not label.winfo_exists() or self.fx_index is None or self.pair_index is None:
+        context = self._scratch_context()
+        if label is None or not label.winfo_exists() or context is None:
             return
-        effects = self.effects()
-        if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "scratch":
-            return
-        fx = dict(tfx.new_effect("scratch"), **effects[self.fx_index])
-        profile = self.profiles[self.pair_index if fx.get("side") == "outgoing" else self.pair_index + 1]
-        period = 60.0 / float(profile.get("bpm") or tfx.DEFAULT_BPM)
-        length = int(fx["length_beats"]) * period
+        fx, length = context
+        self._scratch_editor_changed()
         try:
             plan = tfx.scratch_plan(fx["sequence"] if sequence is None else sequence, length, 200, fx.get("ramp", "exponential"))
         except ValueError as exc:
