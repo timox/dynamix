@@ -313,6 +313,31 @@ def scenario():
         check(dialog is not None and dialog.winfo_exists(), "the Snapshots window opens")
         dialog.destroy()
 
+        import time as _time
+
+        def slow(task):
+            for i in range(300):
+                task.progress(i, 300, f"step {i}")
+                _time.sleep(0.02)
+
+        app.notebook.select(0)
+        task = app._start_task("Smoke task", slow)
+        check(pump(lambda: app.notebook.tab(app.tasks_frame, "text") == "Tasks (1)", 2.0), "the Tasks tab counts the running tasks")
+        check(pump(lambda: "Smoke task" in app.task_status.cget("text") and float(app.task_progress["value"]) > 0, 3.0),
+              "the status bar shows the running task and its progress")
+        check(app.tasks_tree.exists(str(task.id)), "the task is listed in the Tasks tab")
+        check(app.stop_latest_task() is task, "Stop in the status bar stops the newest task")
+        check(pump(lambda: task.state == "stopped", 3.0), "a stopped task ends after its current step")
+        check(pump(lambda: app.notebook.tab(app.tasks_frame, "text") == "Tasks", 2.0), "the Tasks title goes back when nothing runs")
+        check(pump(lambda: app.tasks_tree.item(str(task.id), "values")[4] == "stopped", 2.0), "the stopped task stays listed")
+        shown = app.notebook.select()
+        app.add_report("Background report", "text", show=False)
+        check(app.notebook.select() == shown, "a report finished in the background does not change the tab")
+        check("1 new report" in app.notebook.tab(app.log_frame, "text"), "the Log title counts the new reports")
+        app.notebook.select(app.log_frame)
+        check(pump(lambda: "new report" not in app.notebook.tab(app.log_frame, "text"), 2.0), "opening the Log resets the count")
+        app.notebook.select(0)
+
         # --- checks added by later tasks go above this line ---
 
 

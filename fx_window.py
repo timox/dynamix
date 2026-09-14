@@ -154,7 +154,8 @@ def _fmt(seconds: float) -> str:
 
 class TransitionFxPanel(ttk.Frame):
     """FX tab of the Set Builder, for the project and transition plan it was built with.
-    Needs `app` with: root, project, config, update_status, _report_error, _save_project, _render_overview."""
+    Needs `app` with: root, project, config, update_status, _report_error, _save_project, _render_overview,
+    _start_task and _task_failed (tasks_tab.TasksTabMixin)."""
 
     def __init__(self, parent, app, player=None):
         super().__init__(parent)
@@ -910,15 +911,16 @@ class TransitionFxPanel(ttk.Frame):
         out_dir = project.fx_dir
         self.status(f"Rendering FX for {len(pairs)} transitions ...")
 
-        def work():
+        def work(task):
             try:
                 results, problems = render_set(
                     profiles, lambda a, b: lookup.get(project.fx_key(a, b)), bases, out_dir, fmt,
-                    progress=lambda i, n, name: app.root.after(0, app.update_status, f"Rendering FX {i}/{n}: {name}"))
+                    progress=lambda i, n, name: task.progress(i, n, name))
             except Exception as e:
-                app._report_error(f"FX render failed: {e}", e)
+                app._task_failed(task, f"FX render failed: {e}", e)
                 app.root.after(0, self._apply_finished, "FX render failed (see the Log)")
                 return
+            task.check()  # stopped: the project keeps its previous FX render
 
             def done():
                 self._apply_finished(None)
@@ -947,7 +949,8 @@ class TransitionFxPanel(ttk.Frame):
                     self.refresh_transitions()
                     self.status(message)
             app.root.after(0, done)
-        threading.Thread(target=work, daemon=True).start()
+        app._start_task("Apply all FX", work,
+                        on_stopped=lambda: self._apply_finished("FX render stopped: the project keeps its previous FX copies"))
 
     def _apply_finished(self, message):
         self._applying = False

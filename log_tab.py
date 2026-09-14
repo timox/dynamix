@@ -37,6 +37,7 @@ class LogTabMixin:
         self.notebook.add(frame, text="Log")
         self.log_frame = frame
         self._log_unseen = 0
+        self._log_new_reports = 0
         self._log_title = "Log"
         bar = ttk.Frame(frame)
         bar.pack(fill=tk.X, padx=10, pady=(10, 4))
@@ -144,6 +145,9 @@ class LogTabMixin:
         self._reports_refresh(select=path)
         if show:
             self.notebook.select(self.log_frame)
+        elif not self._log_tab_visible():
+            self._log_new_reports += 1  # a report finished in the background: counted in the tab title, no tab change
+            self._log_update_title()
         return path
 
     def _reports_open_folder(self):
@@ -200,14 +204,20 @@ class LogTabMixin:
             return False
 
     def _log_update_title(self):
-        title = f"Log ({self._log_unseen} ⚠)" if self._log_unseen else "Log"
+        parts = []
+        if self._log_unseen:
+            parts.append(f"{self._log_unseen} ⚠")
+        if self._log_new_reports:
+            parts.append(f"{self._log_new_reports} new report{'s' if self._log_new_reports > 1 else ''}")
+        title = f"Log ({' · '.join(parts)})" if parts else "Log"
         if title != self._log_title:
             self._log_title = title
             self.notebook.tab(self.log_frame, text=title)
 
     def _log_tab_changed(self):
-        if self._log_tab_visible() and self._log_unseen:
+        if self._log_tab_visible() and (self._log_unseen or self._log_new_reports):
             self._log_unseen = 0
+            self._log_new_reports = 0
             self._log_update_title()
 
     def _log_copy(self):

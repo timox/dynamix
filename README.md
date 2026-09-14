@@ -68,6 +68,8 @@ python gui.py
    7. **Export to Mixxx**: intro / outro cues and the playlist, ready for Auto DJ.
 3. **Log** tab: the reports of the project (summary, mastering, band analysis, transition sheet,
    pre-master, Mixxx export) and every message and error.
+4. **Tasks** tab and status bar: the operations running in the background with their progress,
+   and **Stop** (a stopped task leaves the project unchanged).
 
 Redoing an early step resets the later ones, so the workflow status is always true. The GUI is
 described tab by tab in [GUI_README.md](GUI_README.md).

@@ -697,13 +697,9 @@ class SetBuilderMixin:
         self._library_scanning = True
         self._refresh_library_table()
 
-        def progress(i, n, name):
-            if i % 50 == 0 or i == n:
-                self.root.after(0, self.update_status, f"Scanning library {i}/{n}: {name}")
-
-        def work():
+        def work(task):
             try:
-                entries = library.scan(folder, progress=progress)
+                entries = library.scan(folder, progress=lambda i, n, name: task.progress(i, n, name))
             except Exception as e:
                 entries = []
                 self._report_error(f"Library scan failed: {e}", e)
@@ -717,7 +713,7 @@ class SetBuilderMixin:
                     self._library_rescan_pending = False
                     self.rescan_library()
             self.root.after(0, done)
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Scan library", work, cancellable=False)
 
     def _merge_into_library(self, tracks):
         """Show freshly analysed values in the library table without rescanning."""
@@ -860,12 +856,13 @@ class SetBuilderMixin:
             messagebox.showwarning("Warning", "No selected tracks on disk: pick tracks in the Library and click 'Add to selection →'.")
             return
         
-        def work():
+        def work(task):
             try:
+                task.progress(0, len(files))
                 manager = PlaylistManager(project.folder)
-                manager.analyze_playlist(files, progress_callback=lambda i, n, name, status: self.root.after(
-                    0, self.update_status, f"Analyzing {i}/{n} ({status}): {name}"))
+                manager.analyze_playlist(files, progress_callback=lambda i, n, name, status: task.progress(i, n, name))
                 run = manager.last_run
+                task.check()  # stopped: the project is left unchanged (the analysed tracks stay in the cache)
                 
                 def done():
                     # the selection may have changed while the worker ran: keep selected records only
@@ -905,10 +902,10 @@ class SetBuilderMixin:
                     self.update_status(message)
                 self.root.after(0, done)
             except Exception as e:
-                self._report_error(f"Analysis failed: {e}", e)
-        
+                self._task_failed(task, f"Analysis failed: {e}", e)
+
         self.update_status(f"Analyzing {len(files)} tracks ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Analyze selection", work)
     
     def create_set_list(self):
         """Compute proposals from the analysed selection (worker thread); the set list changes on 'Use this proposal'."""
@@ -925,17 +922,20 @@ class SetBuilderMixin:
         curve = self.energy_curve_var.get()
         mix_bars = self._mix_bars()
 
-        def work():
+        def work(task):
             try:
                 if curve == "all":
-                    variants = [set_proposer.propose(tracks, duration * 60, curve=c, mix_bars=mix_bars, variants=1)[0]
-                                for c in set_proposer.CURVES]
+                    variants = []
+                    for n, c in enumerate(set_proposer.CURVES):
+                        task.progress(n, len(set_proposer.CURVES), c)
+                        variants.append(set_proposer.propose(tracks, duration * 60, curve=c, mix_bars=mix_bars, variants=1)[0])
                     variants.sort(key=lambda v: (-v["score"], v["cost"]))
                 else:
                     variants = set_proposer.propose(tracks, duration * 60, curve=curve, mix_bars=mix_bars, variants=3)
             except Exception as e:
-                self._report_error(f"Proposal failed: {e}", e)
+                self._task_failed(task, f"Proposal failed: {e}", e)
                 return
+            task.check()
 
             def done():
                 if self.project is not project:
@@ -951,7 +951,7 @@ class SetBuilderMixin:
             self.root.after(0, done)
 
         self.update_status(f"Computing proposals from {len(tracks)} tracks ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Propose", work)
 
     @staticmethod
     def _proposal_values(number, variant):
@@ -1043,11 +1043,11 @@ class SetBuilderMixin:
             return
         project = self.project
         
-        def work():
+        def work(task):
             try:
                 planner = TransitionPlanner(tracks, mix_bars=int(project.options.get("mix_bars", 8)))
-                planner.plan(progress_callback=lambda i, n, name: self.root.after(
-                    0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
+                planner.plan(progress_callback=lambda i, n, name: task.progress(i - 1, n, name))
+                task.check()
                 
                 def done():
                     project.set_transitions(planner.to_dict())
@@ -1063,10 +1063,10 @@ class SetBuilderMixin:
                     self._transition_report()
                 self.root.after(0, done)
             except Exception as e:
-                self._report_error(f"Transition planning failed: {e}", e)
-        
+                self._task_failed(task, f"Transition planning failed: {e}", e)
+
         self.update_status(f"Planning transitions for {len(tracks)} tracks ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Plan transitions", work)
     
     def mastering_report(self):
         if not self._require_project():
@@ -1077,19 +1077,20 @@ class SetBuilderMixin:
             messagebox.showwarning("Warning", "No audio files in the project")
             return
         
-        def work():
+        def work(task):
             try:
-                reports = check_files(files, progress=lambda i, n, name: self.root.after(
-                    0, self.update_status, f"Mastering check {i}/{n}: {name}"))
+                reports = check_files(files, progress=lambda i, n, name: task.progress(i, n, name))
+                task.check()
                 summary = format_check_summary(reports)
-                self.root.after(0, self.add_report, "Mastering Report", summary)
+                self.root.after(0, self.add_report, "Mastering Report", summary, False)
                 flagged = sum(1 for r in reports if r.get("flags"))
-                self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues")
+                self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues "
+                                                      "(report in the Log tab)")
             except Exception as e:
-                self._report_error(f"Mastering check failed: {e}", e)
-        
+                self._task_failed(task, f"Mastering check failed: {e}", e)
+
         self.update_status(f"Checking mastering of {len(files)} tracks ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Mastering Report", work)
     
     def band_report(self):
         """Band tracking, low-mid masking and resonances for the set list (or the library)."""
@@ -1100,28 +1101,30 @@ class SetBuilderMixin:
             messagebox.showwarning("Warning", "Analyze the tracks first")
             return
         
-        def work():
+        def work(task):
             try:
                 reports = []
                 for i, t in enumerate(tracks, 1):
-                    self.root.after(0, self.update_status, f"Band analysis {i}/{len(tracks)}: {t.get('filename', '')}")
+                    task.progress(i - 1, len(tracks), t.get("filename", ""))
                     try:
                         report = analyze_bands_cached(t["file_path"], bpm=float(t.get("bpm") or 0) or None)
                         reports.append(dict(report, key=t.get("key")))  # the key names the resonances' notes
                     except Exception as exc:
                         reports.append({"filename": t.get("filename", ""), "error": str(exc)})
+                task.progress(len(tracks), len(tracks))
                 summary = format_band_summary(reports)
                 needs_mix = [r["filename"] for r in reports if r.get("verdict") == "mix"]
                 if needs_mix:
                     summary = (f"MIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix)
                                + "\n\n" + summary)
-                self.root.after(0, self.add_report, "Band Analysis", summary)
-                self.root.after(0, self.update_status, f"Band analysis done: {len(needs_mix)}/{len(reports)} tracks need a mix revision")
+                self.root.after(0, self.add_report, "Band Analysis", summary, False)
+                self.root.after(0, self.update_status, f"Band analysis done: {len(needs_mix)}/{len(reports)} tracks need a mix "
+                                                      "revision (report in the Log tab)")
             except Exception as e:
-                self._report_error(f"Band analysis failed: {e}", e)
-        
+                self._task_failed(task, f"Band analysis failed: {e}", e)
+
         self.update_status(f"Band analysis of {len(tracks)} tracks ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Band Analysis", work)
     
     def premaster_set(self):
         if not self._require_project():
@@ -1139,12 +1142,12 @@ class SetBuilderMixin:
         mono_hz = float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0
         fmt = self.config.get("output_format", "same")
         
-        def work():
+        def work(task):
             try:
                 results = premaster_files(files, out_dir, target_lufs=target_lufs, tone_match=tone, repair_phase=phase, fmt=fmt,
                                           mono_bass_hz=mono_hz,
-                                          progress=lambda i, n, name: self.root.after(
-                                              0, self.update_status, f"Pre-mastering {i}/{n}: {name}"))
+                                          progress=lambda i, n, name: task.progress(i, n, name))
+                task.check()  # stopped: the copies already written are overwritten next time, the project is unchanged
                 summary = format_premaster_summary(results, out_dir)
                 done_count = sum(1 for r in results if "error" not in r)
                 
@@ -1170,10 +1173,10 @@ class SetBuilderMixin:
                                        "(report in the Log tab)")
                 self.root.after(0, done)
             except Exception as e:
-                self._report_error(f"Pre-master failed: {e}", e)
-        
+                self._task_failed(task, f"Pre-master failed: {e}", e)
+
         self.update_status(f"Pre-mastering {len(files)} tracks into {out_dir} ...")
-        threading.Thread(target=work, daemon=True).start()
+        self._start_task("Pre-master Set", work)
     
     def _with_rendered(self, tracks):
         """Tracks pointing at the file to play: FX copy (with its cue positions), else pre-master, else original."""
@@ -1321,8 +1324,8 @@ class SetBuilderMixin:
             note = f" (data: {path})"
         except Exception as e:
             self._report_error(f"Cannot save transitions.json: {e}", e)
-        self.add_report("Transition Sheet", planner.to_text(f"DynaMix Transition Sheet - {self.project.name}"))
-        self.update_status(f"Transitions planned: {len(planner.transitions)}{note}")
+        self.add_report("Transition Sheet", planner.to_text(f"DynaMix Transition Sheet - {self.project.name}"), show=False)
+        self.update_status(f"Transitions planned: {len(planner.transitions)}{note} - transition sheet in the Log tab")
     
     def _clear_frame(self, container, placeholder=None):
         for child in container.winfo_children():

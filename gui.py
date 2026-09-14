@@ -19,9 +19,11 @@ if getattr(sys, "frozen", False):
 from set_builder import SetBuilderMixin, ConfigTabMixin
 from config import Config
 from log_tab import LogTabMixin
+from tasks import TaskManager
+from tasks_tab import TasksTabMixin
 
 
-class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
+class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
     """Main GUI application for DynaMix"""
 
     def __init__(self, root, log_buffer=None):
@@ -33,9 +35,20 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
         self.apply_font_size(self.config.get("font_size"), redraw=False)  # before any widget uses the fonts
 
-        # Status bar (created first: tabs may report while they load a project)
-        self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.task_manager = TaskManager()
+
+        # Status bar (created first: tabs may report while they load a project): message, then the newest running task
+        bar = ttk.Frame(root)
+        bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.task_stop_button = ttk.Button(bar, text="■ Stop", width=8, command=self.stop_latest_task)
+        self.task_stop_button.pack(side=tk.RIGHT, padx=(4, 2), pady=1)
+        self.task_stop_button.state(["disabled"])
+        self.task_progress = ttk.Progressbar(bar, length=160, maximum=100)
+        self.task_progress.pack(side=tk.RIGHT, padx=4)
+        self.task_status = ttk.Label(bar, text="", foreground="#52514e")
+        self.task_status.pack(side=tk.RIGHT, padx=6)
+        self.status_bar = tk.Label(bar, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -43,6 +56,7 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
         self.create_playlist_tab()
         self.create_config_tab()
         self.create_log_tab()
+        self.create_tasks_tab()
 
     def update_status(self, message: str):
         """Update status bar"""

@@ -85,6 +85,8 @@ setup(
         "check_install",
         "ui_fonts",
         "selftest",
+        "tasks",
+        "tasks_tab",
     ],
     python_requires=">=3.8",
     install_requires=read_requirements(),

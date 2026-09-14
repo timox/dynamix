@@ -106,6 +106,20 @@ python gui.py
   libsndfile with MP3 support, librosa, numba, FFmpeg, Mixxx database,
   analysis cache). Refresh after installing something.
 
+### Status bar and Tasks Tab
+- Long operations (library scan, analysis, proposals, transition planning,
+  Mastering Report, Band Analysis, pre-master, Apply all FX) run in the
+  background. The status bar shows the newest one with a progress bar and
+  **■ Stop**; the **Tasks** tab (its title counts the running tasks) lists
+  them with their progress and time, **■ Stop selected** and **Clear
+  finished**.
+- Stop ends a task after the track in progress. A stopped task leaves the
+  project unchanged; analyses already done stay in the cache, so running it
+  again only does what is missing. The library scan cannot be stopped (it is
+  quick).
+- A task that ends never switches tab: its report arrives in the Log tab,
+  whose title counts the new reports.
+
 ### 3. Log Tab
 - **Reports** (top): the reports of the open project — Project summary,
   Mastering Report, Band Analysis, Transition Sheet, Pre-master, Mixxx Export.
