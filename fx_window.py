@@ -231,11 +231,13 @@ class TransitionFxPanel(ttk.Frame):
         self.nudge_var = tk.StringVar(value="0")
         ttk.Spinbox(nudge_row, from_=-50, to=50, increment=1, textvariable=self.nudge_var, width=6).pack(side=tk.LEFT, padx=4)
         self.nudge_var.trace_add("write", lambda *a: self.on_nudge())
-        inactive = ttk.LabelFrame(left, text="Inactive FX (pairs no longer next to each other)")
-        inactive.pack(fill=tk.X, pady=6)
-        self.inactive_list = tk.Listbox(inactive, height=3)
-        self.inactive_list.pack(fill=tk.X, padx=4, pady=2)
-        ttk.Button(inactive, text="Remove", command=self.remove_inactive).pack(anchor="w", padx=4, pady=2)
+        # orphan FX (the two tracks no longer follow each other): one line, shown only when there are some
+        self.orphan_row = ttk.Frame(left)
+        self.orphan_label = ttk.Label(self.orphan_row, text="", foreground=MUTED)
+        self.orphan_label.pack(side=tk.LEFT)
+        ttk.Button(self.orphan_row, text="Manage…", command=self.open_orphans).pack(side=tk.LEFT, padx=6)
+        self._orphan_window = None
+        self._inactive = []
 
         mid = ttk.Frame(panes)
         panes.add(mid, weight=1)
@@ -306,10 +308,8 @@ class TransitionFxPanel(ttk.Frame):
             name = f"{self.profiles[i].get('filename', os.path.basename(a))} → {self.profiles[i + 1].get('filename', os.path.basename(b))}"
             self.trans_tree.insert("", tk.END, iid=f"T{i}", values=(i + 1, name, f"{float(score):.0f}" if score != "" else "",
                                                                    count or "", state))
-        self.inactive_list.delete(0, tk.END)
         self._inactive = self.project.inactive_fx_pairs()
-        for a, b in self._inactive:
-            self.inactive_list.insert(tk.END, f"{os.path.basename(a)} → {os.path.basename(b)}")
+        self._refresh_orphans()
         if selected is not None and f"T{selected}" in self.trans_tree.get_children():
             self.trans_tree.selection_set(f"T{selected}")
 
@@ -360,13 +360,90 @@ class TransitionFxPanel(ttk.Frame):
         self.project.set_fx_nudge(a, b, value)
         self._saved()
 
-    def remove_inactive(self):
-        sel = self.inactive_list.curselection()
-        if not sel:
-            return
-        a, b = self._inactive[sel[0]]
-        self.project.remove_fx(a, b)
-        self._saved()
+    # ------------------------------------------------------------------ orphan FX
+    def _refresh_orphans(self):
+        count = len(self._inactive)
+        if count:
+            self.orphan_label.config(text=f"⚠ {count} orphan FX (tracks no longer next to each other)")
+            if not self.orphan_row.winfo_manager():
+                self.orphan_row.pack(anchor="w", pady=(2, 4))
+        elif self.orphan_row.winfo_manager():
+            self.orphan_row.pack_forget()
+        if self._orphan_window is not None and self._orphan_window.winfo_exists():
+            self._fill_orphans()
+
+    def remove_orphans(self, pairs):
+        """Delete the FX settings of these orphan pairs; returns how many were removed."""
+        pairs = [pair for pair in pairs if pair in self._inactive]
+        for a, b in pairs:
+            self.project.remove_fx(a, b)
+        if pairs:
+            log.info("Orphan FX removed: %s", ", ".join(f"{os.path.basename(a)} → {os.path.basename(b)}" for a, b in pairs))
+            self._saved()
+        return len(pairs)
+
+    def open_orphans(self):
+        """A window listing the orphan FX, to remove some or all of them."""
+        if self._orphan_window is not None and self._orphan_window.winfo_exists():
+            self._orphan_window.lift()
+            return self._orphan_window
+        win = tk.Toplevel(self)
+        win.title(f"Orphan FX - {self.project.name}")
+        win.geometry("720x320")
+        win.transient(self.winfo_toplevel())
+        ttk.Label(win, text="FX set on two tracks that no longer follow each other in the set list. They come back if the "
+                            "two tracks are next to each other again; remove the ones you do not need.",
+                  foreground=MUTED, wraplength=680, justify=tk.LEFT).pack(anchor="w", padx=10, pady=(10, 4))
+        tree = ttk.Treeview(win, columns=("From", "To", "FX"), show="headings", selectmode="extended")
+        for col, width in (("From", 250), ("To", 250), ("FX", 180)):
+            tree.heading(col, text=col, command=lambda c=col: self._sort_orphans(c))
+            tree.column(col, width=width, anchor="w")
+        tree.pack(fill=tk.BOTH, expand=True, padx=10)
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=tk.X, padx=10, pady=8)
+        ttk.Button(buttons, text="Remove selected", command=lambda: self._confirm_remove_orphans(selected=True)).pack(side=tk.LEFT)
+        ttk.Button(buttons, text="Remove all", command=lambda: self._confirm_remove_orphans(selected=False)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(buttons, text="Close", command=win.destroy).pack(side=tk.RIGHT)
+        self._orphan_window, self._orphan_tree, self._orphan_sort = win, tree, None
+        self._fill_orphans()
+        return win
+
+    def _orphan_rows(self):
+        rows = []
+        for a, b in self._inactive:
+            effects = (self.project.fx_for_pair(a, b) or {}).get("effects") or []
+            types = " · ".join(fx.get("type", "?") for fx in effects)
+            rows.append(((a, b), (os.path.basename(a), os.path.basename(b), f"{len(effects)} · {types}")))
+        if self._orphan_sort is not None:
+            rows.sort(key=lambda row: row[1][self._orphan_sort].lower())
+        return rows
+
+    def _fill_orphans(self):
+        tree = self._orphan_tree
+        tree.delete(*tree.get_children())
+        self._orphan_pairs = {}
+        for i, (pair, values) in enumerate(self._orphan_rows()):
+            tree.insert("", tk.END, iid=f"O{i}", values=values)
+            self._orphan_pairs[f"O{i}"] = pair
+
+    def _sort_orphans(self, column):
+        self._orphan_sort = ("From", "To", "FX").index(column)
+        self._fill_orphans()
+
+    def _confirm_remove_orphans(self, selected):
+        pairs = ([self._orphan_pairs[iid] for iid in self._orphan_tree.selection()] if selected
+                 else list(self._inactive))
+        if not pairs:
+            return 0
+        answer = messagebox.askyesnocancel(
+            "Remove orphan FX", f"Remove the FX of {len(pairs)} pair(s)?\n\n"
+            "Yes: save a snapshot of the project first (Snapshots... to restore it), then remove.\n"
+            "No: remove without a snapshot.", parent=self._orphan_window)
+        if answer is None:
+            return 0
+        if answer and hasattr(self.app, "_do_save_snapshot"):
+            self.app._do_save_snapshot("before removing orphan FX")
+        return self.remove_orphans(pairs)
 
     # ------------------------------------------------------------------ FX stack
     def _store(self, effects, rebuild_settings=False):

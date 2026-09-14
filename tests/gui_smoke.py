@@ -264,6 +264,19 @@ def scenario():
         check(not win._applying, "Apply all FX refuses to render with a changed plan")
         planned["outro_start"] -= 0.5
         check(not win._plan_changed(), "the restored plan matches the FX window again")
+        import transition_fx as tfx_module
+        check(not win.orphan_row.winfo_manager(), "no orphan FX line without orphan FX")
+        app.project.set_fx_effects(fx_tracks[1], fx_tracks[0], [tfx_module.new_effect("echo"), tfx_module.new_effect("freeze")])
+        win.refresh_transitions()
+        check(win.orphan_row.winfo_manager() == "pack" and "1 orphan FX" in win.orphan_label.cget("text"),
+              "an FX pair that is no longer next to each other shows the orphan FX line")
+        orphans = win.open_orphans()
+        check(len(win._orphan_tree.get_children()) == 1 and "2 · echo · freeze" in win._orphan_tree.item("O0", "values")[2],
+              "the orphan FX window lists the pair and its effects")
+        check(win.remove_orphans(list(win._inactive)) == 1 and app.project.inactive_fx_pairs() == [],
+              "orphan FX can be removed")
+        check(not win.orphan_row.winfo_manager() and not win._orphan_tree.get_children(), "the line and the list are updated")
+        orphans.destroy()
         check(app.set_notebook.select() == str(app.fx_tab), "Transition FX opens the FX tab")
         win.start_preview()
         stops_before = player.stops

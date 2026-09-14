@@ -82,6 +82,10 @@ python gui.py
   export then use those copies, with the cue positions of the rendered files.
   The project's `fx/` (and `premaster/`) folder must be part of the Mixxx
   library (Mixxx music directories) for the export to match the copies.
+  FX set on two tracks that no longer follow each other ("orphan FX") are
+  kept, so they come back if the tracks are next to each other again: the
+  line "⚠ n orphan FX — Manage…" opens a window to remove some or all of them
+  (a snapshot can be saved first).
   The tab follows the open project and its transition plan (it is rebuilt
   after a new plan); leaving the tab stops the looped preview.
 - **Overview**: set energy curve against the target, tempo, and the set map
