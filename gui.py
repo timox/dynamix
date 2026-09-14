@@ -5,9 +5,16 @@ transitions, pre-master, transition FX, playlist and Mixxx export.
 """
 
 import logging
+import os
+import sys
 import tkinter as tk
 from tkinter import ttk
-import os
+
+from analysis_store import dynamix_home
+
+if getattr(sys, "frozen", False):
+    # shareable build: numba cannot write its compilation cache inside the application folder
+    os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(dynamix_home(), "numba_cache"))
 
 from set_builder import SetBuilderMixin, ConfigTabMixin
 from config import Config
@@ -44,9 +51,12 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
 
 
 def main():
-    """Main entry point for GUI"""
+    """Main entry point for GUI (--self-test [report file]: check this installation and exit)"""
+    if "--self-test" in sys.argv:
+        import selftest
+        i = sys.argv.index("--self-test")
+        sys.exit(selftest.run(sys.argv[i + 1] if i + 1 < len(sys.argv) else None))
     import app_log
-    from analysis_store import dynamix_home
     log_buffer = app_log.install(os.path.join(dynamix_home(), "logs"))
     root = tk.Tk()
     root.report_callback_exception = lambda exc_type, exc, tb: app_log.log_exception(exc_type, exc, tb, "Error in the interface")

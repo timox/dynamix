@@ -1,6 +1,6 @@
 import librosa
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -106,41 +106,6 @@ class AudioAnalyzer:
         
         return beat_times, beat_strengths
     
-    def detect_sections(self) -> List[Tuple[str, float, float]]:
-        """
-        Detect song sections (intro, verse, chorus, etc.)
-        Returns: List of (section_name, start_time, end_time)
-        """
-        # Compute MFCC features
-        mfcc = librosa.feature.mfcc(y=self.y, sr=self.sr, n_mfcc=13)
-        n_frames = mfcc.shape[1]
-        duration = librosa.get_duration(y=self.y, sr=self.sr)
-        
-        # Aim for roughly one section per 30 seconds, between 1 and 5 sections
-        n_sections = int(np.clip(round(duration / 30.0), 1, 5))
-        n_sections = max(1, min(n_sections, n_frames))
-        
-        if n_sections <= 1 or n_frames < 2:
-            return [('Intro', 0.0, float(duration))]
-        
-        # Agglomerative clustering of MFCC frames gives section boundaries
-        boundaries = librosa.segment.agglomerative(mfcc, n_sections)
-        boundary_times = librosa.frames_to_time(boundaries, sr=self.sr)
-        boundary_times = np.concatenate([boundary_times, [duration]])
-        
-        # Label sections (simplified)
-        section_names = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro']
-        sections = []
-        
-        for i in range(len(boundary_times) - 1):
-            start, end = float(boundary_times[i]), float(boundary_times[i + 1])
-            if end <= start:
-                continue
-            name = section_names[i] if i < len(section_names) else f'Section {i+1}'
-            sections.append((name, start, end))
-        
-        return sections
-    
     def analyze_energy_profile(self, window_size: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
         """
         Analyze energy profile with customizable window size
@@ -154,31 +119,6 @@ class AudioAnalyzer:
         times = librosa.frames_to_time(np.arange(len(rms)), sr=self.sr, hop_length=hop_length)
         
         return times, rms
-    
-    def detect_drops(self, threshold_factor: float = 1.5) -> List[float]:
-        """
-        Detect energy drops (breakdowns) in the track
-        Returns: List of drop times
-        """
-        times, rms = self.analyze_energy_profile()
-        
-        # Calculate rolling average
-        window = int(len(rms) * 0.1)  # 10% of track length
-        rolling_avg = np.convolve(rms, np.ones(window)/window, mode='same')
-        
-        # Find drops (energy significantly below rolling average)
-        drops = []
-        for i, (time, energy, avg) in enumerate(zip(times, rms, rolling_avg)):
-            if energy < avg / threshold_factor and i > window:
-                drops.append(time)
-        
-        # Remove duplicates (drops within 5 seconds of each other)
-        filtered_drops = []
-        for drop in drops:
-            if not any(abs(drop - existing) < 5 for existing in filtered_drops):
-                filtered_drops.append(drop)
-        
-        return filtered_drops
     
     # Calibration of the perceived-energy components (typical club-music ranges).
     # Each component is mapped through a sigmoid centred on `center` with the given
@@ -286,17 +226,7 @@ class AudioAnalyzer:
         beat_times, beat_strengths = self.analyze_beat_grid()
         features['beat_count'] = len(beat_times)
         features['avg_beat_strength'] = np.mean(beat_strengths)
-        
-        # Section analysis
-        sections = self.detect_sections()
-        features['section_count'] = len(sections)
-        features['sections'] = sections
-        
-        # Drop detection
-        drops = self.detect_drops()
-        features['drop_count'] = len(drops)
-        features['drops'] = drops
-        
+
         return features
     
 _PITCH_CLASSES = {'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3, 'E': 4, 'F': 5, 'F#': 6, 'GB': 6,

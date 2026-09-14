@@ -26,9 +26,7 @@ REQUIRED_PACKAGES = [
     ("librosa", "librosa"),
     ("numpy", "numpy"),
     ("matplotlib", "matplotlib"),
-    ("pandas", "pandas"),
     ("scipy", "scipy"),
-    ("scikit-learn", "sklearn"),
     ("soundfile", "soundfile"),
 ]
 

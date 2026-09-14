@@ -61,26 +61,6 @@ class TestAudioAnalyzer(unittest.TestCase):
                         self.assertIsInstance(rms, np.ndarray)
                         self.assertEqual(len(times), len(rms))
     
-    def test_detect_drops(self):
-        """Test drop detection"""
-        with patch('librosa.load') as mock_load:
-            mock_load.return_value = (self.mock_audio_data, self.sample_rate)
-            
-            with patch('librosa.get_duration') as mock_duration:
-                mock_duration.return_value = 10.0
-                
-                # Mock energy profile
-                with patch.object(AudioAnalyzer, 'analyze_energy_profile') as mock_energy:
-                    mock_energy.return_value = (np.linspace(0, 10, 100), np.random.rand(100))
-                    
-                    analyzer = AudioAnalyzer("test_file.mp3")
-                    drops = analyzer.detect_drops()
-                    
-                    self.assertIsInstance(drops, list)
-                    for drop in drops:
-                        self.assertIsInstance(drop, float)
-                        self.assertGreaterEqual(drop, 0)
-    
     def test_get_audio_features(self):
         """Test comprehensive audio features extraction"""
         with patch('librosa.load') as mock_load:
@@ -101,36 +81,27 @@ class TestAudioAnalyzer(unittest.TestCase):
                             
                             with patch.object(AudioAnalyzer, 'analyze_beat_grid') as mock_beat:
                                 mock_beat.return_value = (np.array([0, 0.5, 1.0]), np.array([0.8, 0.9, 0.7]))
-                                
-                                with patch.object(AudioAnalyzer, 'detect_sections') as mock_sections:
-                                    mock_sections.return_value = [("Intro", 0, 2), ("Verse", 2, 5)]
-                                    
-                                    with patch.object(AudioAnalyzer, 'detect_drops') as mock_drops:
-                                        mock_drops.return_value = [3.0, 7.0]
-                                        
-                                        analyzer = AudioAnalyzer("test_file.mp3")
-                                        features = analyzer.get_audio_features()
-                                        
-                                        # Check required keys
-                                        required_keys = [
-                                            'duration', 'sample_rate', 'bpm', 'bpm_confidence',
-                                            'key', 'key_confidence', 'avg_energy', 'max_energy',
-                                            'energy_std', 'beat_count', 'avg_beat_strength',
-                                            'section_count', 'drop_count'
-                                        ]
-                                        
-                                        for key in required_keys:
-                                            self.assertIn(key, features)
-                                        
-                                        # Check data types
-                                        self.assertIsInstance(features['duration'], float)
-                                        self.assertIsInstance(features['bpm'], float)
-                                        self.assertIsInstance(features['key'], str)
-                                        self.assertIsInstance(features['sections'], list)
 
-class TestUtilityFunctions(unittest.TestCase):
-    """Test cases for utility functions"""
-    
+                                with patch.object(AudioAnalyzer, 'compute_energy_level') as mock_level:
+                                    mock_level.return_value = (6.5, {'beat_gate': 0.9})
+
+                                    analyzer = AudioAnalyzer("test_file.mp3")
+                                    features = analyzer.get_audio_features()
+
+                                    required_keys = [
+                                        'duration', 'sample_rate', 'bpm', 'bpm_confidence',
+                                        'key', 'key_confidence', 'avg_energy', 'max_energy',
+                                        'energy_std', 'energy_level', 'has_beat', 'beat_count', 'avg_beat_strength',
+                                    ]
+                                    for key in required_keys:
+                                        self.assertIn(key, features)
+
+                                    self.assertIsInstance(features['duration'], float)
+                                    self.assertIsInstance(features['bpm'], float)
+                                    self.assertIsInstance(features['key'], str)
+                                    self.assertEqual((features['energy_level'], features['has_beat'], features['beat_count']),
+                                                     (6.5, True, 3))
+
 class TestErrorHandling(unittest.TestCase):
     """Test error handling scenarios"""
     

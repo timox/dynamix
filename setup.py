@@ -83,6 +83,8 @@ setup(
         "log_tab",
         "reports",
         "check_install",
+        "ui_fonts",
+        "selftest",
     ],
     python_requires=">=3.8",
     install_requires=read_requirements(),

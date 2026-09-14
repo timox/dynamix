@@ -8,7 +8,6 @@ import unittest
 import tempfile
 import os
 import sys
-import pandas as pd
 from unittest.mock import Mock, patch
 
 # Add parent directory to path to import modules
@@ -107,26 +106,22 @@ class TestPlaylistManager(unittest.TestCase):
             audio_files = self.manager.scan_directory()
             
             # Analyze playlist
-            df = self.manager.analyze_playlist(audio_files)
-            
-            # Check DataFrame structure
-            self.assertIsInstance(df, pd.DataFrame)
-            self.assertEqual(len(df), len(audio_files))
-            
-            # Check required columns
-            required_columns = [
+            records = self.manager.analyze_playlist(audio_files)
+
+            self.assertIsInstance(records, list)
+            self.assertEqual(len(records), len(audio_files))
+            self.assertEqual(records, self.manager.tracks)
+
+            required_keys = [
                 'file_path', 'filename', 'duration', 'bpm', 'bpm_confidence',
-                'key', 'key_confidence', 'avg_energy', 'max_energy', 'energy_std',
-                'beat_count', 'section_count', 'drop_count'
+                'key', 'key_confidence', 'avg_energy', 'max_energy', 'energy_std', 'beat_count'
             ]
-            
-            for col in required_columns:
-                self.assertIn(col, df.columns)
-            
-            # Check data types
-            self.assertIsInstance(df['duration'].iloc[0], float)
-            self.assertIsInstance(df['bpm'].iloc[0], float)
-            self.assertIsInstance(df['key'].iloc[0], str)
+            for key in required_keys:
+                self.assertIn(key, records[0])
+
+            self.assertIsInstance(records[0]['duration'], float)
+            self.assertIsInstance(records[0]['bpm'], float)
+            self.assertIsInstance(records[0]['key'], str)
     
     def test_suggest_playlist_order_build(self):
         """Test playlist order suggestion with build energy curve"""

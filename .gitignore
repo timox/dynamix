@@ -335,3 +335,6 @@ test_settings.py
 
 # README screenshots
 !docs/images/*.png
+
+# PyInstaller recipe of the shareable Windows build
+!packaging/dynamix.spec

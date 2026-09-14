@@ -1,7 +1,6 @@
 import os
 import logging
 import numpy as np
-import pandas as pd
 from typing import List, Dict
 from audio_utils import AudioAnalyzer
 from analysis_store import get_store
@@ -62,12 +61,10 @@ class PlaylistManager:
             'max_energy': features['max_energy'],
             'energy_std': features['energy_std'],
             'beat_count': features['beat_count'],
-            'section_count': features['section_count'],
-            'drop_count': features['drop_count'],
         }
 
     def analyze_playlist(self, file_paths: List[str] = None, progress_callback=None,
-                         use_cache: bool = True) -> pd.DataFrame:
+                         use_cache: bool = True) -> List[Dict]:
         """
         Analyze all tracks in playlist. Results are cached per file (analysis_store),
         so only new or changed files are actually decoded.
@@ -76,7 +73,7 @@ class PlaylistManager:
             file_paths: files to analyse (default: scan the playlist directory)
             progress_callback: fn(index, total, filename, status) with status 'cached'|'analyzed'|'failed'
             use_cache: set False to force re-analysis
-        Returns: DataFrame with track analysis
+        Returns: the analysed track records (also kept in self.tracks)
         """
         if file_paths is None:
             file_paths = self.scan_directory()
@@ -112,7 +109,7 @@ class PlaylistManager:
             if progress_callback:
                 progress_callback(i + 1, len(file_paths), os.path.basename(file_path), status)
                 
-        return pd.DataFrame(self.tracks)
+        return list(self.tracks)
     
     @staticmethod
     def _energy_value(track: Dict) -> float:

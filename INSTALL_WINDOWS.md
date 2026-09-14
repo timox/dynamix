@@ -278,6 +278,29 @@ Une sauvegarde horodatée de la base est créée à côté de `mixxxdb.sqlite` a
 chaque export. Les morceaux absents de la bibliothèque Mixxx sont listés dans
 le rapport : ajoutez le dossier dans Mixxx, rebalayez, puis exportez à nouveau.
 
+## 7 bis. Partager DynaMix sans installer Python
+
+Pour donner DynaMix à quelqu'un qui n'a pas Python, lancez depuis le dossier du
+projet (après `install_windows.bat`) :
+
+```bat
+packaging\build_windows.bat
+```
+
+Le script fabrique `dist\DynaMix` : un Python « gelé » avec uniquement les
+bibliothèques utilisées par DynaMix (PyInstaller), puis lance son autotest.
+Compressez le dossier `dist\DynaMix` en zip (environ 120 Mo) : la personne le
+décompresse et double-clique sur **`DynaMix.exe`**.
+
+- L'exécutable n'est pas signé : Windows affiche « Windows a protégé votre
+  ordinateur » ; cliquez sur **Informations complémentaires → Exécuter quand
+  même**.
+- La première analyse est plus lente (numba compile une fois, puis garde le
+  résultat dans `%LOCALAPPDATA%\DynaMix\numba_cache`).
+- Pour vérifier une copie sur une autre machine :
+  `DynaMix.exe --self-test rapport.txt` (les données de l'utilisateur ne sont
+  pas touchées).
+
 ## 8. Dépannage
 
 | Symptôme | Cause probable | Solution |

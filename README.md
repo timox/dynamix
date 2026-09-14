@@ -196,7 +196,9 @@ charts.py             matplotlib charts
 audio_utils.py, playlist_manager.py  track analysis (BPM, key, energy, sections), analysis of the selection
 export_tools.py       M3U playlist
 analysis_store.py, config.py         analysis cache and configuration
+ui_fonts.py           font size of the GUI
 check_install.py, install_windows.bat, run_gui.bat   installation helpers
+selftest.py, packaging/  self-test (--self-test) and the shareable Windows build
 docs/                 design specs and implementation plans
 tests/                unit tests and the GUI smoke test
 ```
@@ -206,7 +208,23 @@ tests/                unit tests and the GUI smoke test
 ```bash
 python -m unittest discover -s tests     # unit tests
 python tests/gui_smoke.py                # drives the GUI end to end (opens a window briefly)
+python gui.py --self-test                # checks this installation: Tk, charts, audio, analysis, limiter, FX
 ```
+
+## Sharing DynaMix (Windows build)
+
+`packaging\build_windows.bat` builds a version of DynaMix that runs without Python: PyInstaller
+freezes the interpreter and only the libraries DynaMix uses into `dist\DynaMix`
+(`packaging\dynamix.spec` lists what is left out), then the script runs the build's self-test.
+Zip `dist\DynaMix` (about 120 MB, 285 MB unzipped) and share it: `DynaMix.exe` starts the
+application.
+
+- The executable is not signed: Windows SmartScreen shows "Windows protected your PC", then
+  **More info → Run anyway**.
+- The first analysis is slower: numba compiles its code once and keeps it in
+  `%LOCALAPPDATA%\DynaMix\numba_cache`.
+- `DynaMix.exe --self-test report.txt` checks a copy on another machine without touching its data.
+- FFmpeg is not included (only needed for M4A / AAC files).
 
 ## License
 
