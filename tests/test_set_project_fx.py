@@ -51,6 +51,33 @@ class TestSetProjectFx(unittest.TestCase):
         self.p.set_order([self.a, self.c, self.b])
         self.assertIsNone(self.p.data["fx"]["render"])
 
+    def test_new_transition_plan_invalidates_the_fx_render(self):
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        self.p.data["premaster"] = {"results": []}
+        self.p.mark("premaster", count=0)
+        self.p.set_fx_render([{"source": self.a, "output": "x"}])
+        for step in ("fx", "playlist", "mixxx"):
+            self.p.mark(step)
+        plan = {"tracks": [{"file_path": x} for x in (self.a, self.b, self.c)], "transitions": [{"score": 50}, {"score": 60}]}
+        self.p.set_transitions(plan)
+        self.assertIsNone(self.p.data["fx"]["render"])
+        for step in ("fx", "playlist", "mixxx"):
+            self.assertFalse(self.p.is_done(step), step)
+        self.assertEqual(len(self.p.fx_for_pair(self.a, self.b)["effects"]), 1)   # recipes kept
+        self.assertIs(self.p.data["transitions"], plan)
+        self.assertTrue(self.p.is_done("transitions"))
+        self.assertEqual(self.p.step_state("transitions")["details"], {"count": 2})
+        # the pre-mastered copies do not depend on the transitions: kept
+        self.assertEqual(self.p.data["premaster"], {"results": []})
+        self.assertTrue(self.p.is_done("premaster"))
+
+    def test_fx_change_resets_the_playlist_and_mixxx_steps(self):
+        self.p.mark("playlist", count=3)
+        self.p.mark("mixxx", cues=6)
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        self.assertFalse(self.p.is_done("playlist"))
+        self.assertFalse(self.p.is_done("mixxx"))
+
     def test_fx_map_and_rendered_profiles(self):
         os.makedirs(self.p.fx_dir)
         os.makedirs(self.p.premaster_dir, exist_ok=True)

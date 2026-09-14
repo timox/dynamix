@@ -475,9 +475,16 @@ class SetProject:
         entry.setdefault("b", b)
         return entry
 
+    def set_transitions(self, data: Dict) -> None:
+        """Store a new transition plan: the FX render and the later steps are no longer valid (recipes kept)."""
+        self.invalidate_from("transitions")
+        self.data["transitions"] = data
+        self.mark("transitions", count=len(data.get("transitions") or []))
+
     def _fx_changed(self) -> None:
         self.data["fx"]["render"] = None
         self.mark("fx", done=False)
+        self.invalidate_from("fx")
 
     def set_fx_effects(self, a: str, b: str, effects: List[Dict]) -> None:
         self.fx_transition(a, b)["effects"] = [dict(fx) for fx in effects]
@@ -611,10 +618,11 @@ class SetProject:
         if step not in keys:
             return
         for later in keys[keys.index(step) + 1:]:
+            if step == "transitions" and later == "premaster":
+                continue  # the pre-mastered copies do not depend on the transitions
             self.mark(later, done=False)
         if step in ("analyze", "setlist"):
             self.data["transitions"] = None
-        if step in ("analyze", "setlist", "transitions"):
             self.data["premaster"] = None
         if step in ("analyze", "setlist", "transitions", "premaster"):
             self.data["fx"]["render"] = None  # the recipes are kept

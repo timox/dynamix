@@ -318,8 +318,7 @@ def main():
         planner.save_json(args.json)
         print(f"Transition data saved to {args.json}")
     if project is not None:
-        project.data["transitions"] = planner.to_dict()
-        project.mark("transitions", count=len(planner.transitions))
+        project.set_transitions(planner.to_dict())
         project.save()
         print(f"Set project updated: {project.path}")
     if project is not None and args.save_charts is None and args.sheet is None:

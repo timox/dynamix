@@ -931,8 +931,7 @@ class SetBuilderMixin:
                     0, self.update_status, f"Planning transitions {i}/{n}: {name}"))
                 
                 def done():
-                    project.data["transitions"] = planner.to_dict()
-                    project.mark("transitions", count=len(planner.transitions))
+                    project.set_transitions(planner.to_dict())
                     if self.project is not project:
                         project.save()
                         log.info("Transitions of project '%s' saved (another project was opened meanwhile)", project.name)
