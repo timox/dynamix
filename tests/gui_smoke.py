@@ -221,6 +221,13 @@ def scenario():
         check(counts["fx"] == 2, f"the export uses the two FX copies, got {counts}")
         check(app._fx_labels() == {0: "freeze · sample"}, "the set map labels the transition FX")
         check(open(fx_tracks[0], "rb").read() == original, "the original file is untouched")
+        planned = app.project.data["transitions"]["tracks"][0]
+        planned["outro_start"] += 0.5
+        check(win._plan_changed(), "the FX window notices a changed transition plan")
+        win.apply_all()
+        check(not win._applying, "Apply all FX refuses to render with a changed plan")
+        planned["outro_start"] -= 0.5
+        check(not win._plan_changed(), "the restored plan matches the FX window again")
         stops_before = player.stops
         win.close()
         check(player.stops > stops_before, "closing the window stops the preview")

@@ -23,6 +23,7 @@ from fx_render import render_preview, render_set
 
 log = logging.getLogger("dynamix.fx")
 MUTED = "#52514e"
+PLAN_CHANGED = "The transitions or the set list changed: close and reopen Transition FX"
 
 FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample"}
 
@@ -123,6 +124,7 @@ class TransitionFxWindow(tk.Toplevel):
         self._preview_job = None
         self._preview_seq = 0
         self._applying = False
+        self._plan_at_open = self._plan_signature()
         self.title(f"Transition FX - {self.project.name}")
         self.geometry("1250x700")
         self._build()
@@ -205,6 +207,19 @@ class TransitionFxWindow(tk.Toplevel):
     def status(self, text):
         if self.winfo_exists():
             self.status_label.config(text=text)
+
+    def _plan_signature(self):
+        """The set list and the cue positions of the planned tracks (None when there is no plan)."""
+        data = self.project.data.get("transitions")
+        tracks = None
+        if data is not None:
+            tracks = tuple((t.get("file_path"), t.get("intro_start"), t.get("intro_end"), t.get("outro_start"),
+                            t.get("outro_end")) for t in data.get("tracks") or [])
+        return tuple(self.project.set_list), tracks
+
+    def _plan_changed(self):
+        """True when the transitions or the set list changed since the window was opened."""
+        return self._plan_signature() != self._plan_at_open
 
     # ------------------------------------------------------------------ transitions
     def pair(self, index=None):
@@ -564,6 +579,9 @@ class TransitionFxWindow(tk.Toplevel):
         if self.pair_index is None:
             messagebox.showinfo("Transition FX", "Select a transition first", parent=self)
             return
+        if self._plan_changed():
+            self.status(PLAN_CHANGED)
+            return
         self._previewing = True
         self.render_preview()
 
@@ -577,6 +595,9 @@ class TransitionFxWindow(tk.Toplevel):
     def render_preview(self):
         self._preview_job = None
         if self.pair_index is None:
+            return
+        if self._plan_changed():
+            self.status(PLAN_CHANGED)
             return
         self._preview_seq += 1
         seq = self._preview_seq
@@ -631,6 +652,9 @@ class TransitionFxWindow(tk.Toplevel):
     def apply_all(self):
         if self._applying:
             return
+        if self._plan_changed():
+            self.status(PLAN_CHANGED)
+            return
         pairs = self.project.active_fx_pairs()
         if not pairs:
             messagebox.showinfo("Transition FX", "No active FX on the transitions of the set list", parent=self)
@@ -642,6 +666,7 @@ class TransitionFxWindow(tk.Toplevel):
         profiles = list(self.profiles)
         lookup = {project.fx_key(a, b): copy.deepcopy(project.fx_for_pair(a, b)) for a, b in pairs}
         bases = project.premaster_map()
+        plan = self._plan_signature()
         fmt = app.config.get("output_format", "same")
         out_dir = project.fx_dir
         self.status(f"Rendering FX for {len(pairs)} transitions ...")
@@ -659,13 +684,14 @@ class TransitionFxWindow(tk.Toplevel):
             def done():
                 self._apply_finished(None)
                 current = {project.fx_key(a, b): copy.deepcopy(project.fx_for_pair(a, b)) for a, b in project.active_fx_pairs()}
-                if current != lookup or project.premaster_map() != bases:
-                    log.warning("FX render discarded: the FX settings or the pre-master changed during the render; "
-                                "click 'Apply all FX' again")
+                if current != lookup or project.premaster_map() != bases or self._plan_signature() != plan:
+                    log.warning("FX render discarded: the FX settings, the pre-master, the transitions or the set list "
+                                "changed during the render; click 'Apply all FX' again")
                     if self.winfo_exists():
                         self.status("Settings changed during the render: click 'Apply all FX' again")
                     return
                 project.set_fx_render(results)
+                project.invalidate_from("fx")  # the playlist and the Mixxx export must use the new copies
                 project.mark("fx", count=len(results))
                 for problem in problems:
                     log.warning("FX: %s", problem)
