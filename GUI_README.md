@@ -65,7 +65,11 @@ python gui.py
   bars): A fading out, B fading in, one lane per effect (freeze captured part
   and repeats, filter sweep, echo and its tail, sample repeats; what runs past
   "A ends" continues in B) and, once a preview has been rendered, the result.
-  It is redrawn at every change; drag the separator to make it taller. Then pick a transition, then stack effects on it — **Freeze** (loops the
+  It is redrawn at every change; drag the separator to make it taller.
+  While the preview loops, a red playhead moves over the chart and the
+  **Position** bar under it shows the time in the loop (and the beats from the
+  junction); click the chart or click / drag the bar to play the loop from
+  that point. Then pick a transition, then stack effects on it — **Freeze** (loops the
   last beats of the outgoing track, with a roll such as 4×1 → 2×2 → 1×4, an
   optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
   low-pass or band-pass sweep with resonance, closing the outgoing track or

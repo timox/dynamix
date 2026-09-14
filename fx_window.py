@@ -13,9 +13,11 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import numpy as np
 import soundfile as sf
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -152,6 +154,17 @@ def _fmt(seconds: float) -> str:
     return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
 
 
+def loop_position(started: float, now: float, length: float) -> float:
+    """Where a looped clip of `length` seconds is, `now - started` seconds after its position 0."""
+    return (now - started) % length if length > 0 else 0.0
+
+
+def rotate_clip(clip: np.ndarray, sr: int, offset: float) -> np.ndarray:
+    """The clip starting at `offset` seconds and wrapping around: looping it is looping the clip from there."""
+    i = int(round(max(0.0, offset) * sr)) % max(1, len(clip))
+    return np.concatenate([clip[i:], clip[:i]])
+
+
 class TransitionFxPanel(ttk.Frame):
     """FX tab of the Set Builder, for the project and transition plan it was built with.
     Needs `app` with: root, project, config, update_status, _report_error, _save_project, _render_overview,
@@ -173,6 +186,13 @@ class TransitionFxPanel(ttk.Frame):
         self._preview_seq = 0
         self._applying = False
         self._logged_warnings = set()  # a preview warning goes to the Log once, not at every render
+        self._play = None               # the looping preview: {"clip", "sr", "length", "preview_start", "started"}
+        self._playhead_job = None
+        self._playhead_item = None
+        self._playhead_widget = None
+        self._seek_count = 0
+        self._setting_position = False
+        self._dragging_position = False
         self._waves = {}            # (A file, B file) -> {"a_env", "b_env", "beats"} for the chart
         self._waves_loading = set()
         self._result_env = None     # {"key": what was rendered, "env": peak envelope of the preview clip}
@@ -200,6 +220,18 @@ class TransitionFxPanel(ttk.Frame):
         self.apply_button.pack(side=tk.LEFT, padx=12)
         self.status_label = ttk.Label(bar, text="", foreground=MUTED)
         self.status_label.pack(side=tk.LEFT, padx=8)
+
+        # position of the looping preview: follows the playback, click or drag to play from another point
+        posbar = ttk.Frame(self)
+        posbar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 0))
+        ttk.Label(posbar, text="Position:").pack(side=tk.LEFT)
+        self.position_var = tk.DoubleVar(value=0.0)
+        self.position_scale = ttk.Scale(posbar, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.position_var)
+        self.position_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        self.position_scale.bind("<ButtonPress-1>", lambda e: setattr(self, "_dragging_position", True))
+        self.position_scale.bind("<ButtonRelease-1>", lambda e: self._position_released())
+        self.position_label = ttk.Label(posbar, text="(start the preview)", foreground=MUTED, width=28)
+        self.position_label.pack(side=tk.LEFT)
 
         rows = ttk.PanedWindow(self, orient=tk.VERTICAL)
         rows.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
@@ -821,7 +853,8 @@ class TransitionFxPanel(ttk.Frame):
                 if seq != self._preview_seq:
                     return
                 sf.write(path, clip, sr, subtype="PCM_16")
-                result_env = tfx.peak_envelope(clip, sr, t0=transition_layout_for(pa, pb, entry, length)["preview_start"])
+                preview_start = transition_layout_for(pa, pb, entry, length)["preview_start"]
+                result_env = tfx.peak_envelope(clip, sr, t0=preview_start)
             except Exception as e:
                 self.app._report_error(f"Preview failed: {e}", e)
                 self.app.root.after(0, self.status, "Preview failed (see the Log)")
@@ -840,6 +873,8 @@ class TransitionFxPanel(ttk.Frame):
                     self.app._report_error(f"Cannot play the preview: {e}", e)
                     self.status("Preview playback failed (see the Log)")
                     return
+                if looping:
+                    self._start_playhead(clip, sr, preview_start)
                 for w in warnings:
                     if w not in self._logged_warnings:
                         self._logged_warnings.add(w)
@@ -856,7 +891,115 @@ class TransitionFxPanel(ttk.Frame):
             self._preview_job = None
         self._preview_seq += 1
         self.player.stop()
+        self._stop_playhead()
         self.status("Stopped")
+
+    # ------------------------------------------------------------------ playhead
+    def _start_playhead(self, clip, sr, preview_start, offset=0.0):
+        self._play = {"clip": clip, "sr": int(sr), "length": len(clip) / float(sr), "preview_start": float(preview_start),
+                      "started": time.monotonic() - offset}
+        if self._playhead_job is None:
+            self._tick_playhead()
+
+    def _stop_playhead(self):
+        self._play = None
+        if self._playhead_job is not None:
+            self.after_cancel(self._playhead_job)
+            self._playhead_job = None
+        if self._playhead_item is not None and self._playhead_widget is not None and self._playhead_widget.winfo_exists():
+            self._playhead_widget.delete(self._playhead_item)
+        self._playhead_item = None
+        self._setting_position = True
+        self.position_var.set(0.0)
+        self._setting_position = False
+        self.position_label.config(text="(start the preview)")
+
+    def playhead_position(self):
+        """Seconds into the looping preview clip, or None when nothing loops."""
+        play = self._play
+        return loop_position(play["started"], time.monotonic(), play["length"]) if play else None
+
+    def _tick_playhead(self):
+        self._playhead_job = None
+        play = self._play
+        if play is None or not self.winfo_exists():
+            return
+        position = self.playhead_position()
+        if not self._dragging_position:
+            self._setting_position = True
+            self.position_var.set(position / play["length"] if play["length"] else 0.0)
+            self._setting_position = False
+        t = play["preview_start"] + position
+        beats = ""
+        layout = self.last_layout
+        if layout and layout.get("period"):
+            beats = f" · J{(t - layout['junction']) / layout['period']:+.0f} beats"
+        self.position_label.config(text=f"{_fmt(position)} / {_fmt(play['length'])}{beats}")
+        self._draw_playhead(t)
+        self._playhead_job = self.after(50, self._tick_playhead)
+
+    def _chart_geometry(self):
+        """(figure, widget, pixel ratio) of the chart on screen, or None."""
+        canvas = self._chart_canvas
+        if canvas is None or not canvas.figure.axes:
+            return None
+        widget = canvas.get_tk_widget()
+        return canvas.figure, widget, float(getattr(canvas, "device_pixel_ratio", 1.0) or 1.0)
+
+    def _draw_playhead(self, t):
+        geometry = self._chart_geometry()
+        if geometry is None:
+            return
+        fig, widget, ratio = geometry
+        axes = fig.axes
+        x0, x1 = axes[0].get_xlim()
+        height = fig.bbox.height
+        if not x0 <= t <= x1:
+            x = -10.0
+        else:
+            x = axes[-1].transData.transform((t, 0))[0] / ratio
+        top = (height - axes[0].bbox.y1) / ratio
+        bottom = (height - axes[-1].bbox.y0) / ratio
+        if widget is not self._playhead_widget or self._playhead_item is None:
+            self._playhead_widget = widget
+            self._playhead_item = widget.create_line(x, top, x, bottom, fill=charts.STATUS_CRITICAL, width=2)
+        else:
+            widget.coords(self._playhead_item, x, top, x, bottom)
+            widget.tag_raise(self._playhead_item)
+
+    def seek(self, offset):
+        """Play the looping preview from `offset` seconds (the loop goes on from there)."""
+        play = self._play
+        if play is None or not self._previewing:
+            return False
+        offset = min(max(0.0, float(offset)), max(0.0, play["length"] - 0.05))
+        self._seek_count += 1
+        path = os.path.join(self._tmp_dir(), f"preview_seek_{'a' if self._seek_count % 2 else 'b'}.wav")
+        try:
+            sf.write(path, rotate_clip(play["clip"], play["sr"], offset), play["sr"], subtype="PCM_16")
+            self.player.play_loop(path)
+        except Exception as e:
+            self.app._report_error(f"Cannot play the preview from {_fmt(offset)}: {e}", e)
+            return False
+        play["started"] = time.monotonic() - offset
+        return True
+
+    def _position_released(self):
+        self._dragging_position = False
+        play = self._play
+        if play is not None:
+            self.seek(float(self.position_var.get()) * play["length"])
+
+    def _on_chart_click(self, event):
+        play, geometry = self._play, self._chart_geometry()
+        if play is None or geometry is None:
+            return
+        fig, _, ratio = geometry
+        ax = fig.axes[-1]
+        t = ax.transData.inverted().transform((event.x * ratio, 0))[0]
+        offset = t - play["preview_start"]
+        if 0.0 <= offset <= play["length"]:
+            self.seek(offset)
 
     def close(self):
         self.stop_preview()
@@ -955,8 +1098,10 @@ class TransitionFxPanel(ttk.Frame):
             child.destroy()
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        canvas.get_tk_widget().bind("<Button-1>", self._on_chart_click)  # click: play the preview from there
         canvas.draw()
         self._chart_canvas = canvas
+        self._playhead_item = None  # drawn again on the new chart at the next tick
 
     def _chart_message(self, text):
         for child in self.chart_frame.winfo_children():

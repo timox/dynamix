@@ -245,6 +245,13 @@ def scenario():
         win.start_preview()
         check(pump(lambda: player.loops and os.path.exists(player.loops[-1]), 20.0), "the preview is rendered and looped")
         check(pump(lambda: win._result_env is not None, 5.0), "the rendered result is added to the chart")
+        check(pump(lambda: win._play is not None, 5.0), "the looping preview starts the playhead")
+        check(pump(lambda: "/" in win.position_label.cget("text"), 2.0), "the position bar shows the time in the loop")
+        check(pump(lambda: win._playhead_item is not None, 5.0), "the playhead is drawn on the transition chart")
+        loops_before = len(player.loops)
+        check(win.seek(1.0) and len(player.loops) == loops_before + 1 and "preview_seek" in player.loops[-1],
+              "moving the position plays the loop from there")
+        check(abs(win.playhead_position() - 1.0) < 0.5, "the playhead follows the new position")
         win.nudge_var.set("10")
         check(app.project.fx_for_pair(*fx_tracks)["nudge_ms"] == 10.0, "the nudge is stored")
         check(pump(lambda: len(player.loops) >= 2, 20.0), "a change re-renders the looped preview")
