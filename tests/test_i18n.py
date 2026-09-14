@@ -31,7 +31,7 @@ def tr_calls():
             if isinstance(node, ast.Call) and node.args:
                 name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
                 first = node.args[0]
-                if name == "tr" and isinstance(first, ast.Constant) and isinstance(first.value, str):
+                if name in ("tr", "N_") and isinstance(first, ast.Constant) and isinstance(first.value, str):
                     found.append((os.path.basename(path), node.lineno, first.value))
     return found
 
@@ -68,6 +68,26 @@ class TestTr(unittest.TestCase):
         self.assertEqual(i18n.tr("Broken {n}", n=2), "Broken 2")          # a wrong placeholder falls back to English
         self.assertEqual(i18n.tr("Empty"), "Empty")                       # an empty translation is ignored
         self.assertEqual(i18n.tr("Not in any catalog"), "Not in any catalog")
+
+    def test_stored_texts_are_translated_from_their_templates(self):
+        with open(os.path.join(self.user, "fr.json"), "w", encoding="utf-8") as f:
+            json.dump({"quieter than the rest of the set ({db:+.1f} dB)": "plus calme que le reste du set ({db:+.1f} dB)",
+                       "persistent resonances: {list}": "résonances persistantes : {list}",
+                       "{freq} Hz ~ {note} ({degree} of {key})": "{freq} Hz ~ {note} ({degree} de {key})",
+                       "tonic": "tonique", "smooth": "fluide",
+                       "{a} then {a}": "{a} puis encore {a}"}, f)
+        i18n.set_language("fr", user_dir=self.user)
+        self.assertEqual(i18n.N_("quieter than the rest of the set ({db:+.1f} dB)").format(db=-3.04),
+                         "quieter than the rest of the set (-3.0 dB)")                  # stored data stays English
+        self.assertEqual(i18n.tr_text("quieter than the rest of the set (-3.0 dB)"), "plus calme que le reste du set (-3.0 dB)")
+        self.assertEqual(i18n.tr_text("smooth"), "fluide")
+        self.assertEqual(i18n.tr_text("persistent resonances: 110 Hz ~ A2 (tonic of A minor)"),
+                         "résonances persistantes : 110 Hz ~ A2 (tonique de A minor)")   # nested stored text
+        self.assertEqual(i18n.tr_text("x then x"), "x puis encore x")
+        self.assertEqual(i18n.tr_text("x then y"), "x then y")                          # repeated field must match
+        self.assertEqual(i18n.tr_text("something new (-3.0 dB)"), "something new (-3.0 dB)")
+        i18n.set_language("en", user_dir=self.user)
+        self.assertEqual(i18n.tr_text("quieter than the rest of the set (-3.0 dB)"), "quieter than the rest of the set (-3.0 dB)")
 
     def test_fields(self):
         self.assertEqual(i18n.fields("{a} of {b:.1f} {c[0]}"), {"a", "b", "c"})

@@ -18,9 +18,10 @@ import glob
 import json
 import locale
 import os
+import re
 import string
 import sys
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 LANGUAGES = {"en": "English", "fr": "Français"}
 _catalog: Dict[str, str] = {}
@@ -88,9 +89,10 @@ def load_catalog(language: str, user_dir: Optional[str] = None) -> Dict[str, str
 
 def set_language(setting: Optional[str], user_dir: Optional[str] = None) -> str:
     """Choose the interface language (at start-up); returns the language used."""
-    global _catalog, _language
+    global _catalog, _language, _patterns
     _language = resolve(setting)
     _catalog = load_catalog(_language, user_dir)
+    _patterns = None
     return _language
 
 
@@ -104,6 +106,64 @@ def fields(text: str) -> Set[str]:
         return {name.split(".")[0].split("[")[0] for _, name, _, _ in string.Formatter().parse(text) if name}
     except ValueError:
         return set()
+
+
+def N_(text: str) -> str:
+    """
+    Mark an English template whose filled text is stored in results (analysis flags, EQ suggestions, transition
+    notes, warnings): returned unchanged, so the stored data and the logic reading it stay English; the text is
+    translated when shown, with tr_text(). Example: flags.append(N_("quieter than the set ({db:+.1f} dB)").format(db=x)).
+    """
+    return text
+
+
+_FIELD = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)[^{}]*\}")
+_patterns: Optional[List[Tuple["re.Pattern", str]]] = None
+
+
+def _template_patterns() -> List[Tuple["re.Pattern", str]]:
+    """Regular expressions recognising the filled English templates of the catalog, most specific first."""
+    global _patterns
+    if _patterns is None:
+        patterns = []
+        for key in _catalog:
+            if not _FIELD.search(key):
+                continue
+            regex, position, seen = "", 0, set()
+            for match in _FIELD.finditer(key):
+                name = match.group(1)
+                regex += re.escape(key[position:match.start()])
+                regex += f"(?P={name})" if name in seen else f"(?P<{name}>.+?)"
+                seen.add(name)
+                position = match.end()
+            regex += re.escape(key[position:])
+            try:
+                patterns.append((re.compile("^" + regex + "$", re.DOTALL), key))
+            except re.error:
+                continue
+        patterns.sort(key=lambda item: -len(_FIELD.sub("", item[1])))
+        _patterns = patterns
+    return _patterns
+
+
+def tr_text(text: str, _depth: int = 0) -> str:
+    """
+    A stored English text in the interface language: an exact catalog entry, or a filled template of the catalog
+    (N_) whose values are put into the translation (values that are themselves stored texts are translated too).
+    Unknown texts stay English.
+    """
+    if not _catalog or not text:
+        return text
+    if text in _catalog:
+        return _catalog[text]
+    if _depth > 3:
+        return text
+    for regex, key in _template_patterns():
+        match = regex.match(text)
+        if match:
+            values = {name: tr_text(value, _depth + 1) for name, value in match.groupdict().items()}
+            return _FIELD.sub(lambda field: values.get(field.group(1), field.group(0)), _catalog[key])
+    return text
 
 
 def tr(text: str, **values) -> str:
