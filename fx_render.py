@@ -30,9 +30,11 @@ def _active(effects: Sequence[Dict]) -> List[Dict]:
 def _beats_for(profile: Dict, grids: Optional[Dict[str, Dict]], duration: float) -> Tuple[List[float], Optional[str]]:
     path = profile["file_path"]
     grid = (grids or {}).get(path) or tfx.beat_grid(path)
-    if profile.get("has_beat") is False:
-        grid = dict(grid, has_beat=False)  # the analysis found no rhythm: use a regular grid
-    return tfx.usable_beats(grid, float(profile.get("bpm") or 0), duration)
+    # the energy analysis can call a track with soft percussion "beatless": a steady detected grid still wins
+    if profile.get("has_beat") is False and not tfx.grid_is_regular(grid.get("beats") or []):
+        grid = dict(grid, has_beat=False)
+    return tfx.usable_beats(grid, float(profile.get("bpm") or 0), duration,
+                            profile.get("filename") or os.path.basename(path))
 
 
 def _cues(profile: Dict) -> Dict[str, float]:

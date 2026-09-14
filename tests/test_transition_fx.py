@@ -47,6 +47,13 @@ class TestGridAndValidation(unittest.TestCase):
         real = grid(10)
         self.assertEqual(tfx.usable_beats({"beats": real, "has_beat": True}, 0, 10)[0], real)
 
+    def test_grid_is_regular(self):
+        self.assertTrue(tfx.grid_is_regular(grid(10)))
+        jittered = [t + (0.02 if i % 5 == 0 else 0.0) for i, t in enumerate(grid(10))]
+        self.assertTrue(tfx.grid_is_regular(jittered))                       # a few late beats stay steady
+        self.assertFalse(tfx.grid_is_regular([0.0, 0.3, 1.1, 1.3, 2.4, 2.6, 3.9, 4.0, 5.5, 5.6]))
+        self.assertFalse(tfx.grid_is_regular(grid(2)))                       # too few beats
+
     def test_beat_grid_uses_the_cache(self):
         import analysis_store
         tmp = tempfile.mkdtemp(prefix="dynamix_fx_")

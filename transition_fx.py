@@ -83,13 +83,23 @@ def beat_grid(path: str, use_cache: bool = True) -> Dict:
     return grid
 
 
-def usable_beats(grid: Dict, fallback_bpm: float, duration: float) -> Tuple[List[float], Optional[str]]:
-    """The detected grid, or a regular one (with a warning) when the track has no usable beat."""
+def grid_is_regular(beats: Sequence[float], tolerance: float = 0.10, share: float = 0.8) -> bool:
+    """True when most beat intervals stay within `tolerance` of the median period: a real, steady beat."""
+    if len(beats) < MIN_GRID_BEATS:
+        return False
+    intervals = np.diff(np.asarray(beats, dtype=float))
+    period = float(np.median(intervals))
+    return period > 0 and float(np.mean(np.abs(intervals - period) <= tolerance * period)) >= share
+
+
+def usable_beats(grid: Dict, fallback_bpm: float, duration: float, name: str = "") -> Tuple[List[float], Optional[str]]:
+    """The detected grid, or a steady one at the track's tempo (with a warning) when the track has no usable beat."""
     beats = list(grid.get("beats") or [])
     if grid.get("has_beat", True) and len(beats) >= MIN_GRID_BEATS:
         return beats, None
     bpm = float(fallback_bpm or grid.get("bpm") or DEFAULT_BPM)
-    return regular_grid(bpm, duration), f"no beat grid detected: using a regular {bpm:.0f} BPM grid"
+    return regular_grid(bpm, duration), (f"{name + ': ' if name else ''}no steady beat found, "
+                                         f"the effects follow a regular {bpm:.0f} BPM grid")
 
 
 # ------------------------------------------------------------------ validation

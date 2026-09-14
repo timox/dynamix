@@ -172,6 +172,7 @@ class TransitionFxPanel(ttk.Frame):
         self._preview_job = None
         self._preview_seq = 0
         self._applying = False
+        self._logged_warnings = set()  # a preview warning goes to the Log once, not at every render
         self._waves = {}            # (A file, B file) -> {"a_env", "b_env", "beats"} for the chart
         self._waves_loading = set()
         self._result_env = None     # {"key": what was rendered, "env": peak envelope of the preview clip}
@@ -763,7 +764,9 @@ class TransitionFxPanel(ttk.Frame):
                     self.status("Preview playback failed (see the Log)")
                     return
                 for w in warnings:
-                    log.warning("Preview: %s", w)
+                    if w not in self._logged_warnings:
+                        self._logged_warnings.add(w)
+                        log.warning("Preview: %s", w)
                 self.status(("Looping the preview" if looping else "Preview opened in the default player")
                             + (f" - {warnings[0]}" if warnings else ""))
             self.app.root.after(0, done)

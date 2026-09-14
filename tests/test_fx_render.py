@@ -146,10 +146,20 @@ class TestRenderSet(unittest.TestCase):
         self.assertTrue(any("t0.wav" in p and "cannot be read" in p for p in problems))
         self.assertTrue(any("transition 1" in p and "skipped" in p for p in problems))
 
+    def test_track_called_beatless_keeps_a_steady_detected_grid(self):
+        from fx_render import _beats_for
+        # soft percussion: the energy analysis says "no beat" but the detected grid is steady
+        beats, warning = _beats_for(dict(self.profiles[0], has_beat=False), {self.paths[0]: self.grid}, 12.0)
+        self.assertIsNone(warning)
+        self.assertEqual(beats, self.grid["beats"])
+
     def test_track_without_rhythm_uses_a_regular_grid(self):
         from fx_render import _beats_for
-        beats, warning = _beats_for(dict(self.profiles[0], has_beat=False), {self.paths[0]: self.grid}, 12.0)
-        self.assertIsNotNone(warning)
+        rng = np.random.default_rng(3)
+        loose = {"beats": list(np.cumsum(rng.uniform(0.2, 0.9, 24))), "bpm": 120.0, "has_beat": True, "duration": 12.0}
+        beats, warning = _beats_for(dict(self.profiles[0], has_beat=False), {self.paths[0]: loose}, 12.0)
+        self.assertIn("no steady beat found", warning)
+        self.assertIn(self.profiles[0]["filename"], warning)
         self.assertAlmostEqual(beats[1], 0.5)
 
 
