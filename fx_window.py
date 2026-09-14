@@ -614,9 +614,10 @@ class TransitionFxPanel(ttk.Frame):
     def _scratch_extras(self, fx):
         box = ttk.LabelFrame(self.settings, text=tr("Sequence"))
         box.pack(fill=tk.X, pady=6)
-        ttk.Label(box, text=tr("Steps: d<factor><seconds> slows down, u<factor><seconds> speeds up, b1 = backwards "
-                               "(b0 forwards). Example: d81b0 u42b1; with a two-digit factor or decimals: d16 0.5 b1. "
-                               "The rest of the effect catches up so that the track ends where it would be."),
+        ttk.Label(box, text=tr("Commands of 5 characters, hexadecimal values as in a tracker: d (slow down) or u (speed up), "
+                               "factor 1-F (0 keeps the speed), seconds 1-F, b, 0 forwards or 1 backwards. "
+                               "Example: d81b0 u42b1 dF3b1. The rest of the effect catches up so that the track ends "
+                               "where it would be."),
                   foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
         ttk.Label(box, text=tr("While you type, the lines below check the sequence; Apply (or Enter) applies it, then the "
                                "chart and the preview follow. An unreadable sequence is not applied."),

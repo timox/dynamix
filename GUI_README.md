@@ -79,8 +79,10 @@ python gui.py
   or *stretch*, or played as it is with *off*; **Repeats** plays a short
   sample several times back to back, up to 64 s —, anchored to end at, start at
   or centre on the junction; **Scratch**: a sequence of playback-speed
-  slopes such as `d81b0 u42b1` (d = reach a speed 8 times slower in 1 s,
-  u = faster, b1 = backwards), confined to 2 to 16 beats: the rest of the
+  slopes written as 5-character commands with hexadecimal values, as in a
+  tracker: `d81b0 u42b1 dF3b1` (d or u = slow down or speed up, factor 1-F with
+  0 = keep the speed, seconds 1-F, b, 0 forwards or 1 backwards; `d81b0` reaches
+  a speed 8 times slower in 1 s), confined to 2 to 16 beats: the rest of the
   effect catches up at a constant speed so the track lands where it would be
   (the settings show the catch-up speed and warn when it gets extreme); it
   may run over into the next track). **▶ Preview (loop)** plays the transition

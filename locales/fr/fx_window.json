@@ -119,7 +119,6 @@
   "Scratch": "Scratch",
   "Sequence": "Séquence",
   "Ramp": "Pente",
-  "Steps: d<factor><seconds> slows down, u<factor><seconds> speeds up, b1 = backwards (b0 forwards). Example: d81b0 u42b1; with a two-digit factor or decimals: d16 0.5 b1. The rest of the effect catches up so that the track ends where it would be.": "Pas : d<facteur><secondes> ralentit, u<facteur><secondes> accélère, b1 = en arrière (b0 en avant). Exemple : d81b0 u42b1 ; avec un facteur à deux chiffres ou des décimales : d16 0.5 b1. La fin de l'effet rattrape pour que le morceau retombe là où il serait.",
   "Sequence error: {error}": "Erreur dans la séquence : {error}",
   "{steps} step(s): {seconds:.2f} s of the {length:.2f} s effect ({beats} beats)": "{steps} pas : {seconds:.2f} s sur les {length:.2f} s de l'effet ({beats} temps)",
   "no time left to catch up": "plus de temps pour rattraper",
@@ -130,5 +129,6 @@
   "✓ Apply the sequence": "✓ Appliquer la séquence",
   "The sequence is not applied: {error}": "La séquence n'est pas appliquée : {error}",
   "Sequence applied": "Séquence appliquée",
-  "not applied yet: click Apply (or press Enter)": "pas encore appliquée : cliquer sur Appliquer (ou Entrée)"
+  "not applied yet: click Apply (or press Enter)": "pas encore appliquée : cliquer sur Appliquer (ou Entrée)",
+  "Commands of 5 characters, hexadecimal values as in a tracker: d (slow down) or u (speed up), factor 1-F (0 keeps the speed), seconds 1-F, b, 0 forwards or 1 backwards. Example: d81b0 u42b1 dF3b1. The rest of the effect catches up so that the track ends where it would be.": "Commandes de 5 caractères, valeurs hexadécimales comme dans un tracker : d (ralentir) ou u (accélérer), facteur 1-F (0 garde la vitesse), secondes 1-F, b, 0 en avant ou 1 en arrière. Exemple : d81b0 u42b1 dF3b1. La fin de l'effet rattrape pour que le morceau retombe là où il serait."
 }

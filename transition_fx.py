@@ -555,21 +555,20 @@ def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
 
 
 # ------------------------------------------------------------------ scratch
-SCRATCH_MAX_FACTOR = 32.0
-SCRATCH_MAX_SECONDS = 30.0
+SCRATCH_COMMAND_LENGTH = 5
 SCRATCH_EXTREME_SPEED = 2.0
-# "d8 1 b0", "d16/0.5b1": factor and seconds separated; "d81b0": one-digit factor, then the seconds
-_SCRATCH_SPACED = re.compile(r"([du])\s*(\d+(?:[.,]\d+)?)\s*(?:[/:]|\s)\s*(\d+(?:[.,]\d+)?)(?:\s*b\s*([01]))?", re.IGNORECASE)
-_SCRATCH_COMPACT = re.compile(r"([du])(\d)(\d+(?:[.,]\d+)?)(?:\s*b\s*([01]))?", re.IGNORECASE)
+# one command = 5 characters, hexadecimal values as in a tracker: d|u, factor 0-F, seconds 1-F, b, 0|1
+_SCRATCH_COMMAND = re.compile(r"([du])([0-9a-f])([0-9a-f])b([01])", re.IGNORECASE)
 _SCRATCH_GAP = re.compile(r"[\s,;]*")
 
 
 def parse_scratch(sequence: str) -> List[Dict]:
     """
-    A scratch sequence, e.g. "d81b0 u42b1": each step changes the playback speed along a slope — d<factor><seconds>
-    reaches a speed <factor> times slower in <seconds>, u<factor><seconds> a speed <factor> times faster — and b1
-    plays it backwards (b0, the default, forwards). "d1 2" keeps the speed for 2 s. Returns
-    [{'kind': 'd'|'u', 'factor', 'seconds', 'backward', 'text'}]; raises ValueError on an unreadable step.
+    A scratch sequence of 5-character commands with hexadecimal values, as in a tracker, e.g. "d81b0 u42b1 dF3b1":
+    d (slow down) or u (speed up), the factor 1-F (0 keeps the current speed), the duration of the slope in seconds
+    1-F, b, then 0 (forwards) or 1 (backwards). "d81b0" reaches a speed 8 times slower in 1 s, forwards. Spaces,
+    commas or new lines between commands are optional. Returns [{'kind': 'd'|'u', 'factor', 'seconds', 'backward',
+    'text'}]; raises ValueError naming the wrong command.
     """
     text = sequence or ""
     steps, position = [], 0
@@ -577,22 +576,17 @@ def parse_scratch(sequence: str) -> List[Dict]:
         position = _SCRATCH_GAP.match(text, position).end()
         if position >= len(text):
             break
-        match = _SCRATCH_SPACED.match(text, position) or _SCRATCH_COMPACT.match(text, position)
+        command = text[position:position + SCRATCH_COMMAND_LENGTH]
+        match = _SCRATCH_COMMAND.fullmatch(command)
         if not match:
-            raise ValueError(N_("cannot read the step at '{text}'").format(text=text[position:position + 12].strip()))
-        step = match.group(0).strip()
-        factor = float(match.group(2).replace(",", "."))
-        seconds = float(match.group(3).replace(",", "."))
-        # the message says how the step was read: "d99999b1" is factor 9 for 9999 s in the compact form
-        if not 1.0 <= factor <= SCRATCH_MAX_FACTOR:
-            raise ValueError(N_("step '{step}' (factor {factor:g}, {seconds:g} s): the factor must be between 1 and 32").format(
-                step=step, factor=factor, seconds=seconds))
-        if not 0.01 <= seconds <= SCRATCH_MAX_SECONDS:
-            raise ValueError(N_("step '{step}' (factor {factor:g}, {seconds:g} s): the duration must be between 0.01 and 30 s").format(
-                step=step, factor=factor, seconds=seconds))
-        steps.append({"kind": match.group(1).lower(), "factor": factor, "seconds": seconds,
-                      "backward": match.group(4) == "1", "text": step})
-        position = match.end()
+            raise ValueError(N_("command '{command}': expected 5 characters like d81b0 (d or u, factor 0-F, seconds 1-F, "
+                                "b, 0 or 1)").format(command=command))
+        seconds = int(match.group(3), 16)
+        if seconds == 0:
+            raise ValueError(N_("command '{command}': the duration must be 1 to F seconds").format(command=command))
+        steps.append({"kind": match.group(1).lower(), "factor": float(max(1, int(match.group(2), 16))),
+                      "seconds": float(seconds), "backward": match.group(4) == "1", "text": command})
+        position += SCRATCH_COMMAND_LENGTH
     if not steps:
         raise ValueError(N_("the sequence is empty"))
     return steps

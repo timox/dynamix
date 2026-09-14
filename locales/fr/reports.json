@@ -28,13 +28,12 @@
   "MIX REVISION RECOMMENDED for {count}/{total} tracks: {names}": "REPRISE DU MIX RECOMMANDÉE pour {count}/{total} morceaux : {names}",
   "MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)": "REPRISE DU MIX CONSEILLÉE (un pre-master ne peut pas corriger cela)",
   "EQ: {suggestion}": "EQ : {suggestion}",
-  "cannot read the step at '{text}'": "impossible de lire le pas à « {text} »",
   "the sequence is empty": "la séquence est vide",
   "the sequence is longer than the effect: it is cut at '{step}'": "la séquence est plus longue que l'effet : elle est coupée à « {step} »",
   "the catch-up has to play backwards (x{speed:.2f}): shorten the sequence or the backward steps": "le rattrapage doit jouer en arrière (x{speed:.2f}) : raccourcir la séquence ou les pas en arrière",
   "extreme catch-up at x{speed:.2f}: shorten the sequence or lengthen the effect": "rattrapage extrême à x{speed:.2f} : raccourcir la séquence ou allonger l'effet",
   "no time left to catch up: the sequence ends {seconds:+.2f} s away from the track": "plus de temps pour rattraper : la séquence finit à {seconds:+.2f} s du morceau",
   "scratch: its beats are outside the audio of the transition": "scratch : ses temps sont hors de l'audio de la transition",
-  "step '{step}' (factor {factor:g}, {seconds:g} s): the factor must be between 1 and 32": "pas « {step} » (facteur {factor:g}, {seconds:g} s) : le facteur doit être entre 1 et 32",
-  "step '{step}' (factor {factor:g}, {seconds:g} s): the duration must be between 0.01 and 30 s": "pas « {step} » (facteur {factor:g}, {seconds:g} s) : la durée doit être entre 0,01 et 30 s"
+  "command '{command}': expected 5 characters like d81b0 (d or u, factor 0-F, seconds 1-F, b, 0 or 1)": "commande « {command} » : 5 caractères attendus comme d81b0 (d ou u, facteur 0-F, secondes 1-F, b, 0 ou 1)",
+  "command '{command}': the duration must be 1 to F seconds": "commande « {command} » : la durée doit aller de 1 à F secondes"
 }

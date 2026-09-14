@@ -17,22 +17,25 @@ BEATS = [i * 0.5 for i in range(240)]   # 120 BPM
 
 
 class TestParse(unittest.TestCase):
-    def test_compact_and_spaced_forms(self):
+    def test_five_character_hex_commands(self):
         steps = tfx.parse_scratch("d81b0 u42b1")
         self.assertEqual([(s["kind"], s["factor"], s["seconds"], s["backward"]) for s in steps],
                          [("d", 8.0, 1.0, False), ("u", 4.0, 2.0, True)])
-        steps = tfx.parse_scratch("D16 0.5 b1, u16/0,5; d1 2")
-        self.assertEqual([(s["kind"], s["factor"], s["seconds"], s["backward"]) for s in steps],
-                         [("d", 16.0, 0.5, True), ("u", 16.0, 0.5, False), ("d", 1.0, 2.0, False)])
-        self.assertEqual(tfx.parse_scratch("d81 b1")[0]["backward"], True)
+        steps = tfx.parse_scratch("DF3B1,u0Fb0\nd81b0u42b1")                        # hex, any case, separators optional
+        self.assertEqual([(s["kind"], s["factor"], s["seconds"], s["backward"], s["text"]) for s in steps],
+                         [("d", 15.0, 3.0, True, "DF3B1"), ("u", 1.0, 15.0, False, "u0Fb0"),   # factor 0 keeps the speed
+                          ("d", 8.0, 1.0, False, "d81b0"), ("u", 4.0, 2.0, True, "u42b1")])
 
     def test_errors(self):
-        for bad in ("", "   ", "x81", "d8", "d0 1", "d99 1", "d8 0", "d81b2"):
+        for bad in ("", "   ", "x81b0", "d8", "d81b", "d81b2", "d80b0", "d81 b0", "d16 0.5 b1", "dG1b0", "d81b01"):
             with self.assertRaises(ValueError, msg=bad):
                 tfx.parse_scratch(bad)
-        with self.assertRaises(ValueError) as caught:                                 # read as factor 9 for 9999 s
-            tfx.parse_scratch("d99999b1")
-        self.assertIn("(factor 9, 9999 s)", str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            tfx.parse_scratch("d81b0 d99999b1")
+        self.assertIn("command 'd9999'", str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            tfx.parse_scratch("u40b1")
+        self.assertIn("1 to F seconds", str(caught.exception))
         self.assertTrue(any("scratch" in p for p in tfx.validate_effect(dict(tfx.new_effect("scratch"), sequence="zz"))))
         self.assertEqual(tfx.validate_effect(tfx.new_effect("scratch")), [])
 
@@ -53,12 +56,12 @@ class TestPlan(unittest.TestCase):
         self.assertAlmostEqual(plan["advance"], -1.0, delta=0.002)
         self.assertAlmostEqual(plan["catch_up_speed"], 5.0 / 3.0, delta=0.002)
         self.assertAlmostEqual(float(np.sum(plan["speed"])), 4.0 * SR, places=6)
-        self.assertTrue(any("longer than the effect" in w for w in tfx.scratch_plan("d81 u81 d81", 2.5, SR)["warnings"]))
+        self.assertTrue(any("longer than the effect" in w for w in tfx.scratch_plan("d81b0u81b0d81b0", 2.5, SR)["warnings"]))
         self.assertTrue(any("extreme catch-up" in w for w in tfx.scratch_plan("d82b1", 2.5, SR)["warnings"]))
-        self.assertTrue(any("no time left" in w for w in tfx.scratch_plan("d82", 2.0, SR)["warnings"]))
+        self.assertTrue(any("no time left" in w for w in tfx.scratch_plan("d82b0", 2.0, SR)["warnings"]))
 
     def test_linear_ramp(self):
-        plan = tfx.scratch_plan("d21", 2.0, SR, ramp="linear")
+        plan = tfx.scratch_plan("d21b0", 2.0, SR, ramp="linear")
         self.assertAlmostEqual(plan["speed"][499], 0.75, delta=0.002)                 # halfway from 1 to 1/2
 
 
@@ -74,7 +77,7 @@ class TestRender(unittest.TestCase):
     def test_neutral_sequence_changes_nothing(self):
         track = np.random.default_rng(2).normal(0, 0.3, (12 * SR, 2)).astype(np.float32)
         ctx = tfx.make_context(track.copy(), SR, BEATS, 8.0, 10.0, track.copy(), SR, BEATS, 2.0)
-        tfx.apply_effects(ctx, [dict(tfx.new_effect("scratch"), sequence="d1 4", length_beats=8, start_offset_beats=-8)])
+        tfx.apply_effects(ctx, [dict(tfx.new_effect("scratch"), sequence="d14b0", length_beats=8, start_offset_beats=-8)])
         self.assertTrue(np.allclose(ctx.a[:10 * SR], track[:10 * SR], atol=1e-5))
 
     def test_effect_replaces_its_beats_only(self):
@@ -98,7 +101,7 @@ class TestLayout(unittest.TestCase):
         self.assertTrue(lane["blocks"][-1]["label"].startswith("×"))
         bad = tfx.transition_layout(BEATS, BEATS, 8.0, 10.0, 2.0, [dict(fx, sequence="zz")])["lanes"][0]
         self.assertEqual(bad["blocks"], [])
-        self.assertIn("cannot read", bad["note"])
+        self.assertIn("command 'zz'", bad["note"])
 
 
 if __name__ == "__main__":
