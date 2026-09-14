@@ -70,6 +70,8 @@ python gui.py
   junction by ear. **Apply all FX** writes copies into `fx/` (the library and
   the pre-mastered copies are never modified); the playlist and the Mixxx
   export then use those copies, with the cue positions of the rendered files.
+  The project's `fx/` (and `premaster/`) folder must be part of the Mixxx
+  library (Mixxx music directories) for the export to match the copies.
 - **Log tab**: everything DynaMix prints and every error with its traceback,
   filterable by level, also written to `<DynaMix home>/logs/dynamix.log`
   (**Open log folder**). The tab title counts new warnings and errors.

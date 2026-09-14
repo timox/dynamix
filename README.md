@@ -125,13 +125,14 @@ A set is a **project folder** under the projects folder chosen in the GUI's Conf
 <projects folder>/<set name>/
     project.json     options, selection, analysed tracks, proposals, set list, step status, results
     premaster/       corrected copies written by the pre-master pass
+    fx/              copies with transition FX (freeze, filters, echo, samples)
     exports/         M3U playlists, transition sheets, JSON, charts
 ```
 
 Every track you mixed lives in one **music library folder** (Configuration tab), scanned in
 place and never written to (`library.py`). For each set you pick tracks from the library into
-the project's **selection**; the Set Builder tab then walks through six steps (Select and
-analyze → Propose → Plan Transitions → Pre-master → Create Playlist → Export to Mixxx) and shows
+the project's **selection**; the Set Builder tab then walks through seven steps (Select and
+analyze → Propose → Plan Transitions → Pre-master → Transition FX → Create Playlist → Export to Mixxx) and shows
 what is done, when, and what comes next. **Propose** computes several variants from the
 selection only (`set_proposer.py`); you use one and adjust it with Up / Down / Remove.
 **Reset project...** starts a set again from scratch and **Clear analysis cache...** forces the
@@ -146,7 +147,8 @@ transition in a loop while you tweak it; **Apply all FX** renders copies into th
 `fx/` folder (effects that outlast the outgoing track continue at the start of the next one).
 Settings are kept per track pair in `project.json`, so reordering the set keeps them; the
 library and the pre-mastered copies are never modified. Playback files are chosen in this
-order: FX copy, pre-mastered copy, original.
+order: FX copy, pre-mastered copy, original. The project's `fx/` and `premaster/` folders must be
+part of the Mixxx library (Mixxx music directories) for the export to match those copies.
 
 - **Analysis cache** (`analysis_store.py`): every per-file result is stored in
   `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows or `~/.dynamix/analysis.sqlite`
@@ -250,7 +252,8 @@ the previous track, until its energy kicks in) and an **outro** section (where t
 track should start fading, until it must be gone). They are written as Mixxx intro/outro cues
 and a Mixxx playlist is created with the set order. In Mixxx, add that playlist to the Auto DJ
 queue and pick the **Full Intro + Outro** transition mode. The tracks must already be in the
-Mixxx library and Mixxx must be closed during the export; a backup of `mixxxdb.sqlite` is made
+Mixxx library (for a project that uses copies, its `fx/` and `premaster/` folders too) and Mixxx
+must be closed during the export; a backup of `mixxxdb.sqlite` is made
 first. The same is available in the GUI: Playlist Manager tab, **Plan Transitions**, then
 **Export to Mixxx**.
 
