@@ -290,6 +290,29 @@ def scenario():
         check(app.log_body.winfo_manager() == "pack", "All shows the log stream again")
         app.notebook.select(0)
 
+        check("Audio used:" in app.audio_used_label.cget("text"), "the workflow panel says which audio is used")
+        app.use_premaster_var.set(False)
+        app._use_premaster_changed()
+        check(app.project.options["use_premaster"] is False and "originals 2" in app.audio_used_label.cget("text"),
+              f"unchecking the option plays the originals, got {app.audio_used_label.cget('text')!r}")
+        check(not app.project.data["fx"]["render"] and not app.project.is_done("fx"),
+              "changing the option invalidates the FX render")
+        check(SetProject.open(app.project.folder).options["use_premaster"] is False, "the option is saved with the project")
+        app.use_premaster_var.set(True)
+        app._use_premaster_changed()
+        order = list(app.project.set_list)
+        snapshot = app._do_save_snapshot("smoke state")
+        check(os.path.isfile(snapshot), "a snapshot is saved in the project")
+        app.project.set_order(list(reversed(order)))
+        app._save_project()
+        check(app._do_restore_snapshot(snapshot) is not None and app.project.set_list == order,
+              "restoring a snapshot brings the set list back")
+        check(sorted(s["label"] for s in app.project.list_snapshots()) == ["before restore", "smoke state"],
+              "the state before the restore is kept as a snapshot")
+        dialog = app.open_snapshots()
+        check(dialog is not None and dialog.winfo_exists(), "the Snapshots window opens")
+        dialog.destroy()
+
         # --- checks added by later tasks go above this line ---
 
 

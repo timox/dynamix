@@ -83,11 +83,15 @@ A set is a **project folder** under the projects folder (default `~/DynaMix Proj
     fx/              copies with the transition FX
     exports/         M3U playlists, transitions.json, charts
     exports/reports/ reports, one text file each
+    snapshots/       saved states of the settings (Snapshots... button), restorable
 ```
 
 The music library is scanned in place and never written to (`library.py`); the originals and
 the pre-mastered copies are never modified. Playback files are chosen in this order: FX copy,
-pre-mastered copy, original. **Reset project...** starts a set again from an empty selection
+pre-mastered copy (unless **Use pre-mastered copies** is unchecked), original; the workflow panel
+always says which ones the set uses. **Snapshots...** saves the project's settings under a name
+and restores them later (the audio copies are not part of a snapshot: steps whose copies changed
+since are marked to redo). **Reset project...** starts a set again from an empty selection
 (name, options and the analysis cache are kept); **Clear analysis cache...** forces the selected
 tracks to be analysed again. Projects created by older versions keep working: their imported
 `source/` copies become their selection.

@@ -24,7 +24,17 @@ python gui.py
   **Reset project...** starts the set again from an empty selection (name,
   options, notes and the analysis cache are kept; pre-master and exports are
   deleted). **Clear analysis cache...** forgets the cached analyses of the
-  selected tracks so they are analysed again.
+  selected tracks so they are analysed again. **Snapshots...** saves the
+  project's settings (selection, set list, transitions, FX settings, options)
+  under a name in the project's `snapshots/` folder and restores one later
+  (the current state is saved first as "before restore"; steps whose audio
+  copies changed since, and the playlist and Mixxx export, are to redo).
+- **Which audio is played**: the line under "Next:" says what the FX, the
+  playlist and the Mixxx export use (FX copies, pre-mastered copies,
+  originals). **Use pre-mastered copies** in *Options for this set* (on by
+  default) chooses between the pre-mastered copies and the originals; changing
+  it means applying the FX, writing the playlist and exporting again. The FX
+  tab shows it per transition ("Plays from: A pre-mastered copy · B original").
 - **Workflow panel**: the six steps with a ✓ / ○ status, the date and key
   figures of each, and a "Next:" hint:
     1. Select and analyze (BPM, key, energy; cached per file)

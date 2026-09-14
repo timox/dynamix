@@ -133,7 +133,12 @@ DynaMix Projects\Samedi soir\
 ```
 
 **New project...** crée le projet, le menu déroulant rouvre n'importe quel
-projet. **Reset project...** repart d'une sélection vide, **Clear analysis
+projet. **Snapshots...** enregistre l'état des réglages du projet sous un nom
+(sélection, set list, transitions, réglages FX, options) et permet de le
+restaurer plus tard ; l'état courant est d'abord sauvegardé (« before
+restore »). La ligne *Audio used* du panneau Workflow indique si le set utilise
+les copies FX, les copies pré-masterisées ou les originaux, et la case **Use
+pre-mastered copies** des options permet de choisir. **Reset project...** repart d'une sélection vide, **Clear analysis
 cache...** fait réanalyser les morceaux sélectionnés.
 
 Le panneau *Workflow* liste les sept étapes avec leur état, leur date et un

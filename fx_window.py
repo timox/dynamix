@@ -220,7 +220,9 @@ class TransitionFxPanel(ttk.Frame):
         self.trans_tree.pack(fill=tk.BOTH, expand=True)
         self.trans_tree.bind("<<TreeviewSelect>>", lambda e: self.on_transition_selected())
         self.info_label = ttk.Label(left, text="", foreground=MUTED, justify=tk.LEFT, wraplength=380)
-        self.info_label.pack(anchor="w", pady=4)
+        self.info_label.pack(anchor="w", pady=(4, 0))
+        self.source_label = ttk.Label(left, text="", foreground=MUTED, justify=tk.LEFT, wraplength=380)
+        self.source_label.pack(anchor="w", pady=(0, 4))
         nudge_row = ttk.Frame(left)
         nudge_row.pack(anchor="w")
         ttk.Label(nudge_row, text="Nudge (ms):").pack(side=tk.LEFT)
@@ -326,6 +328,7 @@ class TransitionFxPanel(ttk.Frame):
             f"Junction A {_fmt(pa.get('outro_start', 0))} · B {_fmt(pb.get('intro_start', 0))}\n"
             f"{bpm_a:.1f} → {float(pb.get('bpm') or 0):.1f} BPM · {pa.get('key') or '-'} → {pb.get('key') or '-'} · "
             f"beat {beat} · score {float(t.get('score', 0)):.0f}"))
+        self.refresh_sources()
         self._setting_nudge = True
         self.nudge_var.set(str(int(round(float(self.entry().get("nudge_ms", 0))))))
         self._setting_nudge = False
@@ -333,6 +336,16 @@ class TransitionFxPanel(ttk.Frame):
         self.show_settings()
         self.load_waveforms()
         self.schedule_preview()
+
+    def refresh_sources(self):
+        """Which file the preview and the render read for A and B: the pre-mastered copy or the original."""
+        if self.pair_index is None or not self.winfo_exists():
+            return
+        bases = self.project.premaster_map()
+        a, b = self.pair()
+        kind = {True: "pre-mastered copy", False: "original"}
+        note = "" if self.project.options.get("use_premaster", True) else " (pre-mastered copies not used)"
+        self.source_label.config(text=f"Plays from: A {kind[a in bases]} · B {kind[b in bases]}{note}")
 
     def on_nudge(self):
         if getattr(self, "_setting_nudge", False) or self.pair_index is None:

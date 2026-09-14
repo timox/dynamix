@@ -7,6 +7,7 @@ Set project: one folder per set.
         premaster/       corrected copies written by the pre-master pass
         fx/              copies with transition FX (freeze, filters, echo, samples)
         exports/         M3U playlists, transition sheets, JSON, charts
+        snapshots/       saved states of project.json (settings only, restorable)
         source/          (projects created before version 3 only) imported copies
 
 The tracks of a set are picked in the music library (one folder holding every
@@ -15,6 +16,7 @@ the library is never written to. The GUI and the command-line tools read and
 update project.json, so you always know where you are and never redo a step.
 """
 
+import copy
 import datetime as _dt
 import json
 import os
@@ -100,6 +102,7 @@ class SetProject:
     PREMASTER_DIR = "premaster"
     FX_DIR = "fx"
     EXPORTS_DIR = "exports"
+    SNAPSHOTS_DIR = "snapshots"
 
     def __init__(self, folder: str, autoload: bool = True):
         self.folder = os.path.abspath(folder)
@@ -119,6 +122,7 @@ class SetProject:
                 "tone_match": True,
                 "fix_phase": True,
                 "mono_bass_hz": 120.0,
+                "use_premaster": True,   # FX, playlist and Mixxx use the pre-mastered copies when they exist
             },
             "selection": [],       # absolute paths of the tracks picked in the library
             "tracks": [],          # analysed track records (selected files only)
@@ -189,6 +193,10 @@ class SetProject:
     def load(self) -> "SetProject":
         with open(self.path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
+        return self._apply(loaded)
+
+    def _apply(self, loaded: Dict) -> "SetProject":
+        """Merge a saved project.json content into the current data (defaults kept for missing keys)."""
         for key, value in loaded.items():
             if key == "steps":
                 for step_key, state in value.items():
@@ -392,8 +400,8 @@ class SetProject:
         by_path = {t["file_path"]: t for t in self.data["tracks"]}
         return [by_path[p] for p in self.data["set_list"] if p in by_path]
 
-    def premaster_map(self) -> Dict[str, str]:
-        """original file path -> pre-mastered copy, for copies that exist on disk."""
+    def _premaster_outputs(self) -> Dict[str, str]:
+        """original file path -> pre-mastered copy on disk, whether the copies are used or not."""
         pm = self.data.get("premaster") or {}
         mapping = {}
         for r in pm.get("results") or []:
@@ -402,6 +410,44 @@ class SetProject:
             if os.path.exists(r["output"]):
                 mapping[r["input"]] = r["output"]
         return mapping
+
+    def premaster_map(self) -> Dict[str, str]:
+        """original file path -> pre-mastered copy to use ({} when the project does not use them)."""
+        if not self.options.get("use_premaster", True):
+            return {}
+        return self._premaster_outputs()
+
+    def set_use_premaster(self, use: bool) -> bool:
+        """Use (or not) the pre-mastered copies; a change invalidates the FX render and the exports. True if changed."""
+        use = bool(use)
+        if bool(self.options.get("use_premaster", True)) == use:
+            return False
+        self.options["use_premaster"] = use
+        self.invalidate_from("premaster")
+        return True
+
+    def audio_sources(self) -> Dict:
+        """What the set plays: counts of FX copies, pre-mastered copies and originals for the set list."""
+        tracks = self.set_list_tracks() or self.tracks
+        _, counts = self.rendered_profiles(tracks)
+        return {"total": len(tracks), "fx": counts["fx"], "premaster": counts["premaster"],
+                "original": len(tracks) - counts["fx"] - counts["premaster"],
+                "premaster_ready": bool(self._premaster_outputs()),
+                "use_premaster": bool(self.options.get("use_premaster", True))}
+
+    def audio_used_text(self) -> str:
+        """One line saying which audio the FX, the playlist and the Mixxx export use."""
+        s = self.audio_sources()
+        if not s["total"]:
+            return "Audio used: - (no analysed tracks yet)"
+        parts = [f"{label} {s[key]}" for key, label in (("fx", "FX copies"), ("premaster", "pre-mastered copies"),
+                                                         ("original", "originals")) if s[key]]
+        text = f"Audio used: {' · '.join(parts)} (of {s['total']} tracks)"
+        if s["premaster_ready"] and not s["use_premaster"]:
+            text += " - pre-mastered copies not used"
+        elif not s["premaster_ready"]:
+            text += " - no pre-master yet"
+        return text
 
     # ------------------------------------------------------------- transition FX
     @staticmethod
@@ -513,6 +559,100 @@ class SetProject:
             out.append(q)
         return out, counts
 
+    # ------------------------------------------------------------- snapshots (settings only)
+    @property
+    def snapshots_dir(self) -> str:
+        return os.path.join(self.folder, self.SNAPSHOTS_DIR)
+
+    @staticmethod
+    def _stamp(path: str) -> Optional[List[float]]:
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        return [st.st_size, round(st.st_mtime, 3)]
+
+    @staticmethod
+    def _copy_outputs(data: Dict) -> Dict[str, List[str]]:
+        """The audio copies a project state refers to: {'premaster': [...], 'fx': [...]}."""
+        pm = (data.get("premaster") or {}).get("results") or []
+        fx = ((data.get("fx") or {}).get("render") or {}).get("results") or []
+        return {"premaster": [r["output"] for r in pm if r.get("output") and "error" not in r],
+                "fx": [r["output"] for r in fx if r.get("output") and "error" not in r]}
+
+    def save_snapshot(self, label: str, now: Optional[_dt.datetime] = None) -> str:
+        """Save the current project state (settings, not the audio) into snapshots/; returns the file."""
+        os.makedirs(self.snapshots_dir, exist_ok=True)
+        label = (label or "").strip() or "snapshot"
+        base = f"{(now or _dt.datetime.now()).strftime('%Y-%m-%d %H-%M-%S')} {safe_name(label)}"
+        path, n = os.path.join(self.snapshots_dir, base + ".json"), 1
+        while os.path.exists(path):
+            n += 1
+            path = os.path.join(self.snapshots_dir, f"{base} ({n}).json")
+        outputs = self._copy_outputs(self.data)
+        payload = {"label": label, "at": _now(), "data": self.data,
+                   "files": {p: self._stamp(p) for paths in outputs.values() for p in paths}}
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=_json_default)
+        os.replace(tmp, path)
+        return path
+
+    def list_snapshots(self) -> List[Dict]:
+        """Saved snapshots, newest first: {'path', 'label', 'at', 'set_list' (tracks), 'fx' (transitions with FX)}."""
+        if not os.path.isdir(self.snapshots_dir):
+            return []
+        found = []
+        for name in os.listdir(self.snapshots_dir):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(self.snapshots_dir, name)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    snap = json.load(f)
+            except (OSError, ValueError):
+                continue
+            data = snap.get("data") or {}
+            transitions = (data.get("fx") or {}).get("transitions") or {}
+            found.append({"path": path, "label": snap.get("label") or name, "at": snap.get("at") or "",
+                          "set_list": len(data.get("set_list") or []),
+                          "fx": sum(1 for entry in transitions.values() if entry.get("effects"))})
+        return sorted(found, key=lambda s: (s["at"], s["path"]), reverse=True)
+
+    def restore_snapshot(self, path: str) -> Dict:
+        """
+        Bring back a snapshot (the current state is saved first as 'before restore'). Pre-master and FX steps whose
+        copies are gone or were rewritten since are to redo; the playlist and the Mixxx export always are.
+        Returns {'stale': [steps to redo because of the audio], 'before': path of the automatic snapshot}.
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            snap = json.load(f)
+        before = self.save_snapshot("before restore")
+        fresh = SetProject(self.folder, autoload=False)
+        fresh._apply(copy.deepcopy(snap["data"]))
+        self.data = fresh.data
+        stamps = snap.get("files") or {}
+
+        def changed(paths):
+            return any(self._stamp(p) is None or self._stamp(p) != stamps.get(p) for p in paths)
+
+        outputs = self._copy_outputs(self.data)
+        stale = []
+        if outputs["premaster"] and changed(outputs["premaster"]):
+            self.data["premaster"] = None
+            self.mark("premaster", done=False)
+            self.invalidate_from("premaster")
+            stale.append("premaster")
+        if self.data["fx"].get("render") and changed(outputs["fx"]):
+            self.data["fx"]["render"] = None
+            self.mark("fx", done=False)
+            self.invalidate_from("fx")
+            stale.append("fx")
+        for key in ("playlist", "mixxx"):
+            self.mark(key, done=False)  # what was written outside the project may have changed since
+        self.save()
+        return {"stale": stale, "before": before}
+
     # ------------------------------------------------------------- reset
     @staticmethod
     def _files_under(path: str) -> List[str]:
@@ -609,6 +749,7 @@ class SetProject:
             details = state.get("details") or {}
             extra = ", ".join(f"{k}={v}" for k, v in details.items() if k in ("count", "out_dir", "playlist", "db", "file", "cues"))
             lines.append(f"  {mark} {label}{when}{(' | ' + extra) if extra else ''}")
+        lines.append(self.audio_used_text())
         key, hint = self.next_step()
         lines.append(f"Next: {hint}")
         return lines

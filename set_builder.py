@@ -66,6 +66,7 @@ class SetBuilderMixin:
         self.project_combo.bind("<<ComboboxSelected>>", lambda e: self.open_selected_project())
         ttk.Button(head, text="New project...", command=self.new_project).pack(side=tk.LEFT, padx=4)
         ttk.Button(head, text="Project summary", command=self.show_project_summary).pack(side=tk.LEFT, padx=4)
+        ttk.Button(head, text="Snapshots...", command=self.open_snapshots).pack(side=tk.LEFT, padx=4)
         ttk.Button(head, text="Reset project...", command=self.reset_project).pack(side=tk.LEFT, padx=(16, 4))
         ttk.Button(head, text="Clear analysis cache...", command=self.clear_analysis_cache).pack(side=tk.LEFT, padx=4)
         self.project_path_label = ttk.Label(frame, text="No project open. Create one with 'New project...' (the Configuration tab sets where projects live).",
@@ -104,6 +105,8 @@ class SetBuilderMixin:
         self.next_step_label = ttk.Label(steps_frame, text="Next: open or create a project.", wraplength=330,
                                          anchor="w", justify=tk.LEFT, font=ui_fonts.BOLD)
         self.next_step_label.pack(fill=tk.X, padx=6, pady=(6, 4))
+        self.audio_used_label = ttk.Label(steps_frame, text="", foreground=MUTED, wraplength=330, anchor="w", justify=tk.LEFT)
+        self.audio_used_label.pack(fill=tk.X, padx=6, pady=(0, 4))
         
         options_frame = ttk.LabelFrame(left, text="Options for this set")
         options_frame.pack(fill=tk.X, padx=2, pady=6)
@@ -126,6 +129,9 @@ class SetBuilderMixin:
         self.mono_bass_hz_var = tk.DoubleVar(value=float(self.config.get("mono_bass_hz") or 120.0) or 120.0)
         ttk.Spinbox(mono_row, from_=40, to=300, increment=10, textvariable=self.mono_bass_hz_var, width=5).pack(side=tk.LEFT, padx=3)
         ttk.Label(mono_row, text="Hz").pack(side=tk.LEFT)
+        self.use_premaster_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(grid, text="Use pre-mastered copies (FX, playlist, Mixxx)", variable=self.use_premaster_var,
+                        command=self._use_premaster_changed).grid(row=6, column=0, columnspan=2, sticky="w")
         report_row = ttk.Frame(options_frame)
         report_row.pack(anchor="w", padx=4, pady=(0, 4))
         ttk.Button(report_row, text="Mastering Report", command=self.mastering_report).pack(side=tk.LEFT)
@@ -410,6 +416,7 @@ class SetBuilderMixin:
         self.mono_bass_var.set(mono_hz > 0)
         if mono_hz > 0:
             self.mono_bass_hz_var.set(mono_hz)
+        self.use_premaster_var.set(bool(opts.get("use_premaster", True)))
         
         manager = PlaylistManager(project.folder)
         manager.tracks = list(project.tracks)
@@ -441,6 +448,7 @@ class SetBuilderMixin:
             "tone_match": bool(self.premaster_tone_var.get()),
             "fix_phase": bool(self.premaster_phase_var.get()),
             "mono_bass_hz": float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0,
+            "use_premaster": bool(self.use_premaster_var.get()),
         })
         self.project.save()
         self._refresh_workflow()
@@ -482,6 +490,7 @@ class SetBuilderMixin:
             w["detail"].config(text=" · ".join(parts))
         key, hint = self.project.next_step()
         self.next_step_label.config(text=f"Next: {hint}")
+        self.audio_used_label.config(text=self.project.audio_used_text())
         try:
             stats = get_store().stats()
             self.cache_label.config(text=f"Analysis cache: {stats['files']} files, {stats['entries']} results")
@@ -492,6 +501,112 @@ class SetBuilderMixin:
         if not self._require_project():
             return
         self.add_report("Project summary", "\n".join(self.project.summary_lines()))
+
+    def _use_premaster_changed(self):
+        if self.project is None:
+            return
+        use = bool(self.use_premaster_var.get())
+        if not self.project.set_use_premaster(use):
+            return
+        self._save_project()
+        self._refresh_tables()
+        self._render_overview()
+        if self.fx_panel is not None:
+            self.fx_panel.refresh_sources()
+            self.fx_panel.schedule_chart()
+        message = ("The pre-mastered copies are used" if use else "The originals are used, not the pre-mastered copies") + \
+            ": apply the FX, write the playlist and export to Mixxx again"
+        log.info(message)
+        self.update_status(message)
+
+    # ------------------------------------------------------------------ snapshots
+    def open_snapshots(self):
+        """Save the project's settings as a snapshot, restore or delete one."""
+        if not self._require_project():
+            return
+        project = self.project
+        win = tk.Toplevel(self.root)
+        win.title(f"Snapshots - {project.name}")
+        win.geometry("700x380")
+        win.transient(self.root)
+        ttk.Label(win, text="A snapshot keeps the project's settings (selection, set list, transitions, FX settings, options), "
+                            "not the audio copies. Restoring saves the current state first ('before restore').",
+                  foreground=MUTED, wraplength=660, justify=tk.LEFT).pack(anchor="w", padx=10, pady=(10, 4))
+        tree = ttk.Treeview(win, columns=("Saved", "Name", "Set list", "FX"), show="headings", selectmode="browse")
+        for col, width in (("Saved", 150), ("Name", 300), ("Set list", 70), ("FX", 60)):
+            tree.heading(col, text=col)
+            tree.column(col, width=width, anchor="w" if col in ("Saved", "Name") else "center", stretch=(col == "Name"))
+        tree.pack(fill=tk.BOTH, expand=True, padx=10)
+
+        def fill():
+            tree.delete(*tree.get_children())
+            for s in project.list_snapshots():
+                tree.insert("", tk.END, iid=s["path"], values=(s["at"].replace("T", " "), s["label"], s["set_list"], s["fx"]))
+
+        def chosen():
+            sel = tree.selection()
+            return sel[0] if sel else None
+
+        def save():
+            label = simpledialog.askstring("Save snapshot", "Name of this snapshot:", parent=win)
+            if label is not None:
+                self._do_save_snapshot(label)
+                fill()
+
+        def restore():
+            path = chosen()
+            if path and messagebox.askyesno("Restore snapshot", "Replace the project's current settings with this snapshot?\n\n"
+                                            "The current state is saved first as 'before restore'.", parent=win):
+                self._do_restore_snapshot(path)
+                fill()
+
+        def delete():
+            path = chosen()
+            if path and messagebox.askyesno("Delete snapshot", f"Delete the snapshot '{tree.item(path, 'values')[1]}'?",
+                                            parent=win):
+                self._do_delete_snapshot(path)
+                fill()
+
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=tk.X, padx=10, pady=8)
+        ttk.Button(buttons, text="Save current state...", command=save).pack(side=tk.LEFT)
+        ttk.Button(buttons, text="Restore", command=restore).pack(side=tk.LEFT, padx=6)
+        ttk.Button(buttons, text="Delete", command=delete).pack(side=tk.LEFT)
+        ttk.Button(buttons, text="Close", command=win.destroy).pack(side=tk.RIGHT)
+        fill()
+        return win
+
+    def _do_save_snapshot(self, label):
+        self._save_project()
+        path = self.project.save_snapshot(label)
+        log.info("Snapshot saved: %s", path)
+        self.update_status(f"Snapshot saved: {os.path.basename(path)}")
+        return path
+
+    def _do_restore_snapshot(self, path):
+        project = self.project
+        try:
+            result = project.restore_snapshot(path)
+        except (OSError, ValueError, KeyError) as e:
+            self._report_error(f"Cannot restore the snapshot: {e}", e)
+            return None
+        self.load_project(project.folder)
+        stale = result["stale"]
+        message = (f"Snapshot restored: {os.path.basename(path)}"
+                   + (f"; to redo because the audio copies changed since: {', '.join(stale)}" if stale else "")
+                   + "; write the playlist and export to Mixxx again")
+        log.info(message)
+        self.update_status(message)
+        return result
+
+    def _do_delete_snapshot(self, path):
+        try:
+            os.remove(path)
+        except OSError as e:
+            self._report_error(f"Cannot delete the snapshot: {e}", e)
+            return False
+        log.info("Snapshot deleted: %s", path)
+        return True
     
     # ------------------------------------------------------------------ tables
     def _mastering_by_path(self):
@@ -1157,8 +1272,9 @@ class SetBuilderMixin:
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
         note = f" ({self._copies_note(counts)})" if counts["fx"] or counts["premaster"] else ""
+        self.add_report("Playlist", f"{len(tracks)} tracks written to {filename}\n{self.project.audio_used_text()}\n\n"
+                        + "\n".join(f"{i:2d}. {t.get('filename', '')}" for i, t in enumerate(tracks, 1)))
         self.update_status(f"Playlist saved: {len(tracks)} tracks{note} -> {filename}")
-        messagebox.showinfo("Playlist created", f"{len(tracks)} tracks written to:\n{filename}")
     
     def export_to_mixxx(self):
         if not self._require_project():
