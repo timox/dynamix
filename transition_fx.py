@@ -583,10 +583,13 @@ def parse_scratch(sequence: str) -> List[Dict]:
         step = match.group(0).strip()
         factor = float(match.group(2).replace(",", "."))
         seconds = float(match.group(3).replace(",", "."))
+        # the message says how the step was read: "d99999b1" is factor 9 for 9999 s in the compact form
         if not 1.0 <= factor <= SCRATCH_MAX_FACTOR:
-            raise ValueError(N_("step '{step}': the factor must be between 1 and 32").format(step=step))
+            raise ValueError(N_("step '{step}' (factor {factor:g}, {seconds:g} s): the factor must be between 1 and 32").format(
+                step=step, factor=factor, seconds=seconds))
         if not 0.01 <= seconds <= SCRATCH_MAX_SECONDS:
-            raise ValueError(N_("step '{step}': the duration must be between 0.01 and 30 s").format(step=step))
+            raise ValueError(N_("step '{step}' (factor {factor:g}, {seconds:g} s): the duration must be between 0.01 and 30 s").format(
+                step=step, factor=factor, seconds=seconds))
         steps.append({"kind": match.group(1).lower(), "factor": factor, "seconds": seconds,
                       "backward": match.group(4) == "1", "text": step})
         position = match.end()

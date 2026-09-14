@@ -618,12 +618,61 @@ class TransitionFxPanel(ttk.Frame):
                                "(b0 forwards). Example: d81b0 u42b1; with a two-digit factor or decimals: d16 0.5 b1. "
                                "The rest of the effect catches up so that the track ends where it would be."),
                   foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
+        ttk.Label(box, text=tr("While you type, the lines below check the sequence; Apply (or Enter) applies it, then the "
+                               "chart and the preview follow. An unreadable sequence is not applied."),
+                  foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
+        ttk.Button(box, text=tr("✓ Apply the sequence"), command=lambda: self._apply_text("sequence")).pack(anchor="w", padx=4, pady=2)
         self.scratch_info = ttk.Label(box, text="", justify=tk.LEFT, wraplength=380)
         self.scratch_info.pack(anchor="w", padx=4, pady=(2, 4))
         self._refresh_scratch_info()
 
-    def _refresh_scratch_info(self):
-        """What the sequence does over the effect: its length, the catch-up speed, the warnings."""
+    def _text_field(self, parent, key, var):
+        """
+        A multi-line text field applied only on request (the Apply button or Enter): typing stores nothing and redraws
+        nothing (the field keeps the focus); the StringVar holds the applied text, and setting it updates the field.
+        """
+        widget = tk.Text(parent, height=3, width=34, wrap="word", font="DynaMixMono", undo=True)
+        widget.insert("1.0", var.get())
+        if not hasattr(self, "_text_fields"):
+            self._text_fields = {}
+        self._text_fields[key] = (widget, var)
+        widget.bind("<Return>", lambda e, k=key: (self._apply_text(k), "break")[1])
+        widget.bind("<KeyRelease>", lambda e, k=key: self._typing(k))
+
+        def show_applied(*_):
+            if widget.winfo_exists() and widget.get("1.0", "end-1c") != var.get():
+                widget.delete("1.0", tk.END)
+                widget.insert("1.0", var.get())
+        var.trace_add("write", show_applied)
+        return widget
+
+    def _apply_text(self, key):
+        """Apply what is typed in a text field (the StringVar trace stores the effect); an unreadable sequence is refused."""
+        widget, var = getattr(self, "_text_fields", {}).get(key, (None, None))
+        if widget is None or not widget.winfo_exists():
+            return False
+        text = " ".join(widget.get("1.0", "end-1c").split())
+        if key == "sequence":
+            try:
+                tfx.parse_scratch(text)
+            except ValueError as exc:
+                self._refresh_scratch_info(sequence=text)
+                self.status(tr("The sequence is not applied: {error}", error=tr_text(str(exc))))
+                return False
+        if text != var.get():
+            var.set(text)
+        if key == "sequence":
+            self._refresh_scratch_info()
+            self.status(tr("Sequence applied"))
+        return True
+
+    def _typing(self, key):
+        widget, _ = getattr(self, "_text_fields", {}).get(key, (None, None))
+        if key == "sequence" and widget is not None and widget.winfo_exists():
+            self._refresh_scratch_info(sequence=widget.get("1.0", "end-1c"))
+
+    def _refresh_scratch_info(self, sequence=None):
+        """What the sequence does over the effect (the one being typed when given): length, catch-up, warnings."""
         label = getattr(self, "scratch_info", None)
         if label is None or not label.winfo_exists() or self.fx_index is None or self.pair_index is None:
             return
@@ -635,7 +684,7 @@ class TransitionFxPanel(ttk.Frame):
         period = 60.0 / float(profile.get("bpm") or tfx.DEFAULT_BPM)
         length = int(fx["length_beats"]) * period
         try:
-            plan = tfx.scratch_plan(fx["sequence"], length, 200, fx.get("ramp", "exponential"))
+            plan = tfx.scratch_plan(fx["sequence"] if sequence is None else sequence, length, 200, fx.get("ramp", "exponential"))
         except ValueError as exc:
             label.config(text=tr("Sequence error: {error}", error=tr_text(str(exc))), foreground=charts.STATUS_CRITICAL)
             return
@@ -647,6 +696,8 @@ class TransitionFxPanel(ttk.Frame):
             lines.append(tr("catch-up ×{speed:.2f} during {seconds:.2f} s, then the track is back in place",
                             speed=plan["catch_up_speed"], seconds=length - plan["sequence_end"]))
         lines.extend("⚠ " + tr_text(w) for w in plan["warnings"])
+        if sequence is not None and " ".join(sequence.split()) != fx["sequence"]:
+            lines.append(tr("not applied yet: click Apply (or press Enter)"))
         label.config(text="\n".join(lines), foreground=charts.STATUS_CRITICAL if plan["warnings"] else "")
 
     def _fields(self, parent, fields, values, on_change):
@@ -659,14 +710,15 @@ class TransitionFxPanel(ttk.Frame):
             if kind == "choice":
                 widget = ttk.Combobox(parent, textvariable=var, values=[str(c) for c in spec], width=18, state="readonly")
             elif kind == "text":
-                widget = ttk.Entry(parent, textvariable=var, width=30)
+                widget = self._text_field(parent, key, var)
             else:
                 lo, hi = spec
                 step = 1 if kind == "int" else (0.05 if hi <= 1 else (0.1 if hi <= 20 else (1 if hi <= 300 else 10)))
                 widget = ttk.Spinbox(parent, from_=lo, to=hi, increment=step, textvariable=var, width=10)
-            widget.grid(row=row, column=1, sticky="w", padx=6)
+            widget.grid(row=row, column=1, sticky="we" if kind == "text" else "w", padx=6)
             var.trace_add("write", lambda *a, k=key, v=var, kd=kind, s=spec: self._field_changed(k, v, kd, s, on_change))
             variables[key] = var
+        parent.columnconfigure(1, weight=1)
         return variables
 
     @staticmethod

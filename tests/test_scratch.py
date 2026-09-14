@@ -30,6 +30,9 @@ class TestParse(unittest.TestCase):
         for bad in ("", "   ", "x81", "d8", "d0 1", "d99 1", "d8 0", "d81b2"):
             with self.assertRaises(ValueError, msg=bad):
                 tfx.parse_scratch(bad)
+        with self.assertRaises(ValueError) as caught:                                 # read as factor 9 for 9999 s
+            tfx.parse_scratch("d99999b1")
+        self.assertIn("(factor 9, 9999 s)", str(caught.exception))
         self.assertTrue(any("scratch" in p for p in tfx.validate_effect(dict(tfx.new_effect("scratch"), sequence="zz"))))
         self.assertEqual(tfx.validate_effect(tfx.new_effect("scratch")), [])
 

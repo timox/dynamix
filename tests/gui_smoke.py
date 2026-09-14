@@ -292,6 +292,21 @@ def scenario():
               f"the scratch settings show the catch-up, got {win.scratch_info.cget('text')!r}")
         check("Scratch d81b0 u42b1" in win.fx_tree.item(f"F{len(win.effects()) - 1}", "values")[1],
               "the FX stack summarises the scratch")
+        field, _ = win._text_fields["sequence"]
+        check(field.winfo_class() == "Text" and field.get("1.0", "end-1c") == "d81b0 u42b1",
+              "the sequence field is a multi-line text showing the applied sequence")
+        field.insert("end", "\nd11b1")
+        win._typing("sequence")
+        check(win.effects()[-1]["sequence"] == "d81b0 u42b1" and "3 step(s)" in win.scratch_info.cget("text")
+              and "not applied yet" in win.scratch_info.cget("text"),
+              "typing only checks the sequence in the information lines, nothing is stored yet")
+        check(win._apply_text("sequence") and win.effects()[-1]["sequence"] == "d81b0 u42b1 d11b1",
+              "Apply stores the typed sequence")
+        field.insert("end", " oops")
+        win._typing("sequence")
+        check("Sequence error" in win.scratch_info.cget("text"), "an error in the typed sequence is shown before applying")
+        check(not win._apply_text("sequence") and win.effects()[-1]["sequence"] == "d81b0 u42b1 d11b1",
+              "an unreadable sequence is refused and the applied one is kept")
         win._form_vars["sequence"].set("zz")
         check("Sequence error" in win.scratch_info.cget("text"), "an unreadable sequence is reported in the settings")
         win.remove_effect()

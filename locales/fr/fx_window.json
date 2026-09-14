@@ -125,5 +125,10 @@
   "no time left to catch up": "plus de temps pour rattraper",
   "catch-up ×{speed:.2f} during {seconds:.2f} s, then the track is back in place": "rattrapage ×{speed:.2f} pendant {seconds:.2f} s, puis le morceau est de nouveau calé",
   "Scratch {sequence} · {beats} beats ({side})": "Scratch {sequence} · {beats} temps ({side})",
-  "Cannot preview yet: {problem}": "Pré-écoute impossible pour l'instant : {problem}"
+  "Cannot preview yet: {problem}": "Pré-écoute impossible pour l'instant : {problem}",
+  "While you type, the lines below check the sequence; Apply (or Enter) applies it, then the chart and the preview follow. An unreadable sequence is not applied.": "Pendant la frappe, les lignes ci-dessous vérifient la séquence ; Appliquer (ou Entrée) l'applique, puis le graphique et la pré-écoute suivent. Une séquence illisible n'est pas appliquée.",
+  "✓ Apply the sequence": "✓ Appliquer la séquence",
+  "The sequence is not applied: {error}": "La séquence n'est pas appliquée : {error}",
+  "Sequence applied": "Séquence appliquée",
+  "not applied yet: click Apply (or press Enter)": "pas encore appliquée : cliquer sur Appliquer (ou Entrée)"
 }
