@@ -236,6 +236,11 @@ def scenario():
         check(win.effects()[0]["steps"] == [{"beats": 4, "repeats": 1}, {"beats": 1, "repeats": 2}], "+ step keeps the edited steps")
         win.remove_freeze_step(1)
         check(win.effects()[0]["steps"] == [{"beats": 4, "repeats": 1}], "- removes the chosen step")
+        check(win.settings.master is win._settings_canvas, "the Settings panel is inside a scrolling canvas")
+        pump(seconds=0.3)
+        region = win._settings_canvas.bbox("all")
+        check(region is not None and region[3] - region[1] >= win.settings.winfo_reqheight() - 2,
+              "the scroll region covers every setting (Loop echo included)")
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)
         win.start_preview()
         check(pump(lambda: player.loops and os.path.exists(player.loops[-1]), 20.0), "the preview is rendered and looped")

@@ -112,6 +112,41 @@ def effect_summary(fx: dict) -> str:
     return str(t)
 
 
+def _scrollable(parent):
+    """A frame that scrolls vertically inside `parent` (scrollbar and mouse wheel); returns (frame, canvas)."""
+    background = ttk.Style(parent).lookup("TFrame", "background") or None
+    canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0, background=background)
+    bar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    bar.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0), pady=6)
+    frame = ttk.Frame(canvas)
+    window = canvas.create_window((0, 0), window=frame, anchor="nw")
+    frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+    def wheel(event):
+        if isinstance(event.widget, (tk.Listbox, tk.Text)):
+            return  # lists and texts scroll themselves
+        if canvas.yview() == (0.0, 1.0):
+            return  # everything is visible
+        steps = int(-event.delta / 120) if event.delta else (-1 if event.num == 4 else 1)
+        canvas.yview_scroll(steps, "units")
+
+    def enter(_event):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind_all(seq, wheel)
+
+    def leave(_event):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.unbind_all(seq)
+
+    for widget in (canvas, frame):
+        widget.bind("<Enter>", enter, add="+")
+        widget.bind("<Leave>", leave, add="+")
+    return frame, canvas
+
+
 def _fmt(seconds: float) -> str:
     seconds = max(0.0, float(seconds))
     return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
@@ -223,8 +258,7 @@ class TransitionFxPanel(ttk.Frame):
 
         right = ttk.LabelFrame(panes, text="Settings")
         panes.add(right, weight=2)
-        self.settings = ttk.Frame(right)
-        self.settings.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.settings, self._settings_canvas = _scrollable(right)
 
     def status(self, text):
         if self.winfo_exists():
@@ -406,6 +440,7 @@ class TransitionFxPanel(ttk.Frame):
     def show_settings(self):
         for child in self.settings.winfo_children():
             child.destroy()
+        self._settings_canvas.yview_moveto(0.0)
         if self.pair_index is None or self.fx_index is None:
             ttk.Label(self.settings, text="Select a transition, then add or select an effect.", foreground=MUTED).pack(anchor="w")
             return

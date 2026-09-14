@@ -583,8 +583,12 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
     top.text(j, 1.22, "junction", ha="center", va="bottom", fontsize=8, color=TEXT)
     if a_end > j + span * 0.06:
         top.text(a_end, 1.22, "A ends", ha="center", va="bottom", fontsize=8, color=TEXT2)
-    if abs(layout["planned_junction"] - j) > 1e-3:
-        top.text(layout["planned_junction"], 1.22, "  planned", ha="left", va="bottom", fontsize=8, color=TEXT2)
+    planned = layout["planned_junction"]
+    if abs(planned - j) > 1e-3:
+        near_a_end = a_end > j + span * 0.06 and abs(planned - a_end) < span * 0.12
+        # written on the side away from the "A ends" label when the two lines are close
+        top.text(planned, 1.22, "planned  " if near_a_end and planned < a_end else "  planned",
+                 ha="right" if near_a_end and planned < a_end else "left", va="bottom", fontsize=8, color=TEXT2)
     bars = [(tb, k) for tb, k in layout["beat_times"] if k % 4 == 0 and x0 <= tb <= x1]
     axes[-1].set_xticks([tb for tb, _ in bars])
     axes[-1].set_xticklabels(["J" if k == 0 else f"{k:+d}" for _, k in bars])
