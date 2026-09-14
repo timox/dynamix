@@ -503,7 +503,8 @@ def band_dynamics(report: Dict) -> Figure:
 # ------------------------------------------------------------------ transition detail (FX tab)
 VIOLET = "#7d5bc6"
 VIOLET_LIGHT = "#bca9e8"
-_BLOCK_COLORS = {"source": BLUE_LIGHT, "repeat": BLUE, "tail": GRID, "sweep": BLUE, "hold": BLUE_LIGHT,
+_BLOCK_COLORS = {"scratch_down": BLUE, "scratch_up": BLUE_DARK, "catchup": BLUE_LIGHT,
+                 "source": BLUE_LIGHT, "repeat": BLUE, "tail": GRID, "sweep": BLUE, "hold": BLUE_LIGHT,
                  "release": BLUE_LIGHT, "wet": BLUE, "sample": BLUE}
 
 

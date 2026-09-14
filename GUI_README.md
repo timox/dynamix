@@ -78,7 +78,11 @@ python gui.py
   the file name and the sample is fitted to the track's tempo by *varispeed*
   or *stretch*, or played as it is with *off*; **Repeats** plays a short
   sample several times back to back, up to 64 s —, anchored to end at, start at
-  or centre on the junction; it
+  or centre on the junction; **Scratch**: a sequence of playback-speed
+  slopes such as `d81b0 u42b1` (d = reach a speed 8 times slower in 1 s,
+  u = faster, b1 = backwards), confined to 2 to 16 beats: the rest of the
+  effect catches up at a constant speed so the track lands where it would be
+  (the settings show the catch-up speed and warn when it gets extreme); it
   may run over into the next track). **▶ Preview (loop)** plays the transition
   in a loop and re-renders it when a setting changes; **Nudge (ms)** shifts the
   junction by ear. **Apply all FX** writes copies into `fx/` (the library and

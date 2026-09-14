@@ -285,6 +285,17 @@ def scenario():
               "orphan FX can be removed")
         check(not win.orphan_row.winfo_manager() and not win._orphan_tree.get_children(), "the line and the list are updated")
         orphans.destroy()
+        win.add_effect("scratch")
+        check(win.effects()[-1]["type"] == "scratch" and "sequence" in win._form_vars, "a scratch effect can be added")
+        win._form_vars["sequence"].set("d81b0 u42b1")
+        check(win.effects()[-1]["sequence"] == "d81b0 u42b1" and "catch-up ×" in win.scratch_info.cget("text"),
+              f"the scratch settings show the catch-up, got {win.scratch_info.cget('text')!r}")
+        check("Scratch d81b0 u42b1" in win.fx_tree.item(f"F{len(win.effects()) - 1}", "values")[1],
+              "the FX stack summarises the scratch")
+        win._form_vars["sequence"].set("zz")
+        check("Sequence error" in win.scratch_info.cget("text"), "an unreadable sequence is reported in the settings")
+        win.remove_effect()
+        check(all(fx["type"] != "scratch" for fx in win.effects()), "the scratch effect can be removed")
         check(app.set_notebook.select() == str(app.fx_tab), "Transition FX opens the FX tab")
         win.start_preview()
         stops_before = player.stops

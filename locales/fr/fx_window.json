@@ -115,5 +115,15 @@
   "Preview failed: {error}": "Échec de la pré-écoute : {error}",
   "Cannot play the preview: {error}": "Impossible de lire la pré-écoute : {error}",
   "Cannot play the preview from {time}: {error}": "Impossible de lire la pré-écoute depuis {time} : {error}",
-  "FX render failed: {error}": "Échec du rendu des FX : {error}"
+  "FX render failed: {error}": "Échec du rendu des FX : {error}",
+  "Scratch": "Scratch",
+  "Sequence": "Séquence",
+  "Ramp": "Pente",
+  "Steps: d<factor><seconds> slows down, u<factor><seconds> speeds up, b1 = backwards (b0 forwards). Example: d81b0 u42b1; with a two-digit factor or decimals: d16 0.5 b1. The rest of the effect catches up so that the track ends where it would be.": "Pas : d<facteur><secondes> ralentit, u<facteur><secondes> accélère, b1 = en arrière (b0 en avant). Exemple : d81b0 u42b1 ; avec un facteur à deux chiffres ou des décimales : d16 0.5 b1. La fin de l'effet rattrape pour que le morceau retombe là où il serait.",
+  "Sequence error: {error}": "Erreur dans la séquence : {error}",
+  "{steps} step(s): {seconds:.2f} s of the {length:.2f} s effect ({beats} beats)": "{steps} pas : {seconds:.2f} s sur les {length:.2f} s de l'effet ({beats} temps)",
+  "no time left to catch up": "plus de temps pour rattraper",
+  "catch-up ×{speed:.2f} during {seconds:.2f} s, then the track is back in place": "rattrapage ×{speed:.2f} pendant {seconds:.2f} s, puis le morceau est de nouveau calé",
+  "Scratch {sequence} · {beats} beats ({side})": "Scratch {sequence} · {beats} temps ({side})",
+  "Cannot preview yet: {problem}": "Pré-écoute impossible pour l'instant : {problem}"
 }

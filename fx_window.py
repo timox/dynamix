@@ -34,7 +34,7 @@ MUTED = "#52514e"
 PLAN_CHANGED = "The transitions or the set list changed: plan the transitions again (step 3)"
 NO_SAMPLE_FILE = "Choose a file for the Sample effect: click a sample in the list"
 
-FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample"}
+FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample", "scratch": "Scratch"}
 
 # (key, label, kind, choices or (min, max))
 FIELDS = {
@@ -64,6 +64,12 @@ FIELDS = {
                ("tempo", "Tempo", "choice", ("varispeed", "stretch", "off")),
                ("sample_bpm", "Sample BPM", "float", (40, 250))],
 }
+FIELDS["scratch"] = [("sequence", "Sequence", "text", None),
+                     ("length_beats", "Length (beats)", "choice", (2, 4, 8, 16)),
+                     ("start_offset_beats", "Start (beats)", "int", (-32, 16)),
+                     ("side", "Side", "choice", ("outgoing", "incoming")),
+                     ("ramp", "Ramp", "choice", ("exponential", "linear")),
+                     ("gain_db", "Gain (dB)", "float", (-24, 6))]
 LOOP_FILTER_FIELDS = [f for f in FIELDS["filter"] if f[0] not in ("side", "beats")]
 LOOP_ECHO_FIELDS = [f for f in FIELDS["echo"] if f[0] != "start_offset_beats"]
 
@@ -115,6 +121,9 @@ def effect_summary(fx: dict) -> str:
         return tr("Sample {name}{repeats} ({anchor}, tempo {tempo})", name=name,
                   repeats=f" ×{repeats}" if repeats > 1 else "", anchor=fx.get("anchor"),
                   tempo=fx.get("tempo", "varispeed"))
+    if t == "scratch":
+        return tr("Scratch {sequence} · {beats} beats ({side})", sequence=fx.get("sequence") or "",
+                  beats=fx.get("length_beats", 8), side=fx.get("side", "outgoing"))
     return str(t)
 
 
@@ -580,6 +589,7 @@ class TransitionFxPanel(ttk.Frame):
         self._store(effects, rebuild_settings)
         if not rebuild_settings:
             self._refresh_sample_label()
+            self._refresh_scratch_info()
 
     # ------------------------------------------------------------------ settings panel
     def show_settings(self):
@@ -598,6 +608,46 @@ class TransitionFxPanel(ttk.Frame):
             self._freeze_extras(fx)
         if fx["type"] == "sample":
             self._sample_extras(fx)
+        if fx["type"] == "scratch":
+            self._scratch_extras(fx)
+
+    def _scratch_extras(self, fx):
+        box = ttk.LabelFrame(self.settings, text=tr("Sequence"))
+        box.pack(fill=tk.X, pady=6)
+        ttk.Label(box, text=tr("Steps: d<factor><seconds> slows down, u<factor><seconds> speeds up, b1 = backwards "
+                               "(b0 forwards). Example: d81b0 u42b1; with a two-digit factor or decimals: d16 0.5 b1. "
+                               "The rest of the effect catches up so that the track ends where it would be."),
+                  foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
+        self.scratch_info = ttk.Label(box, text="", justify=tk.LEFT, wraplength=380)
+        self.scratch_info.pack(anchor="w", padx=4, pady=(2, 4))
+        self._refresh_scratch_info()
+
+    def _refresh_scratch_info(self):
+        """What the sequence does over the effect: its length, the catch-up speed, the warnings."""
+        label = getattr(self, "scratch_info", None)
+        if label is None or not label.winfo_exists() or self.fx_index is None or self.pair_index is None:
+            return
+        effects = self.effects()
+        if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "scratch":
+            return
+        fx = dict(tfx.new_effect("scratch"), **effects[self.fx_index])
+        profile = self.profiles[self.pair_index if fx.get("side") == "outgoing" else self.pair_index + 1]
+        period = 60.0 / float(profile.get("bpm") or tfx.DEFAULT_BPM)
+        length = int(fx["length_beats"]) * period
+        try:
+            plan = tfx.scratch_plan(fx["sequence"], length, 200, fx.get("ramp", "exponential"))
+        except ValueError as exc:
+            label.config(text=tr("Sequence error: {error}", error=tr_text(str(exc))), foreground=charts.STATUS_CRITICAL)
+            return
+        lines = [tr("{steps} step(s): {seconds:.2f} s of the {length:.2f} s effect ({beats} beats)", steps=len(plan["steps"]),
+                    seconds=plan["sequence_end"], length=length, beats=fx["length_beats"])]
+        if plan["catch_up_speed"] is None:
+            lines.append(tr("no time left to catch up"))
+        else:
+            lines.append(tr("catch-up ×{speed:.2f} during {seconds:.2f} s, then the track is back in place",
+                            speed=plan["catch_up_speed"], seconds=length - plan["sequence_end"]))
+        lines.extend("⚠ " + tr_text(w) for w in plan["warnings"])
+        label.config(text="\n".join(lines), foreground=charts.STATUS_CRITICAL if plan["warnings"] else "")
 
     def _fields(self, parent, fields, values, on_change):
         """Build one row per field; returns {key: StringVar} so a field can be updated without a rebuild."""
@@ -608,6 +658,8 @@ class TransitionFxPanel(ttk.Frame):
             var = tk.StringVar(value="" if value is None else (f"{value:g}" if isinstance(value, float) else str(value)))
             if kind == "choice":
                 widget = ttk.Combobox(parent, textvariable=var, values=[str(c) for c in spec], width=18, state="readonly")
+            elif kind == "text":
+                widget = ttk.Entry(parent, textvariable=var, width=30)
             else:
                 lo, hi = spec
                 step = 1 if kind == "int" else (0.05 if hi <= 1 else (0.1 if hi <= 20 else (1 if hi <= 300 else 10)))
@@ -620,7 +672,9 @@ class TransitionFxPanel(ttk.Frame):
     @staticmethod
     def _field_changed(key, var, kind, spec, on_change):
         text = var.get()
-        if kind == "choice":
+        if kind == "text":
+            value = text  # stored as typed: an unreadable sequence is reported, never lost
+        elif kind == "choice":
             value = next((c for c in spec if str(c) == text), None)
             if value is None:
                 return
@@ -858,6 +912,10 @@ class TransitionFxPanel(ttk.Frame):
             return
         if self._sample_missing(self.entry()):
             self.status(tr(NO_SAMPLE_FILE))
+            return
+        problems = [p for fx in self.entry().get("effects") or [] if fx.get("enabled", True) for p in tfx.validate_effect(fx)]
+        if problems:  # e.g. a scratch sequence being typed: say it, no error dialog at every key
+            self.status(tr("Cannot preview yet: {problem}", problem=tr_text(problems[0])))
             return
         self._preview_seq += 1
         seq = self._preview_seq

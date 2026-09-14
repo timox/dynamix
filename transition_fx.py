@@ -25,7 +25,7 @@ from scipy import signal
 
 from i18n import N_
 
-FX_TYPES = ("freeze", "filter", "echo", "sample")
+FX_TYPES = ("freeze", "filter", "echo", "sample", "scratch")
 BLOCK = 256
 EDGE_FADE_S = 0.005
 MAX_FREEZE_BEATS = 64
@@ -113,6 +113,7 @@ _RANGES = {
              "damping_hz": (1000, 20000)},
     "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000),
                "sample_bpm": (40, 250), "repeats": (1, 16)},
+    "scratch": {"start_offset_beats": (-32, 16), "gain_db": (-24, 6)},
 }
 _CHOICES = {
     "filter": {"side": ("outgoing", "incoming"), "kind": ("highpass", "lowpass", "bandpass"),
@@ -120,6 +121,7 @@ _CHOICES = {
     "echo": {"delay_beats": (0.25, 0.5, 0.75, 1)},
     "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction"),
                "tempo": ("varispeed", "stretch", "off")},
+    "scratch": {"length_beats": (2, 4, 8, 16), "side": ("outgoing", "incoming"), "ramp": ("exponential", "linear")},
 }
 DEFAULTS = {
     "freeze": {"enabled": True, "capture_offset_beats": 0, "steps": [{"beats": 1, "repeats": 4}], "loop_filter": None,
@@ -130,6 +132,8 @@ DEFAULTS = {
              "damping_hz": 6000.0},
     "sample": {"enabled": True, "file": "", "anchor": "end_at_junction", "offset_beats": 0.0, "gain_db": -3.0,
                "fade_in_ms": 5, "fade_out_ms": 5, "tempo": "varispeed", "sample_bpm": None, "repeats": 1},
+    "scratch": {"enabled": True, "sequence": "d81b0 u81b0", "length_beats": 8, "start_offset_beats": -8,
+                "side": "outgoing", "ramp": "exponential", "gain_db": 0.0},
 }
 
 
@@ -176,6 +180,11 @@ def validate_effect(fx: Dict) -> List[str]:
             errors += _check_ranges("filter", dict(fx["loop_filter"], side="outgoing"), "loop ")
         if fx.get("loop_echo"):
             errors += _check_ranges("echo", dict(fx["loop_echo"], start_offset_beats=0), "loop ")
+    if fx_type == "scratch":
+        try:
+            parse_scratch(fx.get("sequence") or "")
+        except ValueError as exc:
+            errors.append(f"scratch: {exc}")
     if fx_type == "sample":
         import os
         if not fx.get("file") or not os.path.isfile(fx["file"]):
@@ -545,7 +554,147 @@ def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
     _add_layer(ctx, data, start_t)
 
 
-_APPLY = {"freeze": _apply_freeze, "filter": _apply_filter, "echo": _apply_echo, "sample": _apply_sample}
+# ------------------------------------------------------------------ scratch
+SCRATCH_MAX_FACTOR = 32.0
+SCRATCH_MAX_SECONDS = 30.0
+SCRATCH_EXTREME_SPEED = 2.0
+# "d8 1 b0", "d16/0.5b1": factor and seconds separated; "d81b0": one-digit factor, then the seconds
+_SCRATCH_SPACED = re.compile(r"([du])\s*(\d+(?:[.,]\d+)?)\s*(?:[/:]|\s)\s*(\d+(?:[.,]\d+)?)(?:\s*b\s*([01]))?", re.IGNORECASE)
+_SCRATCH_COMPACT = re.compile(r"([du])(\d)(\d+(?:[.,]\d+)?)(?:\s*b\s*([01]))?", re.IGNORECASE)
+_SCRATCH_GAP = re.compile(r"[\s,;]*")
+
+
+def parse_scratch(sequence: str) -> List[Dict]:
+    """
+    A scratch sequence, e.g. "d81b0 u42b1": each step changes the playback speed along a slope — d<factor><seconds>
+    reaches a speed <factor> times slower in <seconds>, u<factor><seconds> a speed <factor> times faster — and b1
+    plays it backwards (b0, the default, forwards). "d1 2" keeps the speed for 2 s. Returns
+    [{'kind': 'd'|'u', 'factor', 'seconds', 'backward', 'text'}]; raises ValueError on an unreadable step.
+    """
+    text = sequence or ""
+    steps, position = [], 0
+    while True:
+        position = _SCRATCH_GAP.match(text, position).end()
+        if position >= len(text):
+            break
+        match = _SCRATCH_SPACED.match(text, position) or _SCRATCH_COMPACT.match(text, position)
+        if not match:
+            raise ValueError(N_("cannot read the step at '{text}'").format(text=text[position:position + 12].strip()))
+        step = match.group(0).strip()
+        factor = float(match.group(2).replace(",", "."))
+        seconds = float(match.group(3).replace(",", "."))
+        if not 1.0 <= factor <= SCRATCH_MAX_FACTOR:
+            raise ValueError(N_("step '{step}': the factor must be between 1 and 32").format(step=step))
+        if not 0.01 <= seconds <= SCRATCH_MAX_SECONDS:
+            raise ValueError(N_("step '{step}': the duration must be between 0.01 and 30 s").format(step=step))
+        steps.append({"kind": match.group(1).lower(), "factor": factor, "seconds": seconds,
+                      "backward": match.group(4) == "1", "text": step})
+        position = match.end()
+    if not steps:
+        raise ValueError(N_("the sequence is empty"))
+    return steps
+
+
+def scratch_plan(sequence: str, length_s: float, sr: int, ramp: str = "exponential") -> Dict:
+    """
+    The playback speed of a scratch lasting length_s seconds, one value per sample: the steps of the sequence, then a
+    constant catch-up speed so that the read position ends exactly length_s seconds further — where the track would
+    be without the effect. Returns {'speed', 'steps' (with 'start'/'end' seconds), 'sequence_end' (s),
+    'advance' (seconds of audio read by the sequence), 'catch_up_speed' (None when no time is left), 'warnings'}.
+    """
+    steps = parse_scratch(sequence)
+    n = max(1, int(round(length_s * sr)))
+    speed = np.ones(n, dtype=np.float64)
+    magnitude, i, placed, warnings = 1.0, 0, [], []
+    for step in steps:
+        full = max(1, int(round(step["seconds"] * sr)))
+        if i >= n or i + full > n:
+            warnings.append(N_("the sequence is longer than the effect: it is cut at '{step}'").format(step=step["text"]))
+        count = min(full, n - i)
+        if count <= 0:
+            break
+        target = magnitude / step["factor"] if step["kind"] == "d" else magnitude * step["factor"]
+        fraction = np.arange(1, count + 1) / full
+        if ramp == "linear":
+            values = magnitude + (target - magnitude) * fraction
+        else:
+            values = magnitude * (target / magnitude) ** fraction
+        speed[i:i + count] = -values if step["backward"] else values
+        placed.append(dict(step, start=i / sr, end=(i + count) / sr))
+        magnitude = float(values[-1])
+        i += count
+        if count < full:
+            break
+    read = float(np.sum(speed[:i]))
+    rest = n - i
+    catch_up = None
+    if rest > 0:
+        catch_up = (n - read) / rest  # exact in samples: the effect ends where the track would be
+        speed[i:] = catch_up
+        if catch_up < 0:
+            warnings.append(N_("the catch-up has to play backwards (x{speed:.2f}): shorten the sequence or the backward steps").format(speed=catch_up))
+        elif catch_up > SCRATCH_EXTREME_SPEED:
+            warnings.append(N_("extreme catch-up at x{speed:.2f}: shorten the sequence or lengthen the effect").format(speed=catch_up))
+    elif abs(n - read) > 1:
+        warnings.append(N_("no time left to catch up: the sequence ends {seconds:+.2f} s away from the track").format(
+            seconds=(read - n) / sr))
+    return {"speed": speed, "steps": placed, "sequence_end": i / sr, "advance": read / sr, "catch_up_speed": catch_up,
+            "warnings": warnings}
+
+
+def render_scratch(audio: np.ndarray, sr: int, start_i: int, speed: np.ndarray) -> np.ndarray:
+    """The audio read from start_i at the given per-sample speed (linear interpolation), silent dips where it turns."""
+    positions = start_i + np.concatenate([[0.0], np.cumsum(speed[:-1])])
+    positions = np.clip(positions, 0.0, len(audio) - 1.0)
+    base = np.floor(positions).astype(np.int64)
+    nxt = np.minimum(base + 1, len(audio) - 1)
+    frac = (positions - base)[:, None].astype(np.float32)
+    out = audio[base] * (1.0 - frac) + audio[nxt] * frac
+    turns = np.nonzero(np.diff(np.sign(speed)) != 0)[0] + 1
+    half = max(1, int(round(EDGE_FADE_S * sr)))
+    if len(turns):
+        envelope = np.ones(len(speed), dtype=np.float32)
+        dip = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, half, dtype=np.float32))  # 0 -> 1
+        for turn in turns:
+            lo, hi = max(0, turn - half), min(len(speed), turn + half)
+            envelope[lo:turn] = np.minimum(envelope[lo:turn], dip[::-1][half - (turn - lo):])
+            envelope[turn:hi] = np.minimum(envelope[turn:hi], dip[:hi - turn])
+        out = out * envelope[:, None]
+    return out.astype(np.float32)
+
+
+def _scratch_span(ctx: TransitionContext, fx: Dict) -> Tuple[float, float]:
+    """(start, end) of a scratch in seconds of its own track."""
+    beats = int(fx.get("length_beats", 8))
+    offset = float(fx.get("start_offset_beats", -beats))
+    if fx.get("side", "outgoing") == "outgoing":
+        return ctx.a_beat(offset), ctx.a_beat(offset + beats)
+    return ctx.b_beat(offset), ctx.b_beat(offset + beats)
+
+
+def _apply_scratch(ctx: TransitionContext, fx: Dict) -> None:
+    outgoing = fx.get("side", "outgoing") == "outgoing"
+    audio, sr = (ctx.a, ctx.a_sr) if outgoing else (ctx.b, ctx.b_sr)
+    start_t, end_t = _scratch_span(ctx, fx)
+    start_i = ctx.a_index(start_t) if outgoing else ctx.b_index(start_t)
+    if end_t <= start_t or start_i < 0 or start_i >= len(audio) - 1:
+        ctx.warnings.append(N_("scratch: its beats are outside the audio of the transition"))
+        return
+    plan = scratch_plan(fx.get("sequence") or "", end_t - start_t, sr, fx.get("ramp", "exponential"))
+    ctx.warnings.extend(plan["warnings"])
+    n = min(len(plan["speed"]), len(audio) - start_i)
+    region = render_scratch(audio, sr, start_i, plan["speed"][:n]) * _db(float(fx.get("gain_db", 0.0)))
+    original = audio[start_i:start_i + n]
+    edge = min(int(round(EDGE_FADE_S * sr)), n // 2)
+    if edge > 0:  # crossfades with the untouched track on both sides
+        ramp_in = np.linspace(0.0, 1.0, edge, dtype=np.float32)[:, None]
+        region[:edge] = original[:edge] * (1.0 - ramp_in) + region[:edge] * ramp_in
+        region[n - edge:] = region[n - edge:] * (1.0 - ramp_in) + original[n - edge:] * ramp_in
+    audio[start_i:start_i + n] = region
+
+
+_APPLY = {"freeze": _apply_freeze, "filter": _apply_filter, "echo": _apply_echo, "sample": _apply_sample,
+          "scratch": _apply_scratch}
 
 
 def apply_effects(ctx: TransitionContext, effects: Sequence[Dict]) -> TransitionContext:
@@ -735,6 +884,28 @@ def _layout_sample(ctx: TransitionContext, fx: Dict, warnings: List[str], sample
     return lane
 
 
+def _layout_scratch(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dict:
+    lane = {"type": "scratch", "label": "Scratch", "blocks": []}
+    start, end = _scratch_span(ctx, fx)
+    if fx.get("side", "outgoing") != "outgoing":
+        shift = ctx.junction_a - ctx.junction_b
+        start, end = start + shift, end + shift
+    try:
+        plan = scratch_plan(fx.get("sequence") or "", end - start, 200, fx.get("ramp", "exponential"))
+    except ValueError as exc:
+        lane["note"] = str(exc)
+        return lane
+    warnings.extend(plan["warnings"])
+    for step in plan["steps"]:
+        lane["blocks"].append({"start": start + step["start"], "end": start + step["end"],
+                               "kind": "scratch_down" if step["kind"] == "d" else "scratch_up", "label": step["text"]})
+    if plan["catch_up_speed"] is not None:
+        lane["blocks"].append({"start": start + plan["sequence_end"], "end": end, "kind": "catchup",
+                               "label": f"×{plan['catch_up_speed']:.2f}"})
+    lane["catch_up_speed"] = plan["catch_up_speed"]
+    return lane
+
+
 def transition_layout(a_beats: Sequence[float], b_beats: Sequence[float], a_outro_start: float, a_outro_end: float,
                       b_intro_start: float, effects: Sequence[Dict], nudge_ms: float = 0.0,
                       sample_seconds: Optional[Callable[[str], Optional[float]]] = None, length: str = "short") -> Dict:
@@ -762,7 +933,8 @@ def transition_layout(a_beats: Sequence[float], b_beats: Sequence[float], a_outr
         if fx["type"] == "sample":
             lanes[i] = _layout_sample(ctx, fx, warnings, sample_seconds)
         else:
-            lanes[i] = {"freeze": _layout_freeze, "filter": _layout_filter, "echo": _layout_echo}[fx["type"]](ctx, fx, warnings)
+            lanes[i] = {"freeze": _layout_freeze, "filter": _layout_filter, "echo": _layout_echo,
+                        "scratch": _layout_scratch}[fx["type"]](ctx, fx, warnings)
     period = ctx.a_period
     if length == "long":
         view = (ctx.junction_a - 20.0, max(ctx.junction_a + 10.0, ctx.a_end + 2.0))
