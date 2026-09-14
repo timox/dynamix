@@ -122,6 +122,7 @@ class TransitionFxWindow(tk.Toplevel):
         self._previewing = False
         self._preview_job = None
         self._preview_seq = 0
+        self._applying = False
         self.title(f"Transition FX - {self.project.name}")
         self.geometry("1250x700")
         self._build()
@@ -140,7 +141,8 @@ class TransitionFxWindow(tk.Toplevel):
         length = ttk.Combobox(bar, textvariable=self.length_var, values=("short", "long"), width=7, state="readonly")
         length.pack(side=tk.LEFT)
         length.bind("<<ComboboxSelected>>", lambda e: self.schedule_preview())
-        ttk.Button(bar, text="Apply all FX", command=self.apply_all).pack(side=tk.LEFT, padx=12)
+        self.apply_button = ttk.Button(bar, text="Apply all FX", command=self.apply_all)
+        self.apply_button.pack(side=tk.LEFT, padx=12)
         self.status_label = ttk.Label(bar, text="", foreground=MUTED)
         self.status_label.pack(side=tk.LEFT, padx=8)
 
@@ -408,6 +410,19 @@ class TransitionFxWindow(tk.Toplevel):
                 value = int(round(value))
         on_change(key, value)
 
+    def freeze_steps(self):
+        """The steps saved on the selected freeze (read at click time, never from the built panel)."""
+        return [dict(s) for s in self.effects()[self.fx_index].get("steps") or []]
+
+    def add_freeze_step(self):
+        self.update_effect({"steps": self.freeze_steps() + [{"beats": 1, "repeats": 2}]}, rebuild_settings=True)
+
+    def remove_freeze_step(self, index):
+        steps = self.freeze_steps()
+        if len(steps) > 1 and 0 <= index < len(steps):
+            steps.pop(index)
+            self.update_effect({"steps": steps}, rebuild_settings=True)
+
     def _freeze_extras(self, fx):
         steps_box = ttk.LabelFrame(self.settings, text="Steps (a roll shortens the loop)")
         steps_box.pack(fill=tk.X, pady=4)
@@ -439,8 +454,8 @@ class TransitionFxWindow(tk.Toplevel):
             beats_var.trace_add("write", changed)
             rep_var.trace_add("write", changed)
             ttk.Button(row, text="−", width=2,
-                       command=lambda i=i: set_steps([s for k, s in enumerate(steps) if k != i] or steps)).pack(side=tk.LEFT, padx=4)
-        ttk.Button(steps_box, text="+ step", command=lambda: set_steps(steps + [{"beats": 1, "repeats": 2}])).pack(anchor="w", padx=4, pady=2)
+                       command=lambda i=i: self.remove_freeze_step(i)).pack(side=tk.LEFT, padx=4)
+        ttk.Button(steps_box, text="+ step", command=self.add_freeze_step).pack(anchor="w", padx=4, pady=2)
 
         for key, label, fields, defaults in (
                 ("loop_filter", "Loop filter", LOOP_FILTER_FIELDS,
@@ -532,7 +547,7 @@ class TransitionFxWindow(tk.Toplevel):
         try:
             data, sr = sf.read(path, dtype="float32", always_2d=True)
             out = os.path.join(self._tmp_dir(), "sample_preview.wav")
-            self.player.stop()
+            self.stop_preview()
             sf.write(out, data, sr, subtype="PCM_16")
             self.player.play_once(out)
         except Exception as e:
@@ -586,7 +601,12 @@ class TransitionFxWindow(tk.Toplevel):
             def done():
                 if seq != self._preview_seq or not self._previewing or not self.winfo_exists():
                     return
-                looping = self.player.play_loop(path)
+                try:
+                    looping = self.player.play_loop(path)
+                except Exception as e:
+                    self.app._report_error(f"Cannot play the preview: {e}", e)
+                    self.status("Preview playback failed (see the Log)")
+                    return
                 for w in warnings:
                     log.warning("Preview: %s", w)
                 self.status(("Looping the preview" if looping else "Preview opened in the default player")
@@ -609,11 +629,15 @@ class TransitionFxWindow(tk.Toplevel):
 
     # ------------------------------------------------------------------ render
     def apply_all(self):
+        if self._applying:
+            return
         pairs = self.project.active_fx_pairs()
         if not pairs:
             messagebox.showinfo("Transition FX", "No active FX on the transitions of the set list", parent=self)
             return
         self.stop_preview()
+        self._applying = True
+        self.apply_button.state(["disabled"])
         app, project = self.app, self.project
         profiles = list(self.profiles)
         lookup = {project.fx_key(a, b): copy.deepcopy(project.fx_for_pair(a, b)) for a, b in pairs}
@@ -629,9 +653,18 @@ class TransitionFxWindow(tk.Toplevel):
                     progress=lambda i, n, name: app.root.after(0, app.update_status, f"Rendering FX {i}/{n}: {name}"))
             except Exception as e:
                 app._report_error(f"FX render failed: {e}", e)
+                app.root.after(0, self._apply_finished, "FX render failed (see the Log)")
                 return
 
             def done():
+                self._apply_finished(None)
+                current = {project.fx_key(a, b): copy.deepcopy(project.fx_for_pair(a, b)) for a, b in project.active_fx_pairs()}
+                if current != lookup or project.premaster_map() != bases:
+                    log.warning("FX render discarded: the FX settings or the pre-master changed during the render; "
+                                "click 'Apply all FX' again")
+                    if self.winfo_exists():
+                        self.status("Settings changed during the render: click 'Apply all FX' again")
+                    return
                 project.set_fx_render(results)
                 project.mark("fx", count=len(results))
                 for problem in problems:
@@ -650,3 +683,10 @@ class TransitionFxWindow(tk.Toplevel):
                     self.status(message)
             app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
+
+    def _apply_finished(self, message):
+        self._applying = False
+        if self.winfo_exists():
+            self.apply_button.state(["!disabled"])
+            if message:
+                self.status(message)

@@ -201,20 +201,29 @@ def scenario():
         win.fx_tree.selection_set("F0")
         check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)
+        win.update_effect({"steps": [{"beats": 4, "repeats": 1}]})  # an edit saved without rebuilding the panel
+        win.add_freeze_step()
+        check(win.effects()[0]["steps"] == [{"beats": 4, "repeats": 1}, {"beats": 1, "repeats": 2}], "+ step keeps the edited steps")
+        win.remove_freeze_step(1)
+        check(win.effects()[0]["steps"] == [{"beats": 4, "repeats": 1}], "- removes the chosen step")
+        win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)
         win.start_preview()
         check(pump(lambda: player.loops and os.path.exists(player.loops[-1]), 20.0), "the preview is rendered and looped")
         win.nudge_var.set("10")
         check(app.project.fx_for_pair(*fx_tracks)["nudge_ms"] == 10.0, "the nudge is stored")
         check(pump(lambda: len(player.loops) >= 2, 20.0), "a change re-renders the looped preview")
         win.apply_all()
+        check(win._applying, "Apply all FX is running")
+        win.apply_all()  # a second click while rendering is ignored
         check(pump(lambda: app.project.data["fx"]["render"] is not None, 30.0), "Apply all FX renders the copies")
         check(app.project.is_done("fx"), "the FX step is marked done")
         _, counts = app.project.rendered_profiles(app.transition_planner.profiles)
         check(counts["fx"] == 2, f"the export uses the two FX copies, got {counts}")
         check(app._fx_labels() == {0: "freeze · sample"}, "the set map labels the transition FX")
         check(open(fx_tracks[0], "rb").read() == original, "the original file is untouched")
+        stops_before = player.stops
         win.close()
-        check(player.stops >= 1, "closing the window stops the preview")
+        check(player.stops > stops_before, "closing the window stops the preview")
 
         # --- checks added by later tasks go above this line ---
 
