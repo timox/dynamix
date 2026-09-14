@@ -477,3 +477,118 @@ def band_dynamics(report: Dict) -> Figure:
         wrapped = "\n".join("\n  ".join(textwrap.wrap(l, 78)) for l in lines[:6])
         ax3.text(0.0, -0.30, wrapped, transform=ax3.transAxes, fontsize=8, color=TEXT2, va="top", ha="left")
     return _finish(fig)
+
+
+# ------------------------------------------------------------------ transition detail (FX tab)
+VIOLET = "#7d5bc6"
+VIOLET_LIGHT = "#bca9e8"
+_BLOCK_COLORS = {"source": BLUE_LIGHT, "repeat": BLUE, "tail": GRID, "sweep": BLUE, "hold": BLUE_LIGHT,
+                 "release": BLUE_LIGHT, "wet": BLUE, "sample": BLUE}
+
+
+def _waveform(ax, env: Optional[Dict], shift: float, x0: float, x1: float, color: str,
+              gain=None, faint: Optional[str] = None) -> bool:
+    """Peak waveform scaled to the view; with `gain` (t -> 0..1) the heard part is drawn over a faint full one."""
+    if not env or not len(env.get("peak", [])):
+        return False
+    peak = np.asarray(env["peak"], dtype=float)
+    t = env["t0"] + shift + np.arange(len(peak)) * env["dt"]
+    keep = (t >= x0) & (t <= x1)
+    if not keep.any():
+        return False
+    t, y = t[keep], peak[keep] / max(1e-6, float(peak[keep].max()))
+    if gain is not None:
+        if faint:
+            ax.fill_between(t, -y, y, color=faint, linewidth=0)
+        y = y * gain(t)
+    ax.fill_between(t, -y, y, color=color, linewidth=0)
+    return True
+
+
+def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optional[Dict] = None,
+                      result_env: Optional[Dict] = None) -> Figure:
+    """
+    One transition on a beat axis: A with its fade-out, B with its fade-in, one lane per effect (freeze repeats,
+    filter sweep, echo and its tail, sample repeats) and the rendered result when there is one.
+    layout: transition_fx.transition_layout; envelopes: transition_fx.peak_envelope (A and result in A seconds,
+    B in B seconds, shifted by layout['b_shift']).
+    """
+    lanes = layout["lanes"]
+    heights = [1.0, 1.0] + [0.42] * len(lanes) + ([1.0] if result_env else [])
+    fig = _figure(9.0, 0.9 + 0.95 * sum(heights))
+    gs = fig.add_gridspec(len(heights), 1, height_ratios=heights)
+    axes = []
+    for i in range(len(heights)):
+        ax = fig.add_subplot(gs[i], sharex=axes[0] if axes else None)
+        _style(ax, grid_axis="")
+        ax.set_yticks([])
+        axes.append(ax)
+    j, a_end, fade = layout["junction"], layout["a_end"], layout["fade_len"]
+    x0, x1 = layout["view"]
+    span = max(1e-6, x1 - x0)
+    def a_gain(tt):
+        g = np.where(tt < j, 1.0, np.cos(np.clip((tt - j) / fade, 0.0, 1.0) * np.pi / 2))
+        return np.where(tt >= a_end, 0.0, g)
+
+    def b_gain(tt):
+        return np.where(tt < j, 0.0, np.sin(np.clip((tt - j) / fade, 0.0, 1.0) * np.pi / 2))
+
+    t = np.linspace(x0, x1, 400)
+    for ax, env, shift, wave_color, faint, line_color, gain, name, note in (
+            (axes[0], a_env, 0.0, BLUE_LIGHT, "#e4eefa", BLUE_DARK, a_gain, "A  (out)", "A fades out"),
+            (axes[1], b_env, layout["b_shift"], VIOLET_LIGHT, "#eee8f8", VIOLET, b_gain, "B  (in)", "B fades in")):
+        if not _waveform(ax, env, shift, x0, x1, wave_color, gain=gain, faint=faint):
+            ax.text(x0 + span * 0.01, 0.0, "waveform loading ...", fontsize=8, color=TEXT2, va="center")
+        ax.plot(t, gain(t), color=line_color, linewidth=1.5)
+        ax.set_ylim(-1.05, 1.2)
+        ax.set_ylabel(name, rotation=0, ha="right", va="center", fontsize=9)
+        ax.text(min(x1 - span * 0.1, j + span * 0.01), 0.85, note, fontsize=8, color=line_color, ha="left", va="center")
+
+    for n_lane, (ax, lane) in enumerate(zip(axes[2:], lanes)):
+        ax.set_ylim(-0.5, 0.5)
+        ax.set_ylabel(lane["label"], rotation=0, ha="right", va="center", fontsize=8)
+        for n, blk in enumerate(lane["blocks"]):
+            kind = blk["kind"]
+            color = BLUE_DARK if kind in ("repeat", "sample") and n % 2 else _BLOCK_COLORS.get(kind, BLUE)
+            width = max(0.0, blk["end"] - blk["start"])
+            ax.barh(0.0, width, left=blk["start"], height=0.7, color=color, linewidth=0,
+                    hatch="///" if kind == "tail" else None, edgecolor=GRAY if kind == "tail" else color)
+            if blk.get("label") and width > span / 30:
+                dark = color in (BLUE, BLUE_DARK)
+                ax.text(max(blk["start"], x0) + min(width, x1 - max(blk["start"], x0)) / 2, 0.0, blk["label"],
+                        fontsize=7, color="white" if dark else TEXT, ha="center", va="center", clip_on=True)
+        if lane.get("note"):
+            ax.text(x0 + span * 0.01, 0.0, lane["note"], fontsize=8, color=TEXT2, va="center")
+
+    if result_env:
+        ax = axes[-1]
+        _waveform(ax, result_env, 0.0, x0, x1, BLUE)
+        ax.set_ylim(-1.05, 1.05)
+        ax.set_ylabel("Result", rotation=0, ha="right", va="center", fontsize=9)
+
+    for ax in axes:
+        for tb, k in layout["beat_times"]:
+            if x0 <= tb <= x1:
+                ax.axvline(tb, color=GRID, linewidth=1.6 if k % 4 == 0 else 0.8, zorder=0)
+        ax.axvline(j, color=TEXT, linewidth=1.3)
+        if a_end > j + 1e-3:
+            ax.axvline(a_end, color=GRAY, linewidth=1.0, linestyle="--")
+        if abs(layout["planned_junction"] - j) > 1e-3:
+            ax.axvline(layout["planned_junction"], color=GRAY, linewidth=1.0, linestyle=":")
+        ax.set_xlim(x0, x1)
+    for ax in axes[:-1]:
+        ax.tick_params(labelbottom=False)
+    top = axes[0]
+    top.text(j, 1.22, "junction", ha="center", va="bottom", fontsize=8, color=TEXT)
+    if a_end > j + span * 0.06:
+        top.text(a_end, 1.22, "A ends", ha="center", va="bottom", fontsize=8, color=TEXT2)
+    if abs(layout["planned_junction"] - j) > 1e-3:
+        top.text(layout["planned_junction"], 1.22, "  planned", ha="left", va="bottom", fontsize=8, color=TEXT2)
+    bars = [(tb, k) for tb, k in layout["beat_times"] if k % 4 == 0 and x0 <= tb <= x1]
+    axes[-1].set_xticks([tb for tb, _ in bars])
+    axes[-1].set_xticklabels(["J" if k == 0 else f"{k:+d}" for _, k in bars])
+    axes[-1].set_xlabel(f"Beats from the junction (1 beat = {layout['period']:.2f} s; thick lines = bars)")
+    warnings = layout.get("warnings") or []
+    top.set_title("Transition" + (f"   ⚠ {warnings[0]}" if warnings else ""), loc="left", fontsize=10,
+                  color=STATUS_CRITICAL if warnings else TEXT, pad=14)
+    return _finish(fig)

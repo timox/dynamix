@@ -203,3 +203,20 @@ def render_preview(profile_a: Dict, profile_b: Dict, entry: Dict, bases: Dict[st
     # same rule as render_set: B's intro lasts at least as long as A's outro
     clip, sr = tfx.preview_mix(ctx, max(cb["intro_end"], ctx.junction_b + (ctx.a_end - ctx.junction_a)), length)
     return clip, sr, [w for w in (wa, wb) if w] + ctx.warnings
+
+
+def transition_beats(profile_a: Dict, profile_b: Dict, grids: Optional[Dict[str, Dict]] = None) -> Tuple[List[float], List[float]]:
+    """The beat grids used for a transition (through the analysis cache; may analyse a track that has none)."""
+    a_beats, _ = _beats_for(profile_a, grids, float(profile_a.get("duration") or 0.0))
+    b_beats, _ = _beats_for(profile_b, grids, float(profile_b.get("duration") or 0.0))
+    return a_beats, b_beats
+
+
+def transition_layout_for(profile_a: Dict, profile_b: Dict, entry: Dict, length: str = "short",
+                          beats: Optional[Tuple[List[float], List[float]]] = None, sample_seconds=None) -> Dict:
+    """tfx.transition_layout for two planned tracks and their FX entry (the drawing of the transition)."""
+    a_beats, b_beats = beats or transition_beats(profile_a, profile_b)
+    ca, cb = _cues(profile_a), _cues(profile_b)
+    return tfx.transition_layout(a_beats, b_beats, ca["outro_start"], ca["outro_end"], cb["intro_start"],
+                                 _active((entry or {}).get("effects")), (entry or {}).get("nudge_ms", 0.0),
+                                 sample_seconds, length)

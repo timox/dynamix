@@ -6,6 +6,7 @@ preview while tweaking, and "Apply all FX" which renders the copies into fx/.
 """
 
 import copy
+import json
 import logging
 import math
 import os
@@ -16,11 +17,14 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import soundfile as sf
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+import charts
 import library
 import transition_fx as tfx
 from analysis_store import dynamix_home
-from fx_render import render_preview, render_set
+from fx_render import render_preview, render_set, transition_beats, transition_layout_for
+from mastering import load_audio
 
 log = logging.getLogger("dynamix.fx")
 MUTED = "#52514e"
@@ -132,6 +136,13 @@ class TransitionFxPanel(ttk.Frame):
         self._preview_job = None
         self._preview_seq = 0
         self._applying = False
+        self._waves = {}            # (A file, B file) -> {"a_env", "b_env", "beats"} for the chart
+        self._waves_loading = set()
+        self._result_env = None     # {"key": what was rendered, "env": peak envelope of the preview clip}
+        self._chart_job = None
+        self._chart_canvas = None
+        self._sample_lengths = {}
+        self.last_layout = None
         self._plan_at_open = self._plan_signature()
         self._build()
         self.refresh_transitions()
@@ -147,14 +158,20 @@ class TransitionFxPanel(ttk.Frame):
         self.length_var = tk.StringVar(value="short")
         length = ttk.Combobox(bar, textvariable=self.length_var, values=("short", "long"), width=7, state="readonly")
         length.pack(side=tk.LEFT)
-        length.bind("<<ComboboxSelected>>", lambda e: self.schedule_preview())
+        length.bind("<<ComboboxSelected>>", lambda e: (self.schedule_preview(), self.schedule_chart()))
         self.apply_button = ttk.Button(bar, text="Apply all FX", command=self.apply_all)
         self.apply_button.pack(side=tk.LEFT, padx=12)
         self.status_label = ttk.Label(bar, text="", foreground=MUTED)
         self.status_label.pack(side=tk.LEFT, padx=8)
 
-        panes = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        panes.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        rows = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        rows.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        self.chart_frame = ttk.Frame(rows, height=340)
+        self.chart_frame.pack_propagate(False)
+        rows.add(self.chart_frame, weight=1)
+        self._chart_message("Select a transition to see it: A and B, the fades and every effect on a beat axis.")
+        panes = ttk.PanedWindow(rows, orient=tk.HORIZONTAL)
+        rows.add(panes, weight=1)
 
         left = ttk.Frame(panes)
         panes.add(left, weight=1)
@@ -280,6 +297,7 @@ class TransitionFxPanel(ttk.Frame):
         self._setting_nudge = False
         self.refresh_fx()
         self.show_settings()
+        self.load_waveforms()
         self.schedule_preview()
 
     def on_nudge(self):
@@ -315,6 +333,7 @@ class TransitionFxPanel(ttk.Frame):
         self.refresh_transitions()
         if hasattr(self.app, "_refresh_workflow"):
             self.app._refresh_workflow()
+        self.schedule_chart()
         self.schedule_preview()
 
     def refresh_fx(self):
@@ -664,22 +683,29 @@ class TransitionFxPanel(ttk.Frame):
         entry = copy.deepcopy(self.entry())
         bases = self.project.premaster_map()
         length = self.length_var.get()
+        result_key = self._result_key(index, entry, length)
+        pa, pb = self.profiles[index], self.profiles[index + 1]
         path = os.path.join(self._tmp_dir(), f"preview_{'a' if seq % 2 else 'b'}.wav")
         self.status("Rendering the preview ...")
 
         def work():
             try:
-                clip, sr, warnings = render_preview(self.profiles[index], self.profiles[index + 1], entry, bases, length)
+                clip, sr, warnings = render_preview(pa, pb, entry, bases, length)
                 if seq != self._preview_seq:
                     return
                 sf.write(path, clip, sr, subtype="PCM_16")
+                result_env = tfx.peak_envelope(clip, sr, t0=transition_layout_for(pa, pb, entry, length)["preview_start"])
             except Exception as e:
                 self.app._report_error(f"Preview failed: {e}", e)
                 self.app.root.after(0, self.status, "Preview failed (see the Log)")
                 return
 
             def done():
-                if seq != self._preview_seq or not self._previewing or not self.winfo_exists():
+                if seq != self._preview_seq or not self.winfo_exists():
+                    return
+                self._result_env = {"key": result_key, "env": result_env}
+                self.schedule_chart()
+                if not self._previewing:
                     return
                 try:
                     looping = self.player.play_loop(path)
@@ -705,7 +731,108 @@ class TransitionFxPanel(ttk.Frame):
 
     def close(self):
         self.stop_preview()
+        if self._chart_job is not None:
+            self.after_cancel(self._chart_job)
+            self._chart_job = None
         self.destroy()
+
+    # ------------------------------------------------------------------ transition chart
+    def _wave_key(self, index=None):
+        a, b = self.pair(index)
+        bases = self.project.premaster_map()
+        return bases.get(a, a), bases.get(b, b)
+
+    @staticmethod
+    def _result_key(index, entry, length):
+        return index, json.dumps(entry, sort_keys=True, default=str), length
+
+    def _sample_seconds(self, path):
+        if path not in self._sample_lengths:
+            try:
+                self._sample_lengths[path] = float(sf.info(path).duration)
+            except Exception:
+                self._sample_lengths[path] = None
+        return self._sample_lengths[path]
+
+    def load_waveforms(self):
+        """Read A and B around the junction in the background (peak envelopes, kept per transition)."""
+        index = self.pair_index
+        key = self._wave_key(index)
+        if key in self._waves or key in self._waves_loading:
+            self.schedule_chart()
+            return
+        self._waves_loading.add(key)
+        pa, pb = self.profiles[index], self.profiles[index + 1]
+        self._chart_message("Loading the waveforms ...")
+
+        def work():
+            try:
+                beats = transition_beats(pa, pb)
+                envs = []
+                for path, lo, hi in ((key[0], float(pa.get("outro_start", 0)) - 90.0, float(pa.get("outro_end", 0)) + 40.0),
+                                     (key[1], float(pb.get("intro_start", 0)) - 10.0, float(pb.get("intro_start", 0)) + 110.0)):
+                    audio, sr = load_audio(path)
+                    i0, i1 = int(max(0.0, lo) * sr), min(len(audio), int(hi * sr))
+                    envs.append(tfx.peak_envelope(tfx.to_stereo(audio[i0:i1]), sr, t0=i0 / sr))
+            except Exception as e:
+                log.warning("Transition chart: cannot read the audio: %s", e)
+
+                def failed():
+                    self._waves_loading.discard(key)
+                    if self.winfo_exists() and self.pair_index == index:
+                        self._chart_message(f"Cannot read the audio of this transition: {e}")
+                self.app.root.after(0, failed)
+                return
+
+            def done():
+                self._waves_loading.discard(key)
+                self._waves[key] = {"a_env": envs[0], "b_env": envs[1], "beats": beats}
+                if self.winfo_exists():
+                    self.schedule_chart()
+            self.app.root.after(0, done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def schedule_chart(self):
+        if not self.winfo_exists():
+            return
+        if self._chart_job is not None:
+            self.after_cancel(self._chart_job)
+        self._chart_job = self.after(150, self.draw_chart)
+
+    def draw_chart(self):
+        self._chart_job = None
+        if not self.winfo_exists() or self.pair_index is None:
+            return
+        waves = self._waves.get(self._wave_key())
+        if waves is None:
+            if self._wave_key() not in self._waves_loading:
+                self.load_waveforms()
+            return
+        entry = self.entry()
+        length = self.length_var.get()
+        result = self._result_env
+        result = result["env"] if result and result["key"] == self._result_key(self.pair_index, entry, length) else None
+        try:
+            layout = transition_layout_for(self.profiles[self.pair_index], self.profiles[self.pair_index + 1], entry, length,
+                                           beats=waves["beats"], sample_seconds=self._sample_seconds)
+            fig = charts.transition_detail(layout, waves["a_env"], waves["b_env"], result)
+        except Exception as e:
+            log.warning("Transition chart: %s", e)
+            self._chart_message(f"Cannot draw this transition: {e}")
+            return
+        self.last_layout = layout
+        for child in self.chart_frame.winfo_children():
+            child.destroy()
+        canvas = FigureCanvasTkAgg(fig, self.chart_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        canvas.draw()
+        self._chart_canvas = canvas
+
+    def _chart_message(self, text):
+        for child in self.chart_frame.winfo_children():
+            child.destroy()
+        self._chart_canvas = None
+        ttk.Label(self.chart_frame, text=text, foreground=MUTED, wraplength=900).pack(padx=20, pady=20, anchor="w")
 
     # ------------------------------------------------------------------ render
     def apply_all(self):

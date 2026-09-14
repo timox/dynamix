@@ -194,9 +194,12 @@ def scenario():
         check(pump(lambda: len(win.samples) == 1, 5.0), "the FX samples folder is scanned")
         win.trans_tree.selection_set("T0")
         check(pump(lambda: win.pair_index == 0, 2.0), "a transition can be selected")
+        check(pump(lambda: win._chart_canvas is not None, 20.0), "the transition chart is drawn with the waveforms")
         win.add_effect("freeze")
         win.add_effect("sample")
         check(pump(lambda: hasattr(win, "sample_list") and win.sample_list.size() == 1, 5.0), "the sample list is shown")
+        check(pump(lambda: win.last_layout is not None and [lane["type"] for lane in win.last_layout["lanes"]] == ["freeze", "sample"], 3.0),
+              "the chart has one lane per effect")
         win.start_preview()  # the sample effect has no file yet
         check(pump(lambda: "Choose a file" in win.status_label.cget("text"), 3.0),
               "a preview with a sample effect without a file asks to choose one (no error)")
@@ -225,6 +228,7 @@ def scenario():
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)
         win.start_preview()
         check(pump(lambda: player.loops and os.path.exists(player.loops[-1]), 20.0), "the preview is rendered and looped")
+        check(pump(lambda: win._result_env is not None, 5.0), "the rendered result is added to the chart")
         win.nudge_var.set("10")
         check(app.project.fx_for_pair(*fx_tracks)["nudge_ms"] == 10.0, "the nudge is stored")
         check(pump(lambda: len(player.loops) >= 2, 20.0), "a change re-renders the looped preview")

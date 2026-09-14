@@ -43,7 +43,12 @@ python gui.py
   transition). Click a variant to preview it; **Use this proposal** copies it
   into the set list, which **Up / Down / Remove** and **Add to set list ▶**
   then edit by hand. Select a selection or set row to open it in the Track tab.
-- **FX tab** (workflow step 5 opens it): pick a transition, then stack effects on it — **Freeze** (loops the
+- **FX tab** (workflow step 5 opens it). At the top, the **transition chart**
+  shows the selected transition on a beat axis (J = junction, thick lines =
+  bars): A fading out, B fading in, one lane per effect (freeze captured part
+  and repeats, filter sweep, echo and its tail, sample repeats; what runs past
+  "A ends" continues in B) and, once a preview has been rendered, the result.
+  It is redrawn at every change; drag the separator to make it taller. Then pick a transition, then stack effects on it — **Freeze** (loops the
   last beats of the outgoing track, with a roll such as 4×1 → 2×2 → 1×4, an
   optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
   low-pass or band-pass sweep with resonance, closing the outgoing track or
