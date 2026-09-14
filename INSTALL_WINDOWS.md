@@ -169,9 +169,15 @@ bas tous les messages et erreurs.
 
 ## 5 ter. L'onglet Configuration
 
-Le bloc **Display** règle la taille des caractères (8 à 18 points) de toute la
+Le bloc **Affichage** règle la taille des caractères (8 à 18 points) de toute la
 fenêtre, des tableaux et des graphiques ; elle s'applique et s'enregistre
-immédiatement.
+immédiatement. La **Langue** (Auto = langue de Windows, English, Français)
+s'applique au prochain démarrage ; le jargon DJ (set list, cue, FX, BPM…) reste
+en anglais. Pour corriger une traduction sans toucher au programme, créez
+`%LOCALAPPDATA%\DynaMix\locales\fr.json` avec les entrées à changer, par exemple
+`{"Plan Transitions": "Planifier"}` (la clé est le texte anglais, gardez les
+`{…}` tels quels). Les rapports (mastering, analyse par bande, feuille de
+transitions) seront traduits dans une seconde étape.
 
 Tout ce qui dépend de votre machine est réuni là : le dossier des projets, la
 base Mixxx (bouton *Detect*, ou laissez vide pour la détection automatique),

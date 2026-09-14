@@ -55,7 +55,9 @@ python gui.py
 ```
 
 1. **Configuration** tab: set the projects folder, your **music library folder** (one folder with
-   every track you mixed), the **FX samples folder** and the Mixxx database (auto-detected).
+   every track you mixed), the **FX samples folder** and the Mixxx database (auto-detected). The
+   interface is available in **English and French** (Language: Auto follows Windows); French texts
+   can be corrected in `<DynaMix home>/locales/fr.json`.
 2. **Set Builder** tab: **New project...**, then follow the workflow panel:
    1. **Select and analyze**: add tracks from the library to the selection (BPM, key, energy;
       each file is analysed once and cached).

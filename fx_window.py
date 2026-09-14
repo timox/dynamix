@@ -26,6 +26,7 @@ import library
 import transition_fx as tfx
 from analysis_store import dynamix_home
 from fx_render import render_preview, render_set, transition_beats, transition_layout_for
+from i18n import tr
 from mastering import load_audio
 
 log = logging.getLogger("dynamix.fx")
@@ -99,18 +100,21 @@ def effect_summary(fx: dict) -> str:
     t = fx.get("type")
     if t == "freeze":
         steps = " → ".join(f"{float(s['beats']):g}×{int(s['repeats'])}" for s in fx.get("steps") or [])
-        extra = (" +filter" if fx.get("loop_filter") else "") + (" +echo" if fx.get("loop_echo") else "")
-        return f"Freeze {steps}{extra}"
+        extra = (" " + tr("+filter") if fx.get("loop_filter") else "") + (" " + tr("+echo") if fx.get("loop_echo") else "")
+        return tr("Freeze {steps}", steps=steps) + extra
     if t == "filter":
-        return (f"Filter {fx.get('side')} {fx.get('kind')} {float(fx.get('start_hz', 0)):.0f}→"
-                f"{float(fx.get('end_hz', 0)):.0f} Hz, {fx.get('beats')} beats")
+        return tr("Filter {side} {kind} {start}→{end} Hz, {beats} beats", side=fx.get("side"), kind=fx.get("kind"),
+                  start=f"{float(fx.get('start_hz', 0)):.0f}", end=f"{float(fx.get('end_hz', 0)):.0f}",
+                  beats=fx.get("beats"))
     if t == "echo":
-        return f"Echo {float(fx.get('delay_beats', 0)):g} beat, feedback {float(fx.get('feedback', 0)):.2f}"
+        return tr("Echo {delay} beat, feedback {feedback}", delay=f"{float(fx.get('delay_beats', 0)):g}",
+                  feedback=f"{float(fx.get('feedback', 0)):.2f}")
     if t == "sample":
-        name = os.path.basename(fx.get("file") or "") or "(choose a sample)"
+        name = os.path.basename(fx.get("file") or "") or tr("(choose a sample)")
         repeats = int(fx.get("repeats", 1))
-        return (f"Sample {name}{f' ×{repeats}' if repeats > 1 else ''} "
-                f"({fx.get('anchor')}, tempo {fx.get('tempo', 'varispeed')})")
+        return tr("Sample {name}{repeats} ({anchor}, tempo {tempo})", name=name,
+                  repeats=f" ×{repeats}" if repeats > 1 else "", anchor=fx.get("anchor"),
+                  tempo=fx.get("tempo", "varispeed"))
     return str(t)
 
 
@@ -209,14 +213,18 @@ class TransitionFxPanel(ttk.Frame):
     def _build(self):
         bar = ttk.Frame(self)
         bar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=6)
-        ttk.Button(bar, text="▶ Preview (loop)", command=self.start_preview).pack(side=tk.LEFT)
-        ttk.Button(bar, text="■ Stop", command=self.stop_preview).pack(side=tk.LEFT, padx=4)
-        ttk.Label(bar, text="Length:").pack(side=tk.LEFT, padx=(12, 2))
+        ttk.Button(bar, text=tr("▶ Preview (loop)"), command=self.start_preview).pack(side=tk.LEFT)
+        ttk.Button(bar, text=tr("■ Stop"), command=self.stop_preview).pack(side=tk.LEFT, padx=4)
+        ttk.Label(bar, text=tr("Length:")).pack(side=tk.LEFT, padx=(12, 2))
+        # the codes "short" / "long" go to the renderer; the combobox shows their translation
+        self._length_labels = {"short": tr("short"), "long": tr("long")}
+        self._length_display = tk.StringVar(value=self._length_labels["short"])
         self.length_var = tk.StringVar(value="short")
-        length = ttk.Combobox(bar, textvariable=self.length_var, values=("short", "long"), width=7, state="readonly")
+        length = ttk.Combobox(bar, textvariable=self._length_display, values=tuple(self._length_labels.values()),
+                              width=10, state="readonly")
         length.pack(side=tk.LEFT)
-        length.bind("<<ComboboxSelected>>", lambda e: (self.schedule_preview(), self.schedule_chart()))
-        self.apply_button = ttk.Button(bar, text="Apply all FX", command=self.apply_all)
+        length.bind("<<ComboboxSelected>>", lambda e: self._length_selected())
+        self.apply_button = ttk.Button(bar, text=tr("Apply all FX"), command=self.apply_all)
         self.apply_button.pack(side=tk.LEFT, padx=12)
         self.status_label = ttk.Label(bar, text="", foreground=MUTED)
         self.status_label.pack(side=tk.LEFT, padx=8)
@@ -224,13 +232,13 @@ class TransitionFxPanel(ttk.Frame):
         # position of the looping preview: follows the playback, click or drag to play from another point
         posbar = ttk.Frame(self)
         posbar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 0))
-        ttk.Label(posbar, text="Position:").pack(side=tk.LEFT)
+        ttk.Label(posbar, text=tr("Position:")).pack(side=tk.LEFT)
         self.position_var = tk.DoubleVar(value=0.0)
         self.position_scale = ttk.Scale(posbar, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.position_var)
         self.position_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
         self.position_scale.bind("<ButtonPress-1>", lambda e: setattr(self, "_dragging_position", True))
         self.position_scale.bind("<ButtonRelease-1>", lambda e: self._position_released())
-        self.position_label = ttk.Label(posbar, text="(start the preview)", foreground=MUTED, width=28)
+        self.position_label = ttk.Label(posbar, text=tr("(start the preview)"), foreground=MUTED, width=28)
         self.position_label.pack(side=tk.LEFT)
 
         rows = ttk.PanedWindow(self, orient=tk.VERTICAL)
@@ -238,17 +246,18 @@ class TransitionFxPanel(ttk.Frame):
         self.chart_frame = ttk.Frame(rows, height=340)
         self.chart_frame.pack_propagate(False)
         rows.add(self.chart_frame, weight=1)
-        self._chart_message("Select a transition to see it: A and B, the fades and every effect on a beat axis.")
+        self._chart_message(tr("Select a transition to see it: A and B, the fades and every effect on a beat axis."))
         panes = ttk.PanedWindow(rows, orient=tk.HORIZONTAL)
         rows.add(panes, weight=1)
 
         left = ttk.Frame(panes)
         panes.add(left, weight=1)
-        ttk.Label(left, text="Transitions", foreground=MUTED).pack(anchor="w")
+        ttk.Label(left, text=tr("Transitions"), foreground=MUTED).pack(anchor="w")
         self.trans_tree = ttk.Treeview(left, columns=("#", "Transition", "Score", "FX", "State"), show="headings",
                                        height=12, selectmode="browse")
+        headings = {"#": "#", "Transition": tr("Transition"), "Score": tr("Score"), "FX": tr("FX"), "State": tr("State")}
         for col, width in (("#", 30), ("Transition", 260), ("Score", 50), ("FX", 35), ("State", 45)):
-            self.trans_tree.heading(col, text=col)
+            self.trans_tree.heading(col, text=headings[col])
             self.trans_tree.column(col, width=width, anchor="w" if col == "Transition" else "center",
                                    stretch=(col == "Transition"))
         self.trans_tree.pack(fill=tk.BOTH, expand=True)
@@ -259,7 +268,7 @@ class TransitionFxPanel(ttk.Frame):
         self.source_label.pack(anchor="w", pady=(0, 4))
         nudge_row = ttk.Frame(left)
         nudge_row.pack(anchor="w")
-        ttk.Label(nudge_row, text="Nudge (ms):").pack(side=tk.LEFT)
+        ttk.Label(nudge_row, text=tr("Nudge (ms):")).pack(side=tk.LEFT)
         self.nudge_var = tk.StringVar(value="0")
         ttk.Spinbox(nudge_row, from_=-50, to=50, increment=1, textvariable=self.nudge_var, width=6).pack(side=tk.LEFT, padx=4)
         self.nudge_var.trace_add("write", lambda *a: self.on_nudge())
@@ -267,40 +276,47 @@ class TransitionFxPanel(ttk.Frame):
         self.orphan_row = ttk.Frame(left)
         self.orphan_label = ttk.Label(self.orphan_row, text="", foreground=MUTED)
         self.orphan_label.pack(side=tk.LEFT)
-        ttk.Button(self.orphan_row, text="Manage…", command=self.open_orphans).pack(side=tk.LEFT, padx=6)
+        ttk.Button(self.orphan_row, text=tr("Manage…"), command=self.open_orphans).pack(side=tk.LEFT, padx=6)
         self._orphan_window = None
         self._inactive = []
 
         mid = ttk.Frame(panes)
         panes.add(mid, weight=1)
-        ttk.Label(mid, text="FX stack (top to bottom)", foreground=MUTED).pack(anchor="w")
+        ttk.Label(mid, text=tr("FX stack (top to bottom)"), foreground=MUTED).pack(anchor="w")
         self.fx_tree = ttk.Treeview(mid, columns=("On", "Effect"), show="headings", height=12, selectmode="browse")
-        self.fx_tree.heading("On", text="On")
-        self.fx_tree.heading("Effect", text="Effect")
+        self.fx_tree.heading("On", text=tr("On"))
+        self.fx_tree.heading("Effect", text=tr("Effect"))
         self.fx_tree.column("On", width=35, anchor="center", stretch=False)
         self.fx_tree.column("Effect", width=300, anchor="w")
         self.fx_tree.pack(fill=tk.BOTH, expand=True)
         self.fx_tree.bind("<<TreeviewSelect>>", lambda e: self.on_fx_selected())
         buttons = ttk.Frame(mid)
         buttons.pack(fill=tk.X, pady=4)
-        add = ttk.Menubutton(buttons, text="Add ▾")
+        add = ttk.Menubutton(buttons, text=tr("Add ▾"))
         menu = tk.Menu(add, tearoff=False)
         for fx_type in tfx.FX_TYPES:
-            menu.add_command(label=FX_NAMES[fx_type], command=lambda t=fx_type: self.add_effect(t))
+            menu.add_command(label=tr(FX_NAMES[fx_type]), command=lambda t=fx_type: self.add_effect(t))
         add["menu"] = menu
         add.pack(side=tk.LEFT)
-        for text, command in (("Remove", self.remove_effect), ("▲", lambda: self.move_effect(-1)),
-                              ("▼", lambda: self.move_effect(1)), ("Duplicate", self.duplicate_effect),
-                              ("On/Off", self.toggle_effect)):
+        for text, command in ((tr("Remove"), self.remove_effect), ("▲", lambda: self.move_effect(-1)),
+                              ("▼", lambda: self.move_effect(1)), (tr("Duplicate"), self.duplicate_effect),
+                              (tr("On/Off"), self.toggle_effect)):
             ttk.Button(buttons, text=text, command=command).pack(side=tk.LEFT, padx=2)
 
-        right = ttk.LabelFrame(panes, text="Settings")
+        right = ttk.LabelFrame(panes, text=tr("Settings"))
         panes.add(right, weight=2)
         self.settings, self._settings_canvas = _scrollable(right)
 
     def status(self, text):
         if self.winfo_exists():
             self.status_label.config(text=text)
+
+    def _length_selected(self):
+        """The length chosen in the combobox (shown translated) becomes its code for the renderer."""
+        shown = self._length_display.get()
+        self.length_var.set(next((code for code, label in self._length_labels.items() if label == shown), "short"))
+        self.schedule_preview()
+        self.schedule_chart()
 
     def _plan_signature(self):
         """The set list and the cue positions of the planned tracks (None when there is no plan)."""
@@ -358,10 +374,11 @@ class TransitionFxPanel(ttk.Frame):
         t = self.transitions[index] if index < len(self.transitions) else {}
         bpm_a = float(pa.get("bpm") or 0)
         beat = f"{60.0 / bpm_a:.3f} s" if bpm_a else "-"
-        self.info_label.config(text=(
-            f"Junction A {_fmt(pa.get('outro_start', 0))} · B {_fmt(pb.get('intro_start', 0))}\n"
-            f"{bpm_a:.1f} → {float(pb.get('bpm') or 0):.1f} BPM · {pa.get('key') or '-'} → {pb.get('key') or '-'} · "
-            f"beat {beat} · score {float(t.get('score', 0)):.0f}"))
+        self.info_label.config(text=tr(
+            "Junction A {a} · B {b}\n{bpm_a} → {bpm_b} BPM · {key_a} → {key_b} · beat {beat} · score {score}",
+            a=_fmt(pa.get("outro_start", 0)), b=_fmt(pb.get("intro_start", 0)), bpm_a=f"{bpm_a:.1f}",
+            bpm_b=f"{float(pb.get('bpm') or 0):.1f}", key_a=pa.get("key") or "-", key_b=pb.get("key") or "-",
+            beat=beat, score=f"{float(t.get('score', 0)):.0f}"))
         self.refresh_sources()
         self._setting_nudge = True
         self.nudge_var.set(str(int(round(float(self.entry().get("nudge_ms", 0))))))
@@ -377,9 +394,12 @@ class TransitionFxPanel(ttk.Frame):
             return
         bases = self.project.premaster_map()
         a, b = self.pair()
-        kind = {True: "pre-mastered copy", False: "original"}
-        note = "" if self.project.options.get("use_premaster", True) else " (pre-mastered copies not used)"
-        self.source_label.config(text=f"Plays from: A {kind[a in bases]} · B {kind[b in bases]}{note}")
+        kind = {True: tr("pre-mastered copy"), False: tr("original")}
+        if self.project.options.get("use_premaster", True):
+            text = tr("Plays from: A {a} · B {b}", a=kind[a in bases], b=kind[b in bases])
+        else:
+            text = tr("Plays from: A {a} · B {b} (pre-mastered copies not used)", a=kind[a in bases], b=kind[b in bases])
+        self.source_label.config(text=text)
 
     def on_nudge(self):
         if getattr(self, "_setting_nudge", False) or self.pair_index is None:
@@ -396,7 +416,7 @@ class TransitionFxPanel(ttk.Frame):
     def _refresh_orphans(self):
         count = len(self._inactive)
         if count:
-            self.orphan_label.config(text=f"⚠ {count} orphan FX (tracks no longer next to each other)")
+            self.orphan_label.config(text=tr("⚠ {count} orphan FX (tracks no longer next to each other)", count=count))
             if not self.orphan_row.winfo_manager():
                 self.orphan_row.pack(anchor="w", pady=(2, 4))
         elif self.orphan_row.winfo_manager():
@@ -420,22 +440,23 @@ class TransitionFxPanel(ttk.Frame):
             self._orphan_window.lift()
             return self._orphan_window
         win = tk.Toplevel(self)
-        win.title(f"Orphan FX - {self.project.name}")
+        win.title(tr("Orphan FX - {project}", project=self.project.name))
         win.geometry("720x320")
         win.transient(self.winfo_toplevel())
-        ttk.Label(win, text="FX set on two tracks that no longer follow each other in the set list. They come back if the "
-                            "two tracks are next to each other again; remove the ones you do not need.",
+        ttk.Label(win, text=tr("FX set on two tracks that no longer follow each other in the set list. They come back if the "
+                               "two tracks are next to each other again; remove the ones you do not need."),
                   foreground=MUTED, wraplength=680, justify=tk.LEFT).pack(anchor="w", padx=10, pady=(10, 4))
         tree = ttk.Treeview(win, columns=("From", "To", "FX"), show="headings", selectmode="extended")
+        headings = {"From": tr("From"), "To": tr("To"), "FX": tr("FX")}
         for col, width in (("From", 250), ("To", 250), ("FX", 180)):
-            tree.heading(col, text=col, command=lambda c=col: self._sort_orphans(c))
+            tree.heading(col, text=headings[col], command=lambda c=col: self._sort_orphans(c))
             tree.column(col, width=width, anchor="w")
         tree.pack(fill=tk.BOTH, expand=True, padx=10)
         buttons = ttk.Frame(win)
         buttons.pack(fill=tk.X, padx=10, pady=8)
-        ttk.Button(buttons, text="Remove selected", command=lambda: self._confirm_remove_orphans(selected=True)).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Remove all", command=lambda: self._confirm_remove_orphans(selected=False)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Close", command=win.destroy).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text=tr("Remove selected"), command=lambda: self._confirm_remove_orphans(selected=True)).pack(side=tk.LEFT)
+        ttk.Button(buttons, text=tr("Remove all"), command=lambda: self._confirm_remove_orphans(selected=False)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(buttons, text=tr("Close"), command=win.destroy).pack(side=tk.RIGHT)
         self._orphan_window, self._orphan_tree, self._orphan_sort = win, tree, None
         self._fill_orphans()
         return win
@@ -468,9 +489,9 @@ class TransitionFxPanel(ttk.Frame):
         if not pairs:
             return 0
         answer = messagebox.askyesnocancel(
-            "Remove orphan FX", f"Remove the FX of {len(pairs)} pair(s)?\n\n"
-            "Yes: save a snapshot of the project first (Snapshots... to restore it), then remove.\n"
-            "No: remove without a snapshot.", parent=self._orphan_window)
+            tr("Remove orphan FX"), tr("Remove the FX of {count} pair(s)?\n\n"
+                                       "Yes: save a snapshot of the project first (Snapshots... to restore it), then remove.\n"
+                                       "No: remove without a snapshot.", count=len(pairs)), parent=self._orphan_window)
         if answer is None:
             return 0
         if answer and hasattr(self.app, "_do_save_snapshot"):
@@ -512,7 +533,7 @@ class TransitionFxPanel(ttk.Frame):
 
     def add_effect(self, fx_type):
         if self.pair_index is None:
-            messagebox.showinfo("Transition FX", "Select a transition first", parent=self)
+            messagebox.showinfo(tr("Transition FX"), tr("Select a transition first"), parent=self)
             return
         effects = self.effects()
         effects.append(tfx.new_effect(fx_type))
@@ -566,10 +587,10 @@ class TransitionFxPanel(ttk.Frame):
             child.destroy()
         self._settings_canvas.yview_moveto(0.0)
         if self.pair_index is None or self.fx_index is None:
-            ttk.Label(self.settings, text="Select a transition, then add or select an effect.", foreground=MUTED).pack(anchor="w")
+            ttk.Label(self.settings, text=tr("Select a transition, then add or select an effect."), foreground=MUTED).pack(anchor="w")
             return
         fx = self.effects()[self.fx_index]
-        ttk.Label(self.settings, text=FX_NAMES[fx["type"]], font="DynaMixTitle").pack(anchor="w")
+        ttk.Label(self.settings, text=tr(FX_NAMES[fx["type"]]), font="DynaMixTitle").pack(anchor="w")
         form = ttk.Frame(self.settings)
         form.pack(fill=tk.X, pady=4)
         self._form_vars = self._fields(form, FIELDS[fx["type"]], fx, lambda key, value: self.update_effect({key: value}))
@@ -582,7 +603,7 @@ class TransitionFxPanel(ttk.Frame):
         """Build one row per field; returns {key: StringVar} so a field can be updated without a rebuild."""
         variables = {}
         for row, (key, label, kind, spec) in enumerate(fields):
-            ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            ttk.Label(parent, text=tr(label)).grid(row=row, column=0, sticky="w", pady=2)
             value = values.get(key)
             var = tk.StringVar(value="" if value is None else (f"{value:g}" if isinstance(value, float) else str(value)))
             if kind == "choice":
@@ -629,7 +650,7 @@ class TransitionFxPanel(ttk.Frame):
             self.update_effect({"steps": steps}, rebuild_settings=True)
 
     def _freeze_extras(self, fx):
-        steps_box = ttk.LabelFrame(self.settings, text="Steps (a roll shortens the loop)")
+        steps_box = ttk.LabelFrame(self.settings, text=tr("Steps (a roll shortens the loop)"))
         steps_box.pack(fill=tk.X, pady=4)
         steps = [dict(s) for s in fx.get("steps") or []]
 
@@ -642,7 +663,7 @@ class TransitionFxPanel(ttk.Frame):
             ttk.Label(row, text=f"{i + 1}.").pack(side=tk.LEFT)
             beats_var = tk.StringVar(value=f"{float(step['beats']):g}")
             ttk.Combobox(row, textvariable=beats_var, values=("4", "2", "1", "0.5"), width=4, state="readonly").pack(side=tk.LEFT, padx=2)
-            ttk.Label(row, text="beats ×").pack(side=tk.LEFT)
+            ttk.Label(row, text=tr("beats ×")).pack(side=tk.LEFT)
             rep_var = tk.StringVar(value=str(int(step["repeats"])))
             ttk.Spinbox(row, from_=1, to=32, increment=1, textvariable=rep_var, width=4).pack(side=tk.LEFT, padx=2)
 
@@ -660,17 +681,17 @@ class TransitionFxPanel(ttk.Frame):
             rep_var.trace_add("write", changed)
             ttk.Button(row, text="−", width=2,
                        command=lambda i=i: self.remove_freeze_step(i)).pack(side=tk.LEFT, padx=4)
-        ttk.Button(steps_box, text="+ step", command=self.add_freeze_step).pack(anchor="w", padx=4, pady=2)
+        ttk.Button(steps_box, text=tr("+ step"), command=self.add_freeze_step).pack(anchor="w", padx=4, pady=2)
 
         for key, label, fields, defaults in (
                 ("loop_filter", "Loop filter", LOOP_FILTER_FIELDS,
                  {k: v for k, v in tfx.new_effect("filter").items() if k not in ("type", "enabled", "side", "beats")}),
                 ("loop_echo", "Loop echo", LOOP_ECHO_FIELDS,
                  {k: v for k, v in tfx.new_effect("echo").items() if k not in ("type", "enabled", "start_offset_beats")})):
-            box = ttk.LabelFrame(self.settings, text=label)
+            box = ttk.LabelFrame(self.settings, text=tr(label))
             box.pack(fill=tk.X, pady=4)
             on = tk.BooleanVar(value=bool(fx.get(key)))
-            ttk.Checkbutton(box, text="On", variable=on,
+            ttk.Checkbutton(box, text=tr("On"), variable=on,
                             command=lambda k=key, v=on, d=defaults: self.update_effect({k: dict(d) if v.get() else None},
                                                                                         rebuild_settings=True)).pack(anchor="w", padx=4)
             if fx.get(key):
@@ -680,19 +701,19 @@ class TransitionFxPanel(ttk.Frame):
                              lambda k2, value, k=key: self.update_effect({k: dict(self.effects()[self.fx_index][k], **{k2: value})}))
 
     def _sample_extras(self, fx):
-        box = ttk.LabelFrame(self.settings, text="Sample")
+        box = ttk.LabelFrame(self.settings, text=tr("Sample"))
         box.pack(fill=tk.BOTH, expand=True, pady=4)
         folder = self.app.config.get("fx_samples_folder") or ""
         if not folder:
-            ttk.Label(box, text="Set the FX samples folder in the Configuration tab.", foreground=MUTED).pack(anchor="w", padx=4)
+            ttk.Label(box, text=tr("Set the FX samples folder in the Configuration tab."), foreground=MUTED).pack(anchor="w", padx=4)
             return
         top = ttk.Frame(box)
         top.pack(fill=tk.X, padx=4)
-        ttk.Label(top, text="Filter:").pack(side=tk.LEFT)
+        ttk.Label(top, text=tr("Filter:")).pack(side=tk.LEFT)
         filter_var = tk.StringVar()
         ttk.Entry(top, textvariable=filter_var, width=20).pack(side=tk.LEFT, padx=4)
-        ttk.Button(top, text="▶ Sample", command=self.audition_sample).pack(side=tk.LEFT, padx=4)
-        ttk.Label(box, text="Click a sample to use it, double-click to hear it.", foreground=MUTED).pack(anchor="w", padx=4)
+        ttk.Button(top, text=tr("▶ Sample"), command=self.audition_sample).pack(side=tk.LEFT, padx=4)
+        ttk.Label(box, text=tr("Click a sample to use it, double-click to hear it."), foreground=MUTED).pack(anchor="w", padx=4)
         self.sample_current_label = ttk.Label(box, text="", wraplength=420, justify=tk.LEFT)
         self.sample_current_label.pack(anchor="w", padx=4)
         self._refresh_sample_label()
@@ -706,7 +727,7 @@ class TransitionFxPanel(ttk.Frame):
             for entry in self._shown_samples:
                 too_long = (entry.get("duration") or 0) > tfx.MAX_SAMPLE_SECONDS
                 self.sample_list.insert(tk.END, f"{entry['filename']}  ({(entry.get('duration') or 0):.1f} s)"
-                                        + ("  - too long" if too_long else ""))
+                                        + ("  - " + tr("too long") if too_long else ""))
                 if too_long:
                     self.sample_list.itemconfig(tk.END, foreground="#9a9a9a")
         filter_var.trace_add("write", fill)
@@ -723,7 +744,8 @@ class TransitionFxPanel(ttk.Frame):
             return
         entry = self._shown_samples[sel[0]]
         if (entry.get("duration") or 0) > tfx.MAX_SAMPLE_SECONDS:
-            self.status(f"{entry['filename']} is longer than {tfx.MAX_SAMPLE_SECONDS:.0f} s")
+            self.status(tr("{name} is longer than {seconds} s", name=entry["filename"],
+                           seconds=f"{tfx.MAX_SAMPLE_SECONDS:.0f}"))
             return
         if self.effects()[self.fx_index].get("file") != entry["file_path"]:
             bpm = tfx.bpm_from_name(entry["file_path"])
@@ -732,7 +754,7 @@ class TransitionFxPanel(ttk.Frame):
             if var is not None:
                 var.set("" if bpm is None else f"{bpm:g}")
         self._refresh_sample_label()
-        self.status(f"Sample: {entry['filename']}")
+        self.status(tr("Sample: {name}", name=entry["filename"]))
 
     def _tempo_note(self, fx):
         """How the sample will be fitted to the outgoing track's tempo (for the 'Current' line)."""
@@ -745,7 +767,7 @@ class TransitionFxPanel(ttk.Frame):
         if problem:
             return f" · {problem}"
         if sample_bpm is None:
-            return " · no BPM in the name: played as it is (set Sample BPM)"
+            return " · " + tr("no BPM in the name: played as it is (set Sample BPM)")
         detail = fx.get("tempo", "varispeed")
         if detail == "varispeed":
             detail += f", {12 * math.log2(ratio):+.1f} st"
@@ -759,7 +781,8 @@ class TransitionFxPanel(ttk.Frame):
         if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "sample":
             return
         fx = effects[self.fx_index]
-        label.config(text=f"Current: {os.path.basename(fx.get('file') or '') or '-'}{self._tempo_note(fx)}")
+        label.config(text=tr("Current: {name}{note}", name=os.path.basename(fx.get("file") or "") or "-",
+                             note=self._tempo_note(fx)))
 
     @staticmethod
     def _sample_missing(entry):
@@ -776,7 +799,7 @@ class TransitionFxPanel(ttk.Frame):
             try:
                 entries = library.scan(folder, use_cache=False)
             except Exception as e:
-                self.app._report_error(f"FX samples scan failed: {e}", e)
+                self.app._report_error(tr("FX samples scan failed: {error}", error=e), e)
                 return
 
             def done():
@@ -800,7 +823,7 @@ class TransitionFxPanel(ttk.Frame):
             sf.write(out, data, sr, subtype="PCM_16")
             self.player.play_once(out)
         except Exception as e:
-            self.app._report_error(f"Cannot play {os.path.basename(path)}: {e}", e)
+            self.app._report_error(tr("Cannot play {file}: {error}", file=os.path.basename(path), error=e), e)
 
     # ------------------------------------------------------------------ preview
     @staticmethod
@@ -811,10 +834,10 @@ class TransitionFxPanel(ttk.Frame):
 
     def start_preview(self):
         if self.pair_index is None:
-            messagebox.showinfo("Transition FX", "Select a transition first", parent=self)
+            messagebox.showinfo(tr("Transition FX"), tr("Select a transition first"), parent=self)
             return
         if self._plan_changed():
-            self.status(PLAN_CHANGED)
+            self.status(tr(PLAN_CHANGED))
             return
         self._previewing = True
         self.render_preview()
@@ -831,10 +854,10 @@ class TransitionFxPanel(ttk.Frame):
         if self.pair_index is None:
             return
         if self._plan_changed():
-            self.status(PLAN_CHANGED)
+            self.status(tr(PLAN_CHANGED))
             return
         if self._sample_missing(self.entry()):
-            self.status(NO_SAMPLE_FILE)
+            self.status(tr(NO_SAMPLE_FILE))
             return
         self._preview_seq += 1
         seq = self._preview_seq
@@ -845,7 +868,7 @@ class TransitionFxPanel(ttk.Frame):
         result_key = self._result_key(index, entry, length)
         pa, pb = self.profiles[index], self.profiles[index + 1]
         path = os.path.join(self._tmp_dir(), f"preview_{'a' if seq % 2 else 'b'}.wav")
-        self.status("Rendering the preview ...")
+        self.status(tr("Rendering the preview ..."))
 
         def work():
             try:
@@ -856,8 +879,8 @@ class TransitionFxPanel(ttk.Frame):
                 preview_start = transition_layout_for(pa, pb, entry, length)["preview_start"]
                 result_env = tfx.peak_envelope(clip, sr, t0=preview_start)
             except Exception as e:
-                self.app._report_error(f"Preview failed: {e}", e)
-                self.app.root.after(0, self.status, "Preview failed (see the Log)")
+                self.app._report_error(tr("Preview failed: {error}", error=e), e)
+                self.app.root.after(0, self.status, tr("Preview failed (see the Log)"))
                 return
 
             def done():
@@ -870,8 +893,8 @@ class TransitionFxPanel(ttk.Frame):
                 try:
                     looping = self.player.play_loop(path)
                 except Exception as e:
-                    self.app._report_error(f"Cannot play the preview: {e}", e)
-                    self.status("Preview playback failed (see the Log)")
+                    self.app._report_error(tr("Cannot play the preview: {error}", error=e), e)
+                    self.status(tr("Preview playback failed (see the Log)"))
                     return
                 if looping:
                     self._start_playhead(clip, sr, preview_start)
@@ -879,7 +902,7 @@ class TransitionFxPanel(ttk.Frame):
                     if w not in self._logged_warnings:
                         self._logged_warnings.add(w)
                         log.warning("Preview: %s", w)
-                self.status(("Looping the preview" if looping else "Preview opened in the default player")
+                self.status((tr("Looping the preview") if looping else tr("Preview opened in the default player"))
                             + (f" - {warnings[0]}" if warnings else ""))
             self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
@@ -892,7 +915,7 @@ class TransitionFxPanel(ttk.Frame):
         self._preview_seq += 1
         self.player.stop()
         self._stop_playhead()
-        self.status("Stopped")
+        self.status(tr("Stopped"))
 
     # ------------------------------------------------------------------ playhead
     def _start_playhead(self, clip, sr, preview_start, offset=0.0):
@@ -912,7 +935,7 @@ class TransitionFxPanel(ttk.Frame):
         self._setting_position = True
         self.position_var.set(0.0)
         self._setting_position = False
-        self.position_label.config(text="(start the preview)")
+        self.position_label.config(text=tr("(start the preview)"))
 
     def playhead_position(self):
         """Seconds into the looping preview clip, or None when nothing loops."""
@@ -930,11 +953,13 @@ class TransitionFxPanel(ttk.Frame):
             self.position_var.set(position / play["length"] if play["length"] else 0.0)
             self._setting_position = False
         t = play["preview_start"] + position
-        beats = ""
         layout = self.last_layout
         if layout and layout.get("period"):
-            beats = f" · J{(t - layout['junction']) / layout['period']:+.0f} beats"
-        self.position_label.config(text=f"{_fmt(position)} / {_fmt(play['length'])}{beats}")
+            text = tr("{position} / {length} · J{offset} beats", position=_fmt(position), length=_fmt(play["length"]),
+                      offset=f"{(t - layout['junction']) / layout['period']:+.0f}")
+        else:
+            text = f"{_fmt(position)} / {_fmt(play['length'])}"
+        self.position_label.config(text=text)
         self._draw_playhead(t)
         self._playhead_job = self.after(50, self._tick_playhead)
 
@@ -979,7 +1004,7 @@ class TransitionFxPanel(ttk.Frame):
             sf.write(path, rotate_clip(play["clip"], play["sr"], offset), play["sr"], subtype="PCM_16")
             self.player.play_loop(path)
         except Exception as e:
-            self.app._report_error(f"Cannot play the preview from {_fmt(offset)}: {e}", e)
+            self.app._report_error(tr("Cannot play the preview from {time}: {error}", time=_fmt(offset), error=e), e)
             return False
         play["started"] = time.monotonic() - offset
         return True
@@ -1035,7 +1060,7 @@ class TransitionFxPanel(ttk.Frame):
             return
         self._waves_loading.add(key)
         pa, pb = self.profiles[index], self.profiles[index + 1]
-        self._chart_message("Loading the waveforms ...")
+        self._chart_message(tr("Loading the waveforms ..."))
 
         def work():
             try:
@@ -1053,7 +1078,7 @@ class TransitionFxPanel(ttk.Frame):
                 def failed():
                     self._waves_loading.discard(key)
                     if self.winfo_exists() and self.pair_index == index:
-                        self._chart_message(f"Cannot read the audio of this transition: {reason}")
+                        self._chart_message(tr("Cannot read the audio of this transition: {reason}", reason=reason))
                 self.app.root.after(0, failed)
                 return
 
@@ -1091,7 +1116,7 @@ class TransitionFxPanel(ttk.Frame):
             fig = charts.transition_detail(layout, waves["a_env"], waves["b_env"], result)
         except Exception as e:
             log.warning("Transition chart: %s", e)
-            self._chart_message(f"Cannot draw this transition: {e}")
+            self._chart_message(tr("Cannot draw this transition: {error}", error=e))
             return
         self.last_layout = layout
         for child in self.chart_frame.winfo_children():
@@ -1114,15 +1139,15 @@ class TransitionFxPanel(ttk.Frame):
         if self._applying:
             return
         if self._plan_changed():
-            self.status(PLAN_CHANGED)
+            self.status(tr(PLAN_CHANGED))
             return
         pairs = self.project.active_fx_pairs()
         if not pairs:
-            messagebox.showinfo("Transition FX", "No active FX on the transitions of the set list", parent=self)
+            messagebox.showinfo(tr("Transition FX"), tr("No active FX on the transitions of the set list"), parent=self)
             return
         if any(self._sample_missing(self.project.fx_for_pair(a, b)) for a, b in pairs):
-            self.status(NO_SAMPLE_FILE)
-            messagebox.showinfo("Transition FX", NO_SAMPLE_FILE, parent=self)
+            self.status(tr(NO_SAMPLE_FILE))
+            messagebox.showinfo(tr("Transition FX"), tr(NO_SAMPLE_FILE), parent=self)
             return
         self.stop_preview()
         self._applying = True
@@ -1134,7 +1159,7 @@ class TransitionFxPanel(ttk.Frame):
         plan = self._plan_signature()
         fmt = app.config.get("output_format", "same")
         out_dir = project.fx_dir
-        self.status(f"Rendering FX for {len(pairs)} transitions ...")
+        self.status(tr("Rendering FX for {count} transitions ...", count=len(pairs)))
 
         def work(task):
             try:
@@ -1142,8 +1167,8 @@ class TransitionFxPanel(ttk.Frame):
                     profiles, lambda a, b: lookup.get(project.fx_key(a, b)), bases, out_dir, fmt,
                     progress=lambda i, n, name: task.progress(i, n, name))
             except Exception as e:
-                app._task_failed(task, f"FX render failed: {e}", e)
-                app.root.after(0, self._apply_finished, "FX render failed (see the Log)")
+                app._task_failed(task, tr("FX render failed: {error}", error=e), e)
+                app.root.after(0, self._apply_finished, tr("FX render failed (see the Log)"))
                 return
             task.check()  # stopped: the project keeps its previous FX render
 
@@ -1154,7 +1179,7 @@ class TransitionFxPanel(ttk.Frame):
                     log.warning("FX render discarded: the FX settings, the pre-master, the transitions or the set list "
                                 "changed during the render; click 'Apply all FX' again")
                     if self.winfo_exists():
-                        self.status("Settings changed during the render: click 'Apply all FX' again")
+                        self.status(tr("Settings changed during the render: click 'Apply all FX' again"))
                     return
                 project.set_fx_render(results)
                 project.invalidate_from("fx")  # the playlist and the Mixxx export must use the new copies
@@ -1164,18 +1189,23 @@ class TransitionFxPanel(ttk.Frame):
                 message = f"FX rendered: {len(results)} copies in {out_dir}" + (
                     f" ({len(problems)} problems, see the Log)" if problems else "")
                 log.info(message)
+                if problems:
+                    shown = tr("FX rendered: {count} copies in {folder} ({problems} problems, see the Log)",
+                               count=len(results), folder=out_dir, problems=len(problems))
+                else:
+                    shown = tr("FX rendered: {count} copies in {folder}", count=len(results), folder=out_dir)
                 if app.project is not project:
                     project.save()
                     return
                 app._save_project()
                 app._render_overview()
-                app.update_status(message)
+                app.update_status(shown)
                 if self.winfo_exists():
                     self.refresh_transitions()
-                    self.status(message)
+                    self.status(shown)
             app.root.after(0, done)
-        app._start_task("Apply all FX", work,
-                        on_stopped=lambda: self._apply_finished("FX render stopped: the project keeps its previous FX copies"))
+        app._start_task(tr("Apply all FX"), work,
+                        on_stopped=lambda: self._apply_finished(tr("FX render stopped: the project keeps its previous FX copies")))
 
     def _apply_finished(self, message):
         self._applying = False

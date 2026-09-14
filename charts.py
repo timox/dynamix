@@ -15,6 +15,8 @@ from typing import Dict, List, Optional, Sequence
 from matplotlib.figure import Figure
 import numpy as np
 
+from i18n import tr
+
 SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
 TEXT2 = "#52514e"
@@ -100,8 +102,8 @@ def set_overview(tracks: Sequence[Dict], targets: Optional[Sequence[float]] = No
         _style(ax)
 
     if targets is not None and len(targets) == n:
-        ax1.plot(x, targets, color=GRAY, linewidth=2, solid_capstyle="round", label="Target curve")
-    ax1.plot(x, energy, color=BLUE, linewidth=2, solid_capstyle="round", solid_joinstyle="round", label="Energy level")
+        ax1.plot(x, targets, color=GRAY, linewidth=2, solid_capstyle="round", label=tr("Target curve"))
+    ax1.plot(x, energy, color=BLUE, linewidth=2, solid_capstyle="round", solid_joinstyle="round", label=tr("Energy level"))
     ax1.scatter(x, energy, s=70, color=BLUE, edgecolors=SURFACE, linewidths=2, zorder=3)
     if n:
         i_max = int(np.argmax(energy))
@@ -111,8 +113,8 @@ def set_overview(tracks: Sequence[Dict], targets: Optional[Sequence[float]] = No
                      xytext=(-8, -3), ha="right", fontsize=8, color=TEXT2)
     ax1.set_ylim(0, 10.5)
     ax1.set_yticks([0, 2, 4, 6, 8, 10])
-    ax1.set_ylabel("Energy (1-10)")
-    ax1.set_title("Set energy curve", loc="left", fontsize=11)
+    ax1.set_ylabel(tr("Energy (1-10)"))
+    ax1.set_title(tr("Set energy curve"), loc="left", fontsize=11)
     if targets is not None and len(targets) == n:
         ax1.legend(loc="upper left", frameon=False, fontsize=8, labelcolor=TEXT2)
     ax1.tick_params(labelbottom=False)
@@ -128,7 +130,7 @@ def set_overview(tracks: Sequence[Dict], targets: Optional[Sequence[float]] = No
         pad = max(3.0, (hi - lo) * 0.25)
         ax2.set_ylim(lo - pad, hi + pad)
     ax2.set_ylabel("BPM")
-    ax2.set_title("Tempo along the set", loc="left", fontsize=11)
+    ax2.set_title(tr("Tempo along the set"), loc="left", fontsize=11)
     ax2.set_xticks(x)
     ax2.set_xticklabels(names, rotation=30, ha="right", fontsize=8)
     ax2.set_xlim(0.5, n + 0.5 if n else 1.5)
@@ -179,7 +181,7 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
             ax.plot([x, x], [y_bot - height / 2, y_top + height / 2], color=GRAY, linewidth=1)
             score = float(t.get("score", 100))
             if score < 70:
-                ax.text(x, y_bot - height / 2 - 0.08, f"score {score:.0f}", ha="center", va="top",
+                ax.text(x, y_bot - height / 2 - 0.08, tr("score {score:.0f}", score=score), ha="center", va="top",
                         fontsize=7, color=TEXT2)
             label = (fx_labels or {}).get(i)
             if label:
@@ -195,8 +197,8 @@ def set_timeline(profiles: Sequence[Dict], transitions: Optional[Sequence[Dict]]
         ticks = [0]
     ax.set_xticks(ticks)
     ax.set_xticklabels([_fmt_time(v) for v in ticks])
-    ax.set_xlabel("Set time (min:sec)")
-    ax.set_title("Set map  (light = intro/outro, blue = body, gray = skipped tail)", loc="left", fontsize=11)
+    ax.set_xlabel(tr("Set time (min:sec)"))
+    ax.set_title(tr("Set map  (light = intro/outro, blue = body, gray = skipped tail)"), loc="left", fontsize=11)
     return _finish(fig)
 
 
@@ -228,11 +230,13 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
     ticks = np.arange(0, duration + 1, 60 if duration > 240 else 30) if duration else [0]
     ax1.set_xticks(ticks)
     ax1.set_xticklabels([_fmt_time(v) for v in ticks])
-    ax1.set_ylabel("Energy (dB rel. peak)")
+    ax1.set_ylabel(tr("Energy (dB rel. peak)"))
     m = profile.get("mastering") or {}
-    head = f"{_short(profile.get('filename', ''), 40)} — {float(profile.get('bpm') or 0):.1f} BPM · {profile.get('key') or '-'} · energy {float(profile.get('energy_level') or 0):.1f}/10"
+    head = tr("{name} — {bpm:.1f} BPM · {key} · energy {energy:.1f}/10", name=_short(profile.get('filename', ''), 40),
+              bpm=float(profile.get('bpm') or 0), key=profile.get('key') or '-', energy=float(profile.get('energy_level') or 0))
     if m.get("lufs") is not None:
-        head += f"\n{m['lufs']:.1f} LUFS · true peak {m['true_peak_db']:+.1f} dBTP · PLR {m['plr']:.1f} dB · mastering score {m['score']:.0f}/100"
+        head += "\n" + tr("{lufs:.1f} LUFS · true peak {true_peak:+.1f} dBTP · PLR {plr:.1f} dB · mastering score {score:.0f}/100",
+                          lufs=m['lufs'], true_peak=m['true_peak_db'], plr=m['plr'], score=m['score'])
     ax1.set_title(head, loc="left", fontsize=10)
 
     sub = gs[1].subgridspec(1, 2, width_ratios=[1.0, 1.0], wspace=0.3)
@@ -256,7 +260,7 @@ def _bass_width_axes(ax, report: Dict):
     phase = (report or {}).get("phase") or {}
     bands = phase.get("bass_width_bands") or {}
     if not phase.get("stereo") or not bands:
-        ax.text(0.5, 0.5, "No bass width data", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.text(0.5, 0.5, tr("No bass width data"), transform=ax.transAxes, ha="center", color=TEXT2)
         ax.set_xticks([])
         ax.set_yticks([])
         return
@@ -272,11 +276,11 @@ def _bass_width_axes(ax, report: Dict):
     ax.set_yticklabels(["-40", "-30", "-20 mono", "-10", "0"], fontsize=7)
     ax.set_xticks(x)
     ax.set_xticklabels([n.split("-")[0] for n in names], fontsize=7)
-    ax.set_xlabel("band start (Hz)", fontsize=8)
-    ax.set_ylabel("side vs mid (dB)", fontsize=8)
+    ax.set_xlabel(tr("band start (Hz)"), fontsize=8)
+    ax.set_ylabel(tr("side vs mid (dB)"), fontsize=8)
     below = phase.get("mono_below_hz") or 0
-    verdict = f"mono below {below:.0f} Hz" if below else "NOT mono"
-    ax.set_title(f"Bass width: {verdict} (red = stereo band)", loc="left", fontsize=10)
+    verdict = tr("mono below {hz:.0f} Hz", hz=below) if below else tr("NOT mono")
+    ax.set_title(tr("Bass width: {verdict} (red = stereo band)", verdict=verdict), loc="left", fontsize=10)
 
 
 def _phase_axes(ax, report: Dict):
@@ -284,17 +288,17 @@ def _phase_axes(ax, report: Dict):
     _style(ax, grid_axis="x")
     phase = (report or {}).get("phase") or {}
     if not phase:
-        ax.text(0.5, 0.5, "No phase data (run the mastering check)", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.text(0.5, 0.5, tr("No phase data (run the mastering check)"), transform=ax.transAxes, ha="center", color=TEXT2)
         ax.set_yticks([])
         return
     if not phase.get("stereo"):
-        ax.text(0.5, 0.5, "Mono file: no stereo phase to check", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.text(0.5, 0.5, tr("Mono file: no stereo phase to check"), transform=ax.transAxes, ha="center", color=TEXT2)
         ax.set_yticks([])
-        ax.set_title("Stereo phase", loc="left", fontsize=10)
+        ax.set_title(tr("Stereo phase"), loc="left", fontsize=10)
         return
-    rows = [("L/R overall", phase.get("correlation", 1.0)),
-            ("Bass < 150 Hz", phase.get("correlation_low", 1.0)),
-            ("Highs > 1 kHz", phase.get("correlation_high", 1.0))]
+    rows = [(tr("L/R overall"), phase.get("correlation", 1.0)),
+            (tr("Bass < 150 Hz"), phase.get("correlation_low", 1.0)),
+            (tr("Highs > 1 kHz"), phase.get("correlation_high", 1.0))]
     y = np.arange(len(rows))[::-1]
     values = [float(v) for _, v in rows]
     ax.barh(y, values, height=0.5, color=[BLUE if v >= 0 else RED for v in values], linewidth=0)
@@ -309,14 +313,17 @@ def _phase_axes(ax, report: Dict):
                     fontsize=8, color=TEXT2)
     ax.set_xlim(-1.05, 1.05)
     ax.set_xticks([-1, 0, 1])
-    ax.set_xticklabels(["-1\ninverted", "0", "+1\nin phase"], fontsize=8)
+    ax.set_xticklabels([tr("-1\ninverted"), "0", tr("+1\nin phase")], fontsize=8)
     ax.set_yticks(y)
     ax.set_yticklabels([label for label, _ in rows], fontsize=8)
-    ax.set_xlabel("correlation (shaded: cancels in mono)", fontsize=8)
+    ax.set_xlabel(tr("correlation (shaded: cancels in mono)"), fontsize=8)
     mono = phase.get("mono_loss_db", 0.0)
     comb = phase.get("comb_delay_ms")
-    extra = f"mono fold-down {mono:+.1f} dB" + (f", comb ≈ {comb:.2f} ms" if comb else "")
-    ax.set_title(f"Stereo phase ({extra})", loc="left", fontsize=10)
+    if comb:
+        title = tr("Stereo phase (mono fold-down {mono:+.1f} dB, comb ≈ {comb:.2f} ms)", mono=mono, comb=comb)
+    else:
+        title = tr("Stereo phase (mono fold-down {mono:+.1f} dB)", mono=mono)
+    ax.set_title(title, loc="left", fontsize=10)
 
 
 BAND_LABELS = [("sub", "Sub (20-60 Hz)"), ("low", "Low (60-250)"), ("low_mid", "Low-mid (250-800)"),
@@ -327,13 +334,13 @@ def _mastering_balance_axes(ax, report: Dict, set_median: Optional[Dict[str, flo
     _style(ax, grid_axis="x")
     balance = (report or {}).get("balance_db") or {}
     if not balance:
-        ax.text(0.5, 0.5, "No mastering data", transform=ax.transAxes, ha="center", color=TEXT2)
+        ax.text(0.5, 0.5, tr("No mastering data"), transform=ax.transAxes, ha="center", color=TEXT2)
         ax.set_yticks([])
         return
     reference = set_median or balance
     labels, values = [], []
     for key, label in BAND_LABELS:
-        labels.append(label)
+        labels.append(tr(label))  # the BAND_LABELS texts are in the catalog
         values.append(float(balance.get(key, 0.0)) - float(reference.get(key, 0.0)))
     y = np.arange(len(labels))[::-1]
     colors = [BLUE if v >= 0 else RED for v in values]
@@ -346,8 +353,8 @@ def _mastering_balance_axes(ax, report: Dict, set_median: Optional[Dict[str, flo
     ax.set_xlim(-lim, lim)
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=8)
-    ax.set_xlabel("Band level vs. set median (dB)" if set_median else "Band level vs. this track's average (dB)")
-    ax.set_title("Tone balance (blue = more than the set, red = less)", loc="left", fontsize=10)
+    ax.set_xlabel(tr("Band level vs. set median (dB)") if set_median else tr("Band level vs. this track's average (dB)"))
+    ax.set_title(tr("Tone balance (blue = more than the set, red = less)"), loc="left", fontsize=10)
 
 
 # ------------------------------------------------------------------ pre-master
@@ -368,29 +375,29 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
         ax.text(ref, n - 0.35, ref_label, fontsize=8, color=TEXT2, ha="center", va="bottom")
         for yi, b, a in zip(y, before, after):
             ax.plot([b, a], [yi, yi], color=GRID, linewidth=2, solid_capstyle="round")
-        ax.scatter(before, y, s=70, color=BLUE_LIGHT, edgecolors=SURFACE, linewidths=2, zorder=3, label="Before")
-        ax.scatter(after, y, s=70, color=BLUE_DARK, edgecolors=SURFACE, linewidths=2, zorder=4, label="After")
+        ax.scatter(before, y, s=70, color=BLUE_LIGHT, edgecolors=SURFACE, linewidths=2, zorder=3, label=tr("Before"))
+        ax.scatter(after, y, s=70, color=BLUE_DARK, edgecolors=SURFACE, linewidths=2, zorder=4, label=tr("After"))
         ax.set_xlabel(xlabel)
         ax.set_ylim(-0.7, n - 0.2)
 
     lufs_b = [float(r["before"]["lufs"] if r["before"]["lufs"] is not None else -70) for r in ok]
     lufs_a = [float(r["after"]["lufs"] if r["after"]["lufs"] is not None else -70) for r in ok]
-    dumbbell(ax1, lufs_b, lufs_a, target_lufs, f"target {target_lufs:g} LUFS", "Integrated loudness (LUFS)")
+    dumbbell(ax1, lufs_b, lufs_a, target_lufs, tr("target {lufs:g} LUFS", lufs=target_lufs), tr("Integrated loudness (LUFS)"))
     ax1.set_yticks(y)
     ax1.set_yticklabels(names, fontsize=8)
-    ax1.set_title("Loudness: before -> after", loc="left", fontsize=11)
+    ax1.set_title(tr("Loudness: before -> after"), loc="left", fontsize=11)
     ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, frameon=False, fontsize=8, labelcolor=TEXT2)
 
     tp_b = [float(r["before"]["true_peak_db"]) for r in ok]
     tp_a = [float(r["after"]["true_peak_db"]) for r in ok]
-    dumbbell(ax2, tp_b, tp_a, ceiling_db, f"ceiling {ceiling_db:g} dBTP", "True peak (dBTP)")
+    dumbbell(ax2, tp_b, tp_a, ceiling_db, tr("ceiling {db:g} dBTP", db=ceiling_db), tr("True peak (dBTP)"))
     clipped = [yi for yi, r in zip(y, ok) if r["before"].get("clip_runs", 0) > 0]
     if clipped:
         ax2.scatter([max(tp_b) + 1.2] * len(clipped), clipped, marker="x", s=40, color=STATUS_CRITICAL,
-                    linewidths=1.5, label="was clipping")
+                    linewidths=1.5, label=tr("was clipping"))
         ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3, frameon=False, fontsize=8, labelcolor=TEXT2)
     ax2.tick_params(labelleft=False)
-    ax2.set_title("True peak: before -> after", loc="left", fontsize=11)
+    ax2.set_title(tr("True peak: before -> after"), loc="left", fontsize=11)
     return _finish(fig)
 
 
@@ -416,7 +423,7 @@ def band_dynamics(report: Dict) -> Figure:
             ax1.plot(times, bands[name], color=GRAY, linewidth=1.5, solid_capstyle="round", label=label)
     if "mud" in bands:
         ax1.plot(times, bands["mud"], color=BLUE, linewidth=2, solid_capstyle="round", label="200-500 Hz")
-    ax1.set_ylabel("band level (dBFS)")
+    ax1.set_ylabel(tr("band level (dBFS)"))
     ax1.set_xlim(0, duration)
     ticks = np.arange(0, duration + 1, 60 if duration > 240 else 30) if duration else [0]
     ax1.set_xticks(ticks)
@@ -424,8 +431,13 @@ def band_dynamics(report: Dict) -> Figure:
     ax1.legend(loc="center right", frameon=False, fontsize=8, labelcolor=TEXT2, ncol=1)
     st = (report.get("stats") or {}).get("mud") or {}
     rel = report.get("release_s")
-    ax1.set_title(f"Band tracking — 200-500 Hz range {st.get('range_db', 0):.1f} dB, pulse {st.get('beat_modulation', 0):.2f}"
-                  + (f" (release {rel * 1000:.0f} ms)" if rel else ""), loc="left", fontsize=10)
+    if rel:
+        title = tr("Band tracking — 200-500 Hz range {range:.1f} dB, pulse {pulse:.2f} (release {release:.0f} ms)",
+                   range=st.get('range_db', 0), pulse=st.get('beat_modulation', 0), release=rel * 1000)
+    else:
+        title = tr("Band tracking — 200-500 Hz range {range:.1f} dB, pulse {pulse:.2f}",
+                   range=st.get('range_db', 0), pulse=st.get('beat_modulation', 0))
+    ax1.set_title(title, loc="left", fontsize=10)
 
     ax2 = fig.add_subplot(gs[1], sharex=ax1)
     _style(ax2)
@@ -437,10 +449,11 @@ def band_dynamics(report: Dict) -> Figure:
         ax2.plot(times, masking, color=BLUE, linewidth=1.5)
         ax2.axhline(median, color=GRAY, linewidth=1)
         ax2.axhline(median + 6, color=GRAY, linewidth=1)
-        ax2.text(duration, median + 6.3, "build-up (+6 dB)", fontsize=7, color=TEXT2, ha="right", va="bottom")
-    ax2.set_ylabel("200-500 vs neighbours (dB)")
-    ax2.set_title(f"Low-mid masking — typical {mud.get('excess_median_db', 0):+.0f} dB, worst {mud.get('excess_p90_db', 0):+.0f} dB, "
-                  f"build-up {mud.get('buildup_share', 0) * 100:.0f}%", loc="left", fontsize=10)
+        ax2.text(duration, median + 6.3, tr("build-up (+6 dB)"), fontsize=7, color=TEXT2, ha="right", va="bottom")
+    ax2.set_ylabel(tr("200-500 vs neighbours (dB)"))
+    ax2.set_title(tr("Low-mid masking — typical {typical:+.0f} dB, worst {worst:+.0f} dB, build-up {share:.0f}%",
+                     typical=mud.get('excess_median_db', 0), worst=mud.get('excess_p90_db', 0),
+                     share=mud.get('buildup_share', 0) * 100), loc="left", fontsize=10)
     ax2.set_xticks(ticks)
     ax2.set_xticklabels([_fmt_time(v) for v in ticks])
 
@@ -470,12 +483,12 @@ def band_dynamics(report: Dict) -> Figure:
             ax3.annotate(f"{res['freq_hz']:.0f} Hz ~ {n['note']}" + (f" ({n['degree']})" if n["in_key"] else ""),
                          (res["freq_hz"], res["prominence_db"]), textcoords="offset points", xytext=(6, 4), fontsize=8, color=TEXT2)
     else:
-        ax3.text(0.5, 0.5, "Track too short for the resonance spectrum", transform=ax3.transAxes, ha="center", color=TEXT2)
+        ax3.text(0.5, 0.5, tr("Track too short for the resonance spectrum"), transform=ax3.transAxes, ha="center", color=TEXT2)
     ax3.set_xlabel("Hz")
-    ax3.set_ylabel("above spectral envelope (dB)")
+    ax3.set_ylabel(tr("above spectral envelope (dB)"))
     n_res = len(report.get("resonances") or [])
-    legend = f"blue = note of {report['key']}, red = other" if report.get("key") else "red dots"
-    ax3.set_title(f"Resonances 100-800 Hz  —  {n_res} persistent peak(s) ({legend})", loc="left", fontsize=10)
+    legend = tr("blue = note of {key}, red = other", key=report['key']) if report.get("key") else tr("red dots")
+    ax3.set_title(tr("Resonances 100-800 Hz  —  {n} persistent peak(s) ({legend})", n=n_res, legend=legend), loc="left", fontsize=10)
     import textwrap
     lines = [("! " + l) for l in (report.get("flags") or [])] + [f"EQ: {sug}" for sug in (report.get("eq_suggestions") or [])]
     if report.get("verdict") == "mix":
@@ -542,10 +555,10 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
 
     t = np.linspace(x0, x1, 400)
     for ax, env, shift, wave_color, faint, line_color, gain, name, note in (
-            (axes[0], a_env, 0.0, BLUE_LIGHT, "#e4eefa", BLUE_DARK, a_gain, "A  (out)", "A fades out"),
-            (axes[1], b_env, layout["b_shift"], VIOLET_LIGHT, "#eee8f8", VIOLET, b_gain, "B  (in)", "B fades in")):
+            (axes[0], a_env, 0.0, BLUE_LIGHT, "#e4eefa", BLUE_DARK, a_gain, tr("A  (out)"), tr("A fades out")),
+            (axes[1], b_env, layout["b_shift"], VIOLET_LIGHT, "#eee8f8", VIOLET, b_gain, tr("B  (in)"), tr("B fades in"))):
         if not _waveform(ax, env, shift, x0, x1, wave_color, gain=gain, faint=faint):
-            ax.text(x0 + span * 0.01, 0.0, "waveform loading ...", fontsize=8, color=TEXT2, va="center")
+            ax.text(x0 + span * 0.01, 0.0, tr("waveform loading ..."), fontsize=8, color=TEXT2, va="center")
         ax.plot(t, gain(t), color=line_color, linewidth=1.5)
         ax.set_ylim(-1.05, 1.2)
         ax.set_ylabel(name, rotation=0, ha="right", va="center", fontsize=9)
@@ -553,7 +566,7 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
 
     for n_lane, (ax, lane) in enumerate(zip(axes[2:], lanes)):
         ax.set_ylim(-0.5, 0.5)
-        ax.set_ylabel(lane["label"], rotation=0, ha="right", va="center", fontsize=8)
+        ax.set_ylabel(tr(lane["label"]), rotation=0, ha="right", va="center", fontsize=8)
         for n, blk in enumerate(lane["blocks"]):
             kind = blk["kind"]
             color = BLUE_DARK if kind in ("repeat", "sample") and n % 2 else _BLOCK_COLORS.get(kind, BLUE)
@@ -562,16 +575,18 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
                     hatch="///" if kind == "tail" else None, edgecolor=GRAY if kind == "tail" else color)
             if blk.get("label") and width > span / 30:
                 dark = color in (BLUE, BLUE_DARK)
-                ax.text(max(blk["start"], x0) + min(width, x1 - max(blk["start"], x0)) / 2, 0.0, blk["label"],
+                # fixed words of transition_fx ("captured", "tail", "held", ...) are in the catalog; a sample shows its file name
+                text = blk["label"] if kind == "sample" else tr(blk["label"])
+                ax.text(max(blk["start"], x0) + min(width, x1 - max(blk["start"], x0)) / 2, 0.0, text,
                         fontsize=7, color="white" if dark else TEXT, ha="center", va="center", clip_on=True)
         if lane.get("note"):
-            ax.text(x0 + span * 0.01, 0.0, lane["note"], fontsize=8, color=TEXT2, va="center")
+            ax.text(x0 + span * 0.01, 0.0, tr(lane["note"]), fontsize=8, color=TEXT2, va="center")
 
     if result_env:
         ax = axes[-1]
         _waveform(ax, result_env, 0.0, x0, x1, BLUE)
         ax.set_ylim(-1.05, 1.05)
-        ax.set_ylabel("Result", rotation=0, ha="right", va="center", fontsize=9)
+        ax.set_ylabel(tr("Result"), rotation=0, ha="right", va="center", fontsize=9)
 
     for ax in axes:
         for tb, k in layout["beat_times"]:
@@ -586,20 +601,20 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
     for ax in axes[:-1]:
         ax.tick_params(labelbottom=False)
     top = axes[0]
-    top.text(j, 1.22, "junction", ha="center", va="bottom", fontsize=8, color=TEXT)
+    top.text(j, 1.22, tr("junction"), ha="center", va="bottom", fontsize=8, color=TEXT)
     if a_end > j + span * 0.06:
-        top.text(a_end, 1.22, "A ends", ha="center", va="bottom", fontsize=8, color=TEXT2)
+        top.text(a_end, 1.22, tr("A ends"), ha="center", va="bottom", fontsize=8, color=TEXT2)
     planned = layout["planned_junction"]
     if abs(planned - j) > 1e-3:
         near_a_end = a_end > j + span * 0.06 and abs(planned - a_end) < span * 0.12
         # written on the side away from the "A ends" label when the two lines are close
-        top.text(planned, 1.22, "planned  " if near_a_end and planned < a_end else "  planned",
+        top.text(planned, 1.22, tr("planned") + "  " if near_a_end and planned < a_end else "  " + tr("planned"),
                  ha="right" if near_a_end and planned < a_end else "left", va="bottom", fontsize=8, color=TEXT2)
     bars = [(tb, k) for tb, k in layout["beat_times"] if k % 4 == 0 and x0 <= tb <= x1]
     axes[-1].set_xticks([tb for tb, _ in bars])
     axes[-1].set_xticklabels(["J" if k == 0 else f"{k:+d}" for _, k in bars])
-    axes[-1].set_xlabel(f"Beats from the junction (1 beat = {layout['period']:.2f} s; thick lines = bars)")
+    axes[-1].set_xlabel(tr("Beats from the junction (1 beat = {period:.2f} s; thick lines = bars)", period=layout['period']))
     warnings = layout.get("warnings") or []
-    top.set_title("Transition" + (f"   ⚠ {warnings[0]}" if warnings else ""), loc="left", fontsize=10,
+    top.set_title(tr("Transition") + (f"   ⚠ {warnings[0]}" if warnings else ""), loc="left", fontsize=10,
                   color=STATUS_CRITICAL if warnings else TEXT, pad=14)
     return _finish(fig)

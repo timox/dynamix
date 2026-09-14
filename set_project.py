@@ -435,18 +435,19 @@ class SetProject:
                 "premaster_ready": bool(self._premaster_outputs()),
                 "use_premaster": bool(self.options.get("use_premaster", True))}
 
-    def audio_used_text(self) -> str:
-        """One line saying which audio the FX, the playlist and the Mixxx export use."""
+    def audio_used_text(self, translate=None) -> str:
+        """One line saying which audio the FX, the playlist and the Mixxx export use (translate: i18n.tr for the GUI)."""
+        t = translate or (lambda text, **values: text.format(**values))
         s = self.audio_sources()
         if not s["total"]:
-            return "Audio used: - (no analysed tracks yet)"
-        parts = [f"{label} {s[key]}" for key, label in (("fx", "FX copies"), ("premaster", "pre-mastered copies"),
-                                                         ("original", "originals")) if s[key]]
-        text = f"Audio used: {' · '.join(parts)} (of {s['total']} tracks)"
+            return t("Audio used: - (no analysed tracks yet)")
+        parts = [t(label, n=s[key]) for key, label in (("fx", "FX copies {n}"), ("premaster", "pre-mastered copies {n}"),
+                                                       ("original", "originals {n}")) if s[key]]
+        text = t("Audio used: {parts} (of {total} tracks)", parts=" · ".join(parts), total=s["total"])
         if s["premaster_ready"] and not s["use_premaster"]:
-            text += " - pre-mastered copies not used"
+            text += t(" - pre-mastered copies not used")
         elif not s["premaster_ready"]:
-            text += " - no pre-master yet"
+            text += t(" - no pre-master yet")
         return text
 
     # ------------------------------------------------------------- transition FX

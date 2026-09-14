@@ -12,6 +12,7 @@ from tkinter import ttk
 
 from analysis_store import dynamix_home
 import i18n
+from i18n import tr
 
 if getattr(sys, "frozen", False):
     # shareable build: numba cannot write its compilation cache inside the application folder
@@ -29,11 +30,11 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
 
     def __init__(self, root, log_buffer=None):
         self.root = root
-        self.root.title("DynaMix - DJ Set Builder")
         self.root.geometry("1200x800")
 
         self.config = Config()
         i18n.set_language(self.config.get("language"))  # before any text is shown
+        self.root.title(tr("DynaMix - DJ Set Builder"))
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
         self.apply_font_size(self.config.get("font_size"), redraw=False)  # before any widget uses the fonts
         import audio_tools
@@ -44,14 +45,14 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
         # Status bar (created first: tabs may report while they load a project): message, then the newest running task
         bar = ttk.Frame(root)
         bar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.task_stop_button = ttk.Button(bar, text="■ Stop", width=8, command=self.stop_latest_task)
+        self.task_stop_button = ttk.Button(bar, text=tr("■ Stop"), width=8, command=self.stop_latest_task)
         self.task_stop_button.pack(side=tk.RIGHT, padx=(4, 2), pady=1)
         self.task_stop_button.state(["disabled"])
         self.task_progress = ttk.Progressbar(bar, length=160, maximum=100)
         self.task_progress.pack(side=tk.RIGHT, padx=4)
         self.task_status = ttk.Label(bar, text="", foreground="#52514e")
         self.task_status.pack(side=tk.RIGHT, padx=6)
-        self.status_bar = tk.Label(bar, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar = tk.Label(bar, text=tr("Ready"), bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.notebook = ttk.Notebook(root)

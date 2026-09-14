@@ -13,6 +13,7 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 from analysis_store import dynamix_home, get_store
+from i18n import tr
 
 DEFAULTS: Dict[str, Any] = {
     "projects_root": os.path.join(os.path.expanduser("~"), "DynaMix Projects"),
@@ -89,19 +90,20 @@ class Config:
 
 
 def environment_report() -> List[Tuple[str, bool, str]]:
-    """[(label, ok, detail)] describing what DynaMix can rely on here."""
+    """[(label, ok, detail)] describing what DynaMix can rely on here (texts in the interface language: display only)."""
     rows: List[Tuple[str, bool, str]] = []
     rows.append(("Python", sys.version_info >= (3, 8), f"{sys.version.split()[0]} ({sys.executable})"))
     try:
         import tkinter
-        rows.append(("Tkinter (GUI)", True, f"Tk {tkinter.TkVersion}"))
+        rows.append((tr("Tkinter (GUI)"), True, f"Tk {tkinter.TkVersion}"))
     except Exception as exc:
-        rows.append(("Tkinter (GUI)", False, str(exc)))
+        rows.append((tr("Tkinter (GUI)"), False, str(exc)))
     try:
         import soundfile as sf
         formats = sf.available_formats()
         rows.append(("soundfile / libsndfile", True, f"libsndfile {sf.__libsndfile_version__}"))
-        rows.append(("MP3 read/write (libsndfile)", "MP3" in formats, "native, no FFmpeg needed" if "MP3" in formats else "missing: install FFmpeg for MP3"))
+        rows.append((tr("MP3 read/write (libsndfile)"), "MP3" in formats,
+                     tr("native, no FFmpeg needed") if "MP3" in formats else tr("missing: install FFmpeg for MP3")))
         rows.append(("FLAC / OGG (libsndfile)", "FLAC" in formats and "OGG" in formats, ""))
     except Exception as exc:
         rows.append(("soundfile / libsndfile", False, str(exc)))
@@ -112,32 +114,33 @@ def environment_report() -> List[Tuple[str, bool, str]]:
         rows.append(("librosa", False, str(exc)))
     try:
         import numba
-        rows.append(("numba (fast limiter)", True, numba.__version__))
+        rows.append((tr("numba (fast limiter)"), True, numba.__version__))
     except Exception:
-        rows.append(("numba (fast limiter)", False, "not installed: the limiter uses a slower pure-Python loop"))
+        rows.append((tr("numba (fast limiter)"), False, tr("not installed: the limiter uses a slower pure-Python loop")))
     ffmpeg = shutil.which("ffmpeg")
-    rows.append(("FFmpeg (optional, M4A/AAC only)", bool(ffmpeg), ffmpeg or "not found: set it in the Configuration tab"))
+    rows.append((tr("FFmpeg (optional, M4A/AAC only)"), bool(ffmpeg), ffmpeg or tr("not found: set it in the Configuration tab")))
     try:
         import audio_tools
         cfg = Config()
         for spec in audio_tools.EDITORS:
             path = (cfg.get(f"editor_{spec['key']}") or "").strip()
-            rows.append((f"Audio editor: {spec['label']}", bool(path) and os.path.isfile(path),
-                         path or "not set (Configuration tab, Detect)"))
+            rows.append((tr("Audio editor: {name}", name=spec["label"]), bool(path) and os.path.isfile(path),
+                         path or tr("not set (Configuration tab, Detect)")))
     except Exception as exc:
-        rows.append(("Audio editors", False, str(exc)))
+        rows.append((tr("Audio editors"), False, str(exc)))
     try:
         from mixxx_export import find_mixxx_db
         detected = find_mixxx_db()
-        rows.append(("Mixxx database (auto-detected)", bool(detected), detected or "not found: set it in the Configuration tab"))
+        rows.append((tr("Mixxx database (auto-detected)"), bool(detected), detected or tr("not found: set it in the Configuration tab")))
     except Exception as exc:
-        rows.append(("Mixxx database (auto-detected)", False, str(exc)))
+        rows.append((tr("Mixxx database (auto-detected)"), False, str(exc)))
     try:
         stats = get_store().stats()
-        rows.append(("Analysis cache", True, f"{stats['files']} files, {stats['entries']} results, {stats['size_bytes'] / 1e6:.1f} MB at {stats['db_path']}"))
+        rows.append((tr("Analysis cache"), True, tr("{files} files, {entries} results, {size:.1f} MB at {path}", files=stats["files"],
+                                                   entries=stats["entries"], size=stats["size_bytes"] / 1e6, path=stats["db_path"])))
     except Exception as exc:
-        rows.append(("Analysis cache", False, str(exc)))
-    rows.append(("DynaMix home", True, dynamix_home()))
+        rows.append((tr("Analysis cache"), False, str(exc)))
+    rows.append((tr("DynaMix home"), True, dynamix_home()))
     return rows
 
 

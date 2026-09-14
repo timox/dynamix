@@ -10,6 +10,8 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+from i18n import tr
+
 log = logging.getLogger("dynamix.tasks")
 MUTED = "#52514e"
 
@@ -19,25 +21,48 @@ def _clock(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+def _state_text(state: str) -> str:
+    """A task state (tasks.Task.state, or 'stopping') as shown in the Tasks tab."""
+    return {"running": tr("running"), "done": tr("done"), "stopped": tr("stopped"), "failed": tr("failed"),
+            "stopping": tr("stopping")}.get(state, state)
+
+
+def _progress_text(task) -> str:
+    """Task.progress_text() with its words translated (the numbers and the detail stay as they are)."""
+    if task.state == "done":
+        return tr("done")
+    if task.state == "stopped":
+        return tr("stopped")
+    if task.state == "failed":
+        return tr("failed: {error}", error=task.error)
+    text = task.progress_text()
+    stopping = text.startswith("stopping... ")
+    if stopping:
+        text = text[len("stopping... "):]
+    if text == "working" or text.startswith("working · "):
+        text = tr("working") + text[len("working"):]
+    return tr("stopping... {progress}", progress=text) if stopping else text
+
+
 class TasksTabMixin:
     """Needs: root, notebook, task_manager, task_status, task_progress, task_stop_button, update_status, _report_error."""
 
     def create_tasks_tab(self):
         frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Tasks")
+        self.notebook.add(frame, text=tr("Tasks"))
         self.tasks_frame = frame
-        self._tasks_title = "Tasks"
+        self._tasks_title = tr("Tasks")
         bar = ttk.Frame(frame)
         bar.pack(fill=tk.X, padx=10, pady=(10, 4))
-        ttk.Button(bar, text="■ Stop selected", command=self.stop_selected_task).pack(side=tk.LEFT)
-        ttk.Button(bar, text="Clear finished", command=self.clear_finished_tasks).pack(side=tk.LEFT, padx=6)
-        ttk.Label(bar, text="Stop ends a task after the track in progress; a stopped task leaves the project unchanged "
-                            "(analyses already done stay in the cache).", foreground=MUTED).pack(side=tk.LEFT, padx=8)
+        ttk.Button(bar, text=tr("■ Stop selected"), command=self.stop_selected_task).pack(side=tk.LEFT)
+        ttk.Button(bar, text=tr("Clear finished"), command=self.clear_finished_tasks).pack(side=tk.LEFT, padx=6)
+        ttk.Label(bar, text=tr("Stop ends a task after the track in progress; a stopped task leaves the project unchanged "
+                               "(analyses already done stay in the cache)."), foreground=MUTED).pack(side=tk.LEFT, padx=8)
         self.tasks_tree = ttk.Treeview(frame, columns=("Task", "Project", "Progress", "Time", "State"), show="headings",
                                        selectmode="browse")
         for col, width, stretch in (("Task", 180, False), ("Project", 140, False), ("Progress", 480, True),
                                     ("Time", 60, False), ("State", 90, False)):
-            self.tasks_tree.heading(col, text=col)
+            self.tasks_tree.heading(col, text=tr(col))
             self.tasks_tree.column(col, width=width, stretch=stretch, anchor="w")
         self.tasks_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         self.root.after(300, self._poll_tasks)
@@ -50,12 +75,12 @@ class TasksTabMixin:
 
         def stopped(_task):
             log.info("%s: stopped", name)
-            self.root.after(0, self.update_status, f"{name}: stopped")
+            self.root.after(0, self.update_status, tr("{name}: stopped", name=name))
             if on_stopped:
                 self.root.after(0, on_stopped)
 
         def failed(_task, exc):
-            self._report_error(f"{name} failed: {exc}", exc)
+            self._report_error(tr("{name} failed: {error}", name=name, error=exc), exc)
 
         self.task_manager.run(task, work, on_stopped=stopped, on_error=failed)
         self._refresh_tasks()
@@ -69,7 +94,7 @@ class TasksTabMixin:
     def stop_latest_task(self):
         task = self.task_manager.latest_stoppable()
         if task is not None and task.cancel():
-            self.update_status(f"Stopping '{task.name}' after the track in progress ...")
+            self.update_status(tr("Stopping '{name}' after the track in progress ...", name=task.name))
             self._refresh_tasks()
         return task
 
@@ -79,9 +104,9 @@ class TasksTabMixin:
         if task is None:
             return None
         if task.cancel():
-            self.update_status(f"Stopping '{task.name}' after the track in progress ...")
+            self.update_status(tr("Stopping '{name}' after the track in progress ...", name=task.name))
         elif task.state == "running":
-            self.update_status(f"'{task.name}' cannot be stopped: it ends in a moment")
+            self.update_status(tr("'{name}' cannot be stopped: it ends in a moment", name=task.name))
         self._refresh_tasks()
         return task
 
@@ -109,8 +134,10 @@ class TasksTabMixin:
                 tree.delete(iid)
         for position, task in enumerate(tasks):
             iid = str(task.id)
-            state = ("stopping" if task.stopping else task.state) + ("" if task.cancellable or task.state != "running" else " (no stop)")
-            values = (task.name, task.project, task.progress_text(), _clock(task.elapsed(now)), state)
+            state = _state_text("stopping" if task.stopping else task.state)
+            if not task.cancellable and task.state == "running":
+                state = tr("{state} (no stop)", state=state)
+            values = (task.name, task.project, _progress_text(task), _clock(task.elapsed(now)), state)
             if tree.exists(iid):
                 if tuple(tree.item(iid, "values")) != tuple(str(v) for v in values):
                     tree.item(iid, values=values)
@@ -119,7 +146,7 @@ class TasksTabMixin:
             else:
                 tree.insert("", position, iid=iid, values=values)
         running = [t for t in tasks if t.state == "running"]
-        title = f"Tasks ({len(running)})" if running else "Tasks"
+        title = tr("Tasks ({n})", n=len(running)) if running else tr("Tasks")
         if title != self._tasks_title:
             self._tasks_title = title
             self.notebook.tab(self.tasks_frame, text=title)
@@ -130,7 +157,7 @@ class TasksTabMixin:
             self.task_stop_button.state(["disabled"])
             return
         more = f" (+{len(running) - 1})" if len(running) > 1 else ""
-        self.task_status.config(text=f"{latest.name}{more}: {latest.progress_text()}")
+        self.task_status.config(text=tr("{name}{more}: {progress}", name=latest.name, more=more, progress=_progress_text(latest)))
         self.task_progress.config(value=(latest.fraction or 0.0) * 100)
         stoppable = self.task_manager.latest_stoppable() is not None
         self.task_stop_button.state(["!disabled"] if stoppable else ["disabled"])

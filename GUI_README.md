@@ -112,7 +112,11 @@ python gui.py
 
 ### 2. Configuration Tab
 - **Display**: the font size (8 to 18 points) of the whole window, the tables
-  and the charts, applied and saved at once
+  and the charts, applied and saved at once; the **Language** (Auto = the
+  Windows language, English, Français), applied at the next start. DJ jargon
+  (set list, cue, FX, BPM...) stays in English. The French texts live in
+  `locales/fr/*.json`; to correct one without touching the application, put
+  the entry in `<DynaMix home>/locales/fr.json` (`{"English text": "Texte"}`)
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
   = auto-detect), the music library folder, the FX samples folder, FFmpeg
   (optional, only for M4A/AAC; Detect; added to DynaMix's PATH), and where

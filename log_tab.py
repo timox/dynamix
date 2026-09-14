@@ -14,7 +14,9 @@ from tkinter import ttk
 
 import app_log
 import reports
+from i18n import tr
 
+# filter codes (the combobox shows their translation, see _log_level_code)
 LEVELS = {"All": logging.DEBUG, "Reports": None, "Warnings and errors": logging.WARNING, "Errors": logging.ERROR}
 REPORTS_DIR = "reports"
 log = logging.getLogger("dynamix.reports")
@@ -34,29 +36,29 @@ class LogTabMixin:
 
     def create_log_tab(self):
         frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Log")
+        self.notebook.add(frame, text=tr("Log"))
         self.log_frame = frame
         self._log_unseen = 0
         self._log_new_reports = 0
-        self._log_title = "Log"
+        self._log_title = tr("Log")
         bar = ttk.Frame(frame)
         bar.pack(fill=tk.X, padx=10, pady=(10, 4))
-        ttk.Label(bar, text="Show:").pack(side=tk.LEFT)
-        self.log_level_var = tk.StringVar(value="All")
-        combo = ttk.Combobox(bar, textvariable=self.log_level_var, values=list(LEVELS), width=20, state="readonly")
+        ttk.Label(bar, text=tr("Show:")).pack(side=tk.LEFT)
+        self.log_level_var = tk.StringVar(value=tr("All"))
+        combo = ttk.Combobox(bar, textvariable=self.log_level_var, values=[tr(code) for code in LEVELS], width=20, state="readonly")
         combo.pack(side=tk.LEFT, padx=4)
         combo.bind("<<ComboboxSelected>>", lambda e: self._log_rebuild())
-        ttk.Button(bar, text="Copy", command=self._log_copy).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bar, text="Clear view", command=self._log_clear).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bar, text="Open log folder", command=self._log_open_folder).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bar, text="Open reports folder", command=self._reports_open_folder).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bar, text=tr("Copy"), command=self._log_copy).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bar, text=tr("Clear view"), command=self._log_clear).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bar, text=tr("Open log folder"), command=self._log_open_folder).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bar, text=tr("Open reports folder"), command=self._reports_open_folder).pack(side=tk.LEFT, padx=4)
 
-        self.reports_box = ttk.LabelFrame(frame, text="Reports (open project)")
+        self.reports_box = ttk.LabelFrame(frame, text=tr("Reports (open project)"))
         self.reports_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
         self.reports_tree = ttk.Treeview(self.reports_box, columns=("Time", "Report"), show="headings",
                                          height=6, selectmode="browse")
-        self.reports_tree.heading("Time", text="Time")
-        self.reports_tree.heading("Report", text="Report")
+        self.reports_tree.heading("Time", text=tr("Time"))
+        self.reports_tree.heading("Report", text=tr("Report"))
         self.reports_tree.column("Time", width=130, stretch=False)
         self.reports_tree.column("Report", width=200)
         self.reports_tree.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0), pady=4)
@@ -85,7 +87,7 @@ class LogTabMixin:
         self.notebook.bind("<<NotebookTabChanged>>", lambda e: self._log_tab_changed(), add="+")
         self._reports_refresh()
         if self.log_buffer is None:
-            self._log_append("Log capture is not installed (start DynaMix with gui.py to see the application log).",
+            self._log_append(tr("Log capture is not installed (start DynaMix with gui.py to see the application log)."),
                              logging.WARNING)
             return
         self._log_rebuild()
@@ -119,7 +121,7 @@ class LogTabMixin:
         try:
             text = reports.read_report(sel[0])
         except OSError as e:
-            text = f"Cannot read {sel[0]}: {e}"
+            text = tr("Cannot read {path}: {error}", path=sel[0], error=e)
         self._show_report_text(text)
 
     def _show_report_text(self, text):
@@ -158,8 +160,13 @@ class LogTabMixin:
         _open_folder(folder)
 
     # ------------------------------------------------------------------ log
+    def _log_level_code(self):
+        """Code of the chosen filter (a key of LEVELS), from its label in any language."""
+        label = self.log_level_var.get()
+        return next((code for code in LEVELS if label in (code, tr(code))), "All")
+
     def _log_min_level(self):
-        return LEVELS.get(self.log_level_var.get()) or logging.DEBUG
+        return LEVELS.get(self._log_level_code()) or logging.DEBUG
 
     def _log_append(self, text, levelno):
         at_bottom = self.log_text.yview()[1] >= 0.999
@@ -171,7 +178,7 @@ class LogTabMixin:
             self.log_text.see(tk.END)
 
     def _log_rebuild(self):
-        if self.log_level_var.get() == "Reports":
+        if self._log_level_code() == "Reports":
             self.log_body.pack_forget()
         elif not self.log_body.winfo_manager():
             self.log_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
@@ -208,8 +215,9 @@ class LogTabMixin:
         if self._log_unseen:
             parts.append(f"{self._log_unseen} ⚠")
         if self._log_new_reports:
-            parts.append(f"{self._log_new_reports} new report{'s' if self._log_new_reports > 1 else ''}")
-        title = f"Log ({' · '.join(parts)})" if parts else "Log"
+            n = self._log_new_reports
+            parts.append(tr("{n} new reports", n=n) if n > 1 else tr("{n} new report", n=n))
+        title = tr("Log ({details})", details=" · ".join(parts)) if parts else tr("Log")
         if title != self._log_title:
             self._log_title = title
             self.notebook.tab(self.log_frame, text=title)
@@ -223,7 +231,7 @@ class LogTabMixin:
     def _log_copy(self):
         self.root.clipboard_clear()
         self.root.clipboard_append(self.log_text.get("1.0", tk.END))
-        self.update_status("Log copied to the clipboard")
+        self.update_status(tr("Log copied to the clipboard"))
 
     def _log_clear(self):
         if self.log_buffer is not None:
