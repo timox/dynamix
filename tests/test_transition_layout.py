@@ -75,6 +75,18 @@ class TestTransitionLayout(unittest.TestCase):
         self.assertEqual(across["label"], "Filter highpass (A+B)")
         self.assertEqual(across["curve"][0][0], 2.0)
 
+    def test_planned_and_a_ends_labels_do_not_overlap(self):
+        # a freeze ending near the planned junction: the two labels go on either side of their lines
+        freeze = dict(tfx.new_effect("freeze"), capture_offset_beats=-2, steps=[{"beats": 1, "repeats": 4}])
+        lay = layout([freeze])
+        span = lay["view"][1] - lay["view"][0]
+        self.assertLess(abs(lay["planned_junction"] - lay["a_end"]), span * 0.12)   # close on the chart
+        fig = charts.transition_detail(lay)
+        labels = {t.get_text().strip(): t.get_horizontalalignment() for t in fig.axes[0].texts}
+        planned_left = lay["planned_junction"] < lay["a_end"]
+        self.assertEqual(labels["A ends"], "left" if planned_left else "right")
+        self.assertEqual(labels["planned"], "right" if planned_left else "left")
+
     def test_filter_response_chart(self):
         for kind in ("highpass", "lowpass", "bandpass"):
             fig = charts.filter_response(dict(tfx.new_effect("filter"), kind=kind, resonance=4.0))

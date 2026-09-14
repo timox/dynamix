@@ -76,7 +76,10 @@ python gui.py
   opening the incoming one, or *across* the junction: one sweep from **Start**
   beats applied to both tracks at the same moments, so the two copies mixed by
   Mixxx sound like the mix going through one filter; **Return to dry** sets how
-  many beats the track takes to sound normal again after the sweep; the
+  many beats the track takes to sound normal again after the sweep (a high-pass
+  or low-pass is turned back like a knob, so the bass or treble come back
+  progressively; with *across* nothing masks the return, 2 to 4 beats sound
+  smooth); the
   settings draw the filter's response at the start and end of the sweep, bass
   on the left, the resonance bump at the cutoff and the band-pass width), **Echo** (tempo-synced) and **Sample** (from the
   FX samples folder — click to use, double-click to hear; its BPM is read from

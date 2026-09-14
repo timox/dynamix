@@ -246,10 +246,12 @@ def filter_q(kind: str, resonance: float, width_octaves: float) -> float:
 
 
 def sweep_filter(x: np.ndarray, sr: int, kind: str, start_hz: float, end_hz: float, q: float,
-                 sweep_samples: int, curve: str = "exponential", hold_start: int = 0) -> np.ndarray:
+                 sweep_samples: int, curve: str = "exponential", hold_start: int = 0,
+                 release_samples: int = 0, release_hz: Optional[float] = None) -> np.ndarray:
     """
     Time-varying biquad: start_hz during the first `hold_start` samples, then a sweep to end_hz
-    over `sweep_samples`, then end_hz. Coefficients change every BLOCK samples; the state is kept.
+    over `sweep_samples`, then end_hz — or, with release_hz, a second sweep from end_hz to release_hz over
+    release_samples (the knob turned back). Coefficients change every BLOCK samples; the state is kept.
     """
     x = to_stereo(x)
     y = np.empty_like(x)
@@ -260,11 +262,16 @@ def sweep_filter(x: np.ndarray, sr: int, kind: str, start_hz: float, end_hz: flo
     for start in range(0, n, BLOCK):
         end = min(n, start + BLOCK)
         centre = (start + end) / 2.0 - hold_start
-        t = 0.0 if centre <= 0 else min(1.0, centre / max(1, sweep_samples))
-        if curve == "linear":
-            freq = start_hz + (end_hz - start_hz) * t
+        lo_hz, hi_hz = start_hz, end_hz
+        if release_hz is not None and centre > sweep_samples:
+            lo_hz, hi_hz = end_hz, release_hz
+            t = min(1.0, (centre - sweep_samples) / max(1, release_samples))
         else:
-            freq = start_hz * (end_hz / start_hz) ** t
+            t = 0.0 if centre <= 0 else min(1.0, centre / max(1, sweep_samples))
+        if curve == "linear":
+            freq = lo_hz + (hi_hz - lo_hz) * t
+        else:
+            freq = lo_hz * (hi_hz / lo_hz) ** t
         b, a = biquad_coefficients(kind, freq, q, sr)
         if zi is None:
             zi = signal.lfilter_zi(b, a)[:, None] * x[0][None, :]
@@ -487,30 +494,47 @@ def _apply_freeze(ctx: TransitionContext, fx: Dict) -> None:
     ctx.a_end = capture_t + len(body) / ctx.a_sr
 
 
+FILTER_XFADE_S = 0.05  # dry <-> filtered crossfade where a filter starts, and after it has been turned back
+
+
 def _filter_span(audio: np.ndarray, sr: int, fx: Dict, first: int, sweep_start: int, sweep_end: int,
                  stop: int, release: Optional[int] = None) -> None:
     """
     Filter audio[first:] in place: start_hz until sweep_start, the sweep until sweep_end, then end_hz — held until
-    stop, or back to the dry track over `release` samples after the sweep (never past stop). The indices may lie
-    outside the audio: the frequency at every sample is still the one of the sweep at that moment.
+    stop, or back to the dry track over `release` samples after the sweep (never past stop): a high-pass or low-pass
+    is turned back to a neutral cutoff (so the bass or the treble come back progressively), a band-pass fades to dry.
+    The indices may lie outside the audio: the frequency at every sample is still the one of the sweep at that moment.
     """
+    kind = fx["kind"]
+    # turned back to 30 Hz rather than lower: the bass return is as smooth, and a strong resonance never booms below it
+    neutral = {"highpass": 30.0, "lowpass": 0.45 * sr}.get(kind)
+    xfade = max(1, int(round(FILTER_XFADE_S * sr)))
+    if release is None:
+        dry_from = None
+    elif neutral is None:
+        dry_from, dry_len = sweep_end, max(1, release)
+    else:
+        dry_from, dry_len = sweep_end + release, xfade
     first = max(0, first)
-    last = min(len(audio), stop if release is None else min(stop, sweep_end + release))
+    last = min(len(audio), stop if dry_from is None else min(stop, dry_from + dry_len))
     if last <= first:
         return
-    q = filter_q(fx["kind"], fx.get("resonance", 0.707), fx.get("width_octaves", 1.0))
-    wet = sweep_filter(audio[first:last], sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
-                       max(1, sweep_end - sweep_start), fx.get("curve", "exponential"), hold_start=sweep_start - first)
-    if release is not None:
-        mix = np.ones(last - first, dtype=np.float32)
-        ramp = np.linspace(1.0, 0.0, release, dtype=np.float32) if release > 0 else np.zeros(0, dtype=np.float32)
-        begin = sweep_end - first
-        lo, hi = max(0, begin), min(len(mix), begin + release)
+    q = filter_q(kind, fx.get("resonance", 0.707), fx.get("width_octaves", 1.0))
+    wet = sweep_filter(audio[first:last], sr, kind, fx["start_hz"], fx["end_hz"], q, max(1, sweep_end - sweep_start),
+                       fx.get("curve", "exponential"), hold_start=sweep_start - first,
+                       release_samples=release or 0, release_hz=neutral if release is not None else None)
+    mix = np.ones(last - first, dtype=np.float32)
+    if first > 0:  # the track before stays dry: no step where the filter starts
+        n = min(xfade, len(mix))
+        mix[:n] = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    if dry_from is not None:
+        begin = dry_from - first
+        ramp = np.linspace(1.0, 0.0, dry_len, dtype=np.float32)
+        lo, hi = max(0, begin), min(len(mix), begin + dry_len)
         if hi > lo:
-            mix[lo:hi] = ramp[lo - begin:hi - begin]
-        mix[max(0, begin + release):] = 0.0
-        wet = wet * mix[:, None] + audio[first:last] * (1.0 - mix[:, None])
-    audio[first:last] = wet
+            mix[lo:hi] = np.minimum(mix[lo:hi], ramp[lo - begin:hi - begin])
+        mix[max(0, begin + dry_len):] = 0.0
+    audio[first:last] = wet * mix[:, None] + audio[first:last] * (1.0 - mix[:, None])
 
 
 def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
@@ -518,14 +542,13 @@ def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
     a_beat_n = int(round(ctx.a_period * ctx.a_sr))
     # A: up to one beat after it stops being audible (the filter state settles, the rest of A is never heard)
     a_stop = ctx.a_index(ctx.a_end) + a_beat_n
-    # the return to the dry track lasts at least a few ms (no click)
-    release_s = max(EDGE_FADE_S, float(fx.get("release_beats", 1)) * ctx.a_period)
+    release_s = float(fx.get("release_beats", 1)) * ctx.a_period
     if side == "outgoing":
         start_i = ctx.a_index(ctx.a_beat(-int(fx["beats"])))
         _filter_span(ctx.a, ctx.a_sr, fx, start_i, start_i, ctx.a_index(ctx.junction_a), a_stop)
     elif side == "incoming":
         junction_i = ctx.b_index(ctx.junction_b)
-        b_release = max(EDGE_FADE_S, float(fx.get("release_beats", 1)) * median_period(ctx.b_beats))
+        b_release = float(fx.get("release_beats", 1)) * median_period(ctx.b_beats)
         _filter_span(ctx.b, ctx.b_sr, fx, 0, junction_i, ctx.b_index(ctx.b_beat(int(fx["beats"]))), len(ctx.b),
                      int(round(b_release * ctx.b_sr)))
     else:

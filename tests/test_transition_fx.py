@@ -136,6 +136,25 @@ class TestFilters(unittest.TestCase):
         dry = ctx.b[ctx.b_index(4.0):ctx.b_index(5.0)]                            # B after the release
         self.assertAlmostEqual(rms_db(dry), rms_db(b[int(4.0 * SR):int(5.0 * SR)]), delta=0.2)
 
+    def test_across_filter_gives_the_bass_back_progressively(self):
+        sr = 22050
+        grid_b = [i * 0.5 for i in range(200)]
+        rng = np.random.default_rng(1)
+        ctx = tfx.make_context(rng.normal(0, 0.2, (30 * sr, 2)).astype(np.float32), sr, grid_b, 20.0, 26.0,
+                               rng.normal(0, 0.2, (30 * sr, 2)).astype(np.float32), sr, grid_b, 2.0)
+        fx = dict(tfx.new_effect("filter"), side="across", kind="highpass", start_hz=20, end_hz=1000, beats=8,
+                  start_offset_beats=-4, release_beats=4)                 # sweep 18 -> 22 s, filter turned back until 24 s
+        tfx.apply_effects(ctx, [fx])
+        out, _ = tfx.preview_mix(ctx, 10.0, "short")                       # the clip starts at 16 s
+        b_lo, a_lo = signal.butter(4, 200, fs=sr)
+        low = signal.lfilter(b_lo, a_lo, out[:, 0])
+        hop = int(0.1 * sr)
+        level = np.array([rms_db(low[i:i + hop]) for i in range(0, len(low) - hop, hop)])
+        self.assertLess(level[58], level[10] - 20)                         # the bass is gone at the end of the sweep
+        self.assertLess(float(np.diff(level)[58:100].max()), 7.0)          # and comes back without a jump
+        self.assertAlmostEqual(float(level[85:95].mean()), float(level[5:15].mean()), delta=2.0)
+        self.assertLess(abs(float(level[20] - np.median(level[15:25]))), 3.0)  # no step where the filter starts
+
     def test_resonance_and_bandpass_response(self):
         b, a = tfx.biquad_coefficients("highpass", 1000, tfx.filter_q("highpass", 8, 1), SR)
         _, h = signal.freqz(b, a, worN=[1000], fs=SR)
