@@ -470,7 +470,10 @@ class SetProject:
 
     def fx_transition(self, a: str, b: str) -> Dict:
         """The FX entry of a -> b, created empty when missing."""
-        return self.data["fx"]["transitions"].setdefault(self.fx_key(a, b), {"nudge_ms": 0.0, "effects": []})
+        entry = self.data["fx"]["transitions"].setdefault(self.fx_key(a, b), {"a": a, "b": b, "nudge_ms": 0.0, "effects": []})
+        entry.setdefault("a", a)
+        entry.setdefault("b", b)
+        return entry
 
     def _fx_changed(self) -> None:
         self.data["fx"]["render"] = None
@@ -506,7 +509,10 @@ class SetProject:
         neighbours = set(self.set_list_pairs())
         out = []
         for key, entry in self.data["fx"]["transitions"].items():
-            a, _, b = key.partition("|")
+            if "a" in entry and "b" in entry:
+                a, b = entry["a"], entry["b"]
+            else:  # entries saved before the pair was stored
+                a, _, b = key.partition("|")
             if entry.get("effects") and (a, b) not in neighbours:
                 out.append((a, b))
         return out
@@ -517,7 +523,7 @@ class SetProject:
     def fx_map(self) -> Dict[str, Dict]:
         """original file path -> FX render result, for copies that exist on disk."""
         render = self.data["fx"].get("render") or {}
-        return {r["source"]: r for r in render.get("results") or [] if r.get("output") and os.path.exists(r["output"])}
+        return {r["source"]: r for r in render.get("results") or [] if r.get("output") and "error" not in r and os.path.exists(r["output"])}
 
     def rendered_profiles(self, profiles: List[Dict]) -> Tuple[List[Dict], Dict[str, int]]:
         """

@@ -95,6 +95,19 @@ class TestSetProjectFx(unittest.TestCase):
         q.save()
         self.assertEqual(len(SetProject.open(self.p.folder).fx_for_pair(self.a, self.b)["effects"]), 1)
 
+    def test_paths_with_a_pipe_and_error_results(self):
+        weird = "/lib/a|weird.wav"
+        self.p.set_tracks([{"file_path": x, "filename": os.path.basename(x)} for x in (weird, self.b, self.c)])
+        self.p.set_order([weird, self.b, self.c])
+        self.p.set_fx_effects(weird, self.b, [self.freeze])
+        self.p.set_order([self.b, weird, self.c])
+        self.assertEqual(self.p.inactive_fx_pairs(), [(weird, self.b)])
+        os.makedirs(self.p.fx_dir)
+        out = os.path.join(self.p.fx_dir, "b.wav")
+        open(out, "wb").close()
+        self.p.set_fx_render([{"source": self.b, "output": out, "error": "boom"}])
+        self.assertEqual(self.p.fx_map(), {})
+
 
 if __name__ == "__main__":
     unittest.main()
