@@ -24,6 +24,7 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin):
 
         self.config = Config()
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
+        self.apply_font_size(self.config.get("font_size"), redraw=False)  # before any widget uses the fonts
 
         # Status bar (created first: tabs may report while they load a project)
         self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)

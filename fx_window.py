@@ -410,7 +410,7 @@ class TransitionFxPanel(ttk.Frame):
             ttk.Label(self.settings, text="Select a transition, then add or select an effect.", foreground=MUTED).pack(anchor="w")
             return
         fx = self.effects()[self.fx_index]
-        ttk.Label(self.settings, text=FX_NAMES[fx["type"]], font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        ttk.Label(self.settings, text=FX_NAMES[fx["type"]], font="DynaMixTitle").pack(anchor="w")
         form = ttk.Frame(self.settings)
         form.pack(fill=tk.X, pady=4)
         self._form_vars = self._fields(form, FIELDS[fx["type"]], fx, lambda key, value: self.update_effect({key: value}))

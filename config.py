@@ -27,6 +27,7 @@ DEFAULTS: Dict[str, Any] = {
     "fix_phase": True,
     "mono_bass_hz": 120.0,         # pre-master: force mono bass below this frequency (0 = off)
     "output_format": "same",       # same | wav | flac | mp3 | ogg
+    "font_size": 9,                # GUI text size in points (ui_fonts.py), charts included
 }
 
 

@@ -44,8 +44,17 @@ def _style(ax, grid_axis: str = "y"):
     ax.yaxis.label.set_color(TEXT2)
 
 
+_SCALE = 1.0  # GUI font size / default size: charts are drawn at a higher resolution to match
+
+
+def set_scale(scale: float) -> None:
+    """Draw the next figures `scale` times bigger on screen (text, lines and designed height)."""
+    global _SCALE
+    _SCALE = max(0.5, float(scale))
+
+
 def _figure(width: float = 9.0, height: float = 5.0) -> Figure:
-    fig = Figure(figsize=(width, height), dpi=100)
+    fig = Figure(figsize=(width, height), dpi=100 * _SCALE)
     fig.patch.set_facecolor(SURFACE)
     return fig
 

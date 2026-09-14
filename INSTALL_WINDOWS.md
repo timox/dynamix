@@ -164,6 +164,10 @@ bas tous les messages et erreurs.
 
 ## 5 ter. L'onglet Configuration
 
+Le bloc **Display** règle la taille des caractères (8 à 18 points) de toute la
+fenêtre, des tableaux et des graphiques ; elle s'applique et s'enregistre
+immédiatement.
+
 Tout ce qui dépend de votre machine est réuni là : le dossier des projets, la
 base Mixxx (bouton *Detect*, ou laissez vide pour la détection automatique),
 les valeurs par défaut des nouveaux projets (durée, courbe, longueur de fondu,

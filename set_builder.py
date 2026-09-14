@@ -19,6 +19,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import charts
 import library
+import ui_fonts
 import set_proposer
 from analysis_store import get_store, dynamix_home
 from config import format_environment_report
@@ -101,7 +102,7 @@ class SetBuilderMixin:
             detail.pack(fill=tk.X, padx=28)
             self.step_widgets[key] = {"status": status, "detail": detail}
         self.next_step_label = ttk.Label(steps_frame, text="Next: open or create a project.", wraplength=330,
-                                         anchor="w", justify=tk.LEFT, font=("TkDefaultFont", 9, "bold"))
+                                         anchor="w", justify=tk.LEFT, font=ui_fonts.BOLD)
         self.next_step_label.pack(fill=tk.X, padx=6, pady=(6, 4))
         
         options_frame = ttk.LabelFrame(left, text="Options for this set")
@@ -1259,6 +1260,7 @@ class SetBuilderMixin:
     
     def on_track_selected(self, tree=None):
         tree = tree or self.set_tree
+        self._track_tree_shown = tree  # redrawn after a font size change
         rows = self._set_rows if tree is self.set_tree else self._selection_rows
         track = self._selected(tree, rows)
         if track is None or track.get("state", "analysed") != "analysed":
@@ -1309,9 +1311,21 @@ class ConfigTabMixin:
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="Configuration")
         cfg = self.config
-        
+
+        display = ttk.LabelFrame(frame, text="Display")
+        display.pack(fill=tk.X, padx=10, pady=(10, 5))
+        drow = ttk.Frame(display)
+        drow.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Label(drow, text="Font size:").pack(side=tk.LEFT)
+        self.cfg_font_size_var = tk.StringVar(value=str(self.font_size))
+        ttk.Spinbox(drow, from_=ui_fonts.MIN_SIZE, to=ui_fonts.MAX_SIZE, increment=1, textvariable=self.cfg_font_size_var,
+                    width=5).pack(side=tk.LEFT, padx=4)
+        ttk.Label(drow, text=f"points ({ui_fonts.MIN_SIZE} to {ui_fonts.MAX_SIZE}): the whole window, the tables and the "
+                             "charts, applied and saved at once", foreground=MUTED).pack(side=tk.LEFT, padx=6)
+        self.cfg_font_size_var.trace_add("write", lambda *a: self._font_size_changed())
+
         paths = ttk.LabelFrame(frame, text="Paths")
-        paths.pack(fill=tk.X, padx=10, pady=(10, 5))
+        paths.pack(fill=tk.X, padx=10, pady=5)
         grid = ttk.Frame(paths)
         grid.pack(fill=tk.X, padx=6, pady=6)
         ttk.Label(grid, text="Projects folder:").grid(row=0, column=0, sticky="w", pady=3)
@@ -1380,10 +1394,36 @@ class ConfigTabMixin:
         env_bar.pack(anchor="w", padx=6, pady=4)
         ttk.Button(env_bar, text="Refresh", command=self.refresh_environment).pack(side=tk.LEFT)
         ttk.Button(env_bar, text="Clear whole cache...", command=self.clear_whole_cache).pack(side=tk.LEFT, padx=6)
-        self.env_text = scrolledtext.ScrolledText(env, height=12, font=("Consolas", 9))
+        self.env_text = scrolledtext.ScrolledText(env, height=12, font=ui_fonts.MONO)
         self.env_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
         self.refresh_environment()
-    
+
+    def apply_font_size(self, size, redraw=True):
+        """Apply a font size to the whole GUI and the charts; with `redraw`, draw the shown charts again."""
+        self.font_size = ui_fonts.apply(self.root, size)
+        charts.set_scale(ui_fonts.chart_scale(self.font_size))
+        if redraw and getattr(self, "project", None) is not None:
+            self._render_overview()
+            self._render_premaster()
+            tree = getattr(self, "_track_tree_shown", None)
+            if tree is not None:
+                self.on_track_selected(tree)
+            if getattr(self, "fx_panel", None) is not None:
+                self.fx_panel.schedule_chart()
+        return self.font_size
+
+    def _font_size_changed(self):
+        try:
+            size = int(self.cfg_font_size_var.get())
+        except ValueError:
+            return  # being typed
+        if not ui_fonts.MIN_SIZE <= size <= ui_fonts.MAX_SIZE or size == self.font_size:
+            return
+        self.apply_font_size(size)
+        self.config.set("font_size", self.font_size)
+        self.config.save()
+        self.update_status(f"Font size: {self.font_size} pt")
+
     def _cfg_pick_dir(self, var):
         d = filedialog.askdirectory(title="Choose folder", initialdir=var.get() or None)
         if d:
@@ -1416,6 +1456,7 @@ class ConfigTabMixin:
         cfg.set("fix_phase", bool(self.cfg_phase_var.get()))
         cfg.set("output_format", self.cfg_format_var.get())
         cfg.set("mono_bass_hz", float(self.cfg_mono_var.get()))
+        cfg.set("font_size", self.font_size)
         os.makedirs(cfg.projects_root, exist_ok=True)
         path = cfg.save()
         self.cfg_status.config(text=f"Saved to {path}")

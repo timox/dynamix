@@ -76,6 +76,17 @@ def scenario():
         app.notebook.select(0)
 
         check(app.cfg_library_var.get() == LIBRARY, "the Configuration tab shows the library folder")
+        from tkinter import font as tkfont, ttk as tkttk
+        import charts
+        rows_before = int(tkttk.Style(root).lookup("Treeview", "rowheight"))
+        app.cfg_font_size_var.set("13")
+        check(tkfont.nametofont("TkDefaultFont").cget("size") == 13 and app.config.get("font_size") == 13,
+              "the font size is applied and saved")
+        check(tkfont.nametofont("DynaMixMono").cget("size") == 13, "the Log and report texts follow the font size")
+        check(int(tkttk.Style(root).lookup("Treeview", "rowheight")) > rows_before, "table rows grow with the font")
+        check(abs(charts._SCALE - 13 / 9) < 1e-6, "the charts follow the font size")
+        app.cfg_font_size_var.set("9")
+        check(app.font_size == 9 and abs(charts._SCALE - 1.0) < 1e-6, "the font size can be set back")
 
         check(pump(lambda: not app._library_scanning and len(app._library_rows) == 2, 10.0),
               "the library lists the 2 tracks of the library folder")

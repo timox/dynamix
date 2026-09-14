@@ -62,7 +62,7 @@ class LogTabMixin:
         self.reports_tree.bind("<<TreeviewSelect>>", lambda e: self._report_selected())
         viewer = ttk.Frame(self.reports_box)
         viewer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self.report_text = tk.Text(viewer, wrap=tk.NONE, font=("Consolas", 9), state=tk.DISABLED, height=12)
+        self.report_text = tk.Text(viewer, wrap=tk.NONE, font="DynaMixMono", state=tk.DISABLED, height=12)
         rvsb = ttk.Scrollbar(viewer, orient=tk.VERTICAL, command=self.report_text.yview)
         rhsb = ttk.Scrollbar(viewer, orient=tk.HORIZONTAL, command=self.report_text.xview)
         self.report_text.configure(yscrollcommand=rvsb.set, xscrollcommand=rhsb.set)
@@ -72,7 +72,7 @@ class LogTabMixin:
 
         self.log_body = ttk.Frame(frame)
         self.log_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        self.log_text = tk.Text(self.log_body, wrap=tk.NONE, font=("Consolas", 9), state=tk.DISABLED)
+        self.log_text = tk.Text(self.log_body, wrap=tk.NONE, font="DynaMixMono", state=tk.DISABLED)
         vsb = ttk.Scrollbar(self.log_body, orient=tk.VERTICAL, command=self.log_text.yview)
         hsb = ttk.Scrollbar(self.log_body, orient=tk.HORIZONTAL, command=self.log_text.xview)
         self.log_text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)

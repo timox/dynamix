@@ -83,6 +83,8 @@ python gui.py
   in the Log tab
 
 ### 2. Configuration Tab
+- **Display**: the font size (8 to 18 points) of the whole window, the tables
+  and the charts, applied and saved at once
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
   = auto-detect), the music library folder, the FX samples folder, and where
   DynaMix keeps its cache and configuration
