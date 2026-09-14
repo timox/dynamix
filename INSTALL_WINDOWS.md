@@ -3,6 +3,12 @@
 Ce guide décrit l'installation de DynaMix sur Windows 10 ou 11. Aucune
 connaissance particulière de Python n'est nécessaire.
 
+DynaMix sert à **créer des playlists avec des transitions soignées**. Son
+premier usage est l'**Auto DJ de Mixxx** : DynaMix prépare la playlist, les
+repères d'intro et d'outro et, si besoin, des copies pré-masterisées ou avec
+FX, pour qu'Auto DJ enchaîne tout un set comme s'il était mixé. (Un
+changement de nom, par exemple *DynaMixxx*, est envisagé plus tard.)
+
 DynaMix est parti d'un fork de [makalin/dynamix](https://github.com/makalin/dynamix),
 dont il s'est depuis dissocié : il est devenu un outil de préparation de sets
 (projets, propositions de set, transitions, pré-mastering, FX, export Mixxx)

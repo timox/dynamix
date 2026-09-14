@@ -32,7 +32,7 @@ setup(
     name="dynamix",
     version=get_version(),
     author="timox (fork of makalin/dynamix by Mehmet T. Akalin)",
-    description="DJ set builder: set proposals, transition planning, pre-master, transition FX and Mixxx export",
+    description="Playlists with better transitions for the Mixxx Auto DJ: set proposals, transition planning, pre-master, transition FX",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
     url="https://github.com/timox/dynamix",

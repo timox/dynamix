@@ -1,9 +1,16 @@
 # DynaMix
 
-**DynaMix** prepares DJ sets from your own mixes: pick tracks from your music library, let it
-propose set lists that fit a duration and an energy curve, plan every transition on the beat,
-level badly mastered tracks, add transition FX (freeze / roll, filter sweeps, echo, FX samples)
-and push the result into [Mixxx](https://mixxx.org) so that its Auto DJ plays the whole set.
+**DynaMix** is dedicated to **building playlists with better transitions**. Its first use is the
+**Auto DJ of [Mixxx](https://mixxx.org)**: DynaMix prepares the playlist and everything Auto DJ
+needs to chain the tracks well, so that a whole set plays by itself and sounds mixed.
+
+From your own tracks it lets you pick a selection from your music library, proposes playlists
+that fit a duration and an energy curve, plans every transition on the beat (intro and outro
+cues), levels badly mastered tracks, adds transition FX (freeze / roll, filter sweeps, echo, FX
+samples) and exports the playlist with its cues into Mixxx.
+
+> Because the project is built for Mixxx first, it may later be renamed (for example
+> *DynaMixxx*); the name DynaMix is kept for now.
 
 ## About this fork
 
