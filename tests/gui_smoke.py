@@ -18,6 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 HOME = tempfile.mkdtemp(prefix="dynamix_gui_")
 os.environ["DYNAMIX_HOME"] = HOME
+os.environ["DYNAMIX_LANGUAGE"] = "en"  # the checks read English texts, whatever the machine's language
 
 import numpy as np
 import soundfile as sf

@@ -21,7 +21,7 @@ EXCLUDES = [
 a = Analysis(  # noqa: F821
     [os.path.join(ROOT, "gui.py")],
     pathex=[ROOT],
-    datas=[],
+    datas=[(os.path.join(ROOT, "locales"), "locales")],  # translations (i18n.package_dir)
     hiddenimports=["selftest"],
     excludes=EXCLUDES,
     noarchive=False,

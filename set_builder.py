@@ -19,6 +19,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import audio_tools
 import charts
+import i18n
+from i18n import tr
 import library
 import ui_fonts
 import set_proposer
@@ -1601,6 +1603,15 @@ class ConfigTabMixin:
         ttk.Label(drow, text=f"points ({ui_fonts.MIN_SIZE} to {ui_fonts.MAX_SIZE}): the whole window, the tables and the "
                              "charts, applied and saved at once", foreground=MUTED).pack(side=tk.LEFT, padx=6)
         self.cfg_font_size_var.trace_add("write", lambda *a: self._font_size_changed())
+        ttk.Label(drow, text=tr("Language:")).pack(side=tk.LEFT, padx=(24, 0))
+        self._language_choices = [("auto", tr("Auto (Windows language)"))] + list(i18n.LANGUAGES.items())
+        current = cfg.get("language") or "auto"
+        self.cfg_language_var = tk.StringVar(value=next((label for code, label in self._language_choices if code == current),
+                                                        self._language_choices[0][1]))
+        language_box = ttk.Combobox(drow, textvariable=self.cfg_language_var, state="readonly", width=24,
+                                    values=[label for _, label in self._language_choices])
+        language_box.pack(side=tk.LEFT, padx=4)
+        language_box.bind("<<ComboboxSelected>>", lambda e: self._language_changed())
 
         paths = ttk.LabelFrame(frame, text="Paths")
         paths.pack(fill=tk.X, padx=10, pady=5)
@@ -1718,6 +1729,16 @@ class ConfigTabMixin:
             if getattr(self, "fx_panel", None) is not None:
                 self.fx_panel.schedule_chart()
         return self.font_size
+
+    def _language_changed(self):
+        code = next((code for code, label in self._language_choices if label == self.cfg_language_var.get()), "auto")
+        if code == (self.config.get("language") or "auto"):
+            return
+        self.config.set("language", code)
+        self.config.save()
+        message = tr("The language is applied at the next start of DynaMix")
+        self.update_status(message)
+        messagebox.showinfo(tr("Language"), message)
 
     def _font_size_changed(self):
         try:

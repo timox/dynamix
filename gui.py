@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from analysis_store import dynamix_home
+import i18n
 
 if getattr(sys, "frozen", False):
     # shareable build: numba cannot write its compilation cache inside the application folder
@@ -32,6 +33,7 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
         self.root.geometry("1200x800")
 
         self.config = Config()
+        i18n.set_language(self.config.get("language"))  # before any text is shown
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
         self.apply_font_size(self.config.get("font_size"), redraw=False)  # before any widget uses the fonts
         import audio_tools
