@@ -110,8 +110,16 @@ python gui.py
 - **Display**: the font size (8 to 18 points) of the whole window, the tables
   and the charts, applied and saved at once
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
-  = auto-detect), the music library folder, the FX samples folder, and where
+  = auto-detect), the music library folder, the FX samples folder, FFmpeg
+  (optional, only for M4A/AAC; Detect; added to DynaMix's PATH), and where
   DynaMix keeps its cache and configuration
+- **Audio editors**: Audacity, Renoise, Ableton Live and Mixbus (Detect
+  editors finds the installed ones), each with its arguments: `{file}` is the
+  audio file; empty starts the editor and shows the file selected in Explorer,
+  ready to drag in (Ableton Live and Mixbus do not open an audio file given on
+  their command line). Right-click a track in the Library, Selection or Set
+  list: **Open in …** (and **Open pre-mastered copy in …** when there is one),
+  **Show in Explorer**
 - **Defaults for new projects**: set duration, energy curve, crossfade
   length, target loudness, tone matching, phase repair, pre-master format
 - **Environment**: what DynaMix found on this machine (Python, Tkinter,

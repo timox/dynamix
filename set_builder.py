@@ -17,6 +17,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+import audio_tools
 import charts
 import library
 import ui_fonts
@@ -167,6 +168,7 @@ class SetBuilderMixin:
                                             {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "Sel": 35},
                                             selectmode="extended")
         self.library_tree.bind("<Double-1>", lambda e: self.selection_add())
+        self.library_tree.bind("<Button-3>", lambda e: self._track_menu(e, self.library_tree, self._library_rows))
         self.library_filter_var.trace_add("write", lambda *args: self._refresh_library_table())
 
         # column 2: the tracks picked for this set
@@ -184,6 +186,7 @@ class SetBuilderMixin:
                                               selectmode="extended")
         self.selection_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.selection_tree))
         self.selection_tree.bind("<Double-1>", lambda e: self.selection_remove())
+        self.selection_tree.bind("<Button-3>", lambda e: self._track_menu(e, self.selection_tree, self._selection_rows))
 
         # column 3: proposals and the set list
         right_col = ttk.Frame(lists)
@@ -219,6 +222,7 @@ class SetBuilderMixin:
         self.set_tree.tag_configure("preview", foreground=MUTED)
         self.set_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.set_tree))
         self.set_tree.bind("<Double-1>", lambda e: self.set_remove())
+        self.set_tree.bind("<Button-3>", lambda e: self._track_menu(e, self.set_tree, self._set_rows))
         
         self.overview_frame = self._scrollable_tab("Overview")
         self.track_frame = self._scrollable_tab("Track")
@@ -275,6 +279,59 @@ class SetBuilderMixin:
         inner._notebook_tab = outer  # what set_notebook.select() needs: the inner frame is not a tab
         return inner
     
+    # ------------------------------------------------------------------ open a track in an audio editor
+    def _track_menu_entries(self, path):
+        """[(label, command)] of the right-click menu of a track: open it (and its pre-mastered copy) in the editors."""
+        copy_path = self.project._premaster_outputs().get(path) if self.project is not None else None
+        versions = [("", path)] + ([("pre-mastered copy ", copy_path)] if copy_path else [])
+        editors = [spec for spec in audio_tools.EDITORS if os.path.isfile((self.config.get(f"editor_{spec['key']}") or "").strip())]
+        entries = []
+        for prefix, file in versions:
+            for spec in editors:
+                entries.append((f"Open {prefix}in {spec['label']}", lambda k=spec["key"], f=file: self.open_in_editor(k, f)))
+            entries.append((f"Show {prefix}in Explorer", lambda f=file: self._reveal(f)))
+        if not editors:
+            entries.insert(0, ("No audio editor set: Configuration tab, 'Detect editors'", None))
+        return entries
+
+    def _track_menu(self, event, tree, rows):
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return None
+        index = tree.index(iid)
+        if not 0 <= index < len(rows) or not rows[index].get("file_path"):
+            return None
+        menu = tk.Menu(tree, tearoff=False)
+        for label, command in self._track_menu_entries(rows[index]["file_path"]):
+            if command is None:
+                menu.add_command(label=label, state="disabled")
+                menu.add_separator()
+            else:
+                menu.add_command(label=label, command=command)
+        menu.tk_popup(event.x_root, event.y_root)
+        return menu
+
+    def open_in_editor(self, key, file):
+        spec = audio_tools.editor(key)
+        exe = (self.config.get(f"editor_{key}") or "").strip()
+        args = self.config.get(f"editor_{key}_args") or ""
+        try:
+            result = audio_tools.open_in_editor(exe, args, file)
+        except Exception as e:
+            self._report_error(f"Cannot open {os.path.basename(file)} in {spec['label']}: {e}", e)
+            return None
+        message = f"{os.path.basename(file)} opened in {spec['label']}" + (
+            f" - drag the file shown in Explorer into {spec['label']}" if result["revealed"] else "")
+        log.info("%s (%s)", message, " ".join(result["command"]))
+        self.update_status(message)
+        return result
+
+    def _reveal(self, file):
+        try:
+            audio_tools.reveal(file)
+        except Exception as e:
+            self._report_error(f"Cannot show {file}: {e}", e)
+
     def _make_tree(self, parent, columns, widths, selectmode="browse", height=14):
         tree = ttk.Treeview(parent, columns=columns, show="headings", height=height, selectmode=selectmode)
         for col in columns:
@@ -1574,7 +1631,36 @@ class ConfigTabMixin:
         ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_dir(self.cfg_fx_samples_var)).grid(row=7, column=2)
         ttk.Label(grid, text="Risers, impacts, sweeps... used by Transition FX (30 s max per sample).",
                   foreground=MUTED).grid(row=8, column=1, sticky="w", padx=4)
+        ttk.Label(grid, text="FFmpeg (optional):").grid(row=9, column=0, sticky="w", pady=3)
+        self.cfg_ffmpeg_var = tk.StringVar(value=cfg.get("ffmpeg_path") or "")
+        ttk.Entry(grid, textvariable=self.cfg_ffmpeg_var, width=70).grid(row=9, column=1, sticky="we", padx=4)
+        ttk.Button(grid, text="Browse", command=lambda: self._cfg_pick_exe(self.cfg_ffmpeg_var, "ffmpeg.exe")).grid(row=9, column=2)
+        ttk.Button(grid, text="Detect", command=self._cfg_detect_ffmpeg).grid(row=9, column=3, padx=2)
+        ttk.Label(grid, text="Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH.",
+                  foreground=MUTED).grid(row=10, column=1, sticky="w", padx=4)
         grid.columnconfigure(1, weight=1)
+
+        editors = ttk.LabelFrame(frame, text="Audio editors (right-click a track: Open in...)")
+        editors.pack(fill=tk.X, padx=10, pady=5)
+        eg = ttk.Frame(editors)
+        eg.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Label(eg, text="Arguments: {file} is the audio file; empty = start the editor and show the file in Explorer "
+                           "(Ableton Live and Mixbus do not open an audio file given on their command line).",
+                  foreground=MUTED).grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 4))
+        self.cfg_editor_vars = {}
+        for row, spec in enumerate(audio_tools.EDITORS, 1):
+            key = spec["key"]
+            path_var = tk.StringVar(value=cfg.get(f"editor_{key}") or "")
+            args_var = tk.StringVar(value=cfg.get(f"editor_{key}_args") if cfg.get(f"editor_{key}_args") is not None else spec["args"])
+            self.cfg_editor_vars[key] = (path_var, args_var)
+            ttk.Label(eg, text=f"{spec['label']}:").grid(row=row, column=0, sticky="w", pady=2)
+            ttk.Entry(eg, textvariable=path_var, width=62).grid(row=row, column=1, sticky="we", padx=4)
+            ttk.Button(eg, text="Browse", command=lambda v=path_var, s=spec: self._cfg_pick_exe(v, s["exe"])).grid(row=row, column=2)
+            ttk.Label(eg, text="Arguments:").grid(row=row, column=3, sticky="e", padx=(8, 2))
+            ttk.Entry(eg, textvariable=args_var, width=14).grid(row=row, column=4, sticky="w")
+        ttk.Button(eg, text="Detect editors", command=self._cfg_detect_editors).grid(row=len(audio_tools.EDITORS) + 1, column=1,
+                                                                                   sticky="w", padx=4, pady=(4, 0))
+        eg.columnconfigure(1, weight=1)
         
         defaults = ttk.LabelFrame(frame, text="Defaults for new projects")
         defaults.pack(fill=tk.X, padx=10, pady=5)
@@ -1655,6 +1741,35 @@ class ConfigTabMixin:
         if f:
             var.set(f)
     
+    def _cfg_pick_exe(self, var, name):
+        f = filedialog.askopenfilename(title=f"Select {name}", filetypes=[("Programs", "*.exe"), ("All files", "*.*")],
+                                       initialdir=os.path.dirname(var.get()) if var.get() else None)
+        if f:
+            var.set(f)
+
+    def _cfg_detect_ffmpeg(self):
+        found = audio_tools.detect_ffmpeg()
+        if found:
+            self.cfg_ffmpeg_var.set(found)
+        self.cfg_status.config(text=f"FFmpeg found: {found}" if found else "FFmpeg not found (only needed for M4A/AAC files)")
+
+    def _cfg_detect_editors(self):
+        """Fill the empty editor paths with the installed editors ('Save configuration' keeps them)."""
+        programs = audio_tools._registry_programs()
+        found = []
+        for spec in audio_tools.EDITORS:
+            path_var, _ = self.cfg_editor_vars[spec["key"]]
+            if path_var.get().strip() and os.path.isfile(path_var.get().strip()):
+                found.append(spec["label"])
+                continue
+            path = audio_tools.detect_editor(spec["key"], programs=programs)
+            if path:
+                path_var.set(path)
+                found.append(spec["label"])
+        self.cfg_status.config(text=("Audio editors found: " + ", ".join(found) if found else "No audio editor found")
+                               + " - click 'Save configuration' to keep them")
+        return found
+
     def _cfg_detect_mixxx(self):
         found = find_mixxx_db()
         if found:
@@ -1678,6 +1793,11 @@ class ConfigTabMixin:
         cfg.set("output_format", self.cfg_format_var.get())
         cfg.set("mono_bass_hz", float(self.cfg_mono_var.get()))
         cfg.set("font_size", self.font_size)
+        cfg.set("ffmpeg_path", self.cfg_ffmpeg_var.get().strip())
+        for key, (path_var, args_var) in self.cfg_editor_vars.items():
+            cfg.set(f"editor_{key}", path_var.get().strip())
+            cfg.set(f"editor_{key}_args", args_var.get().strip())
+        audio_tools.apply_ffmpeg_path(cfg.get("ffmpeg_path"))
         os.makedirs(cfg.projects_root, exist_ok=True)
         path = cfg.save()
         self.cfg_status.config(text=f"Saved to {path}")

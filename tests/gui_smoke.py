@@ -342,6 +342,14 @@ def scenario():
         app._set_track_source("original")
         check("File analysed: original" in app.track_source_label.cget("text"), "the Track tab can analyse the original instead")
         app._track_source_choice = None
+        app.config.set("editor_audacity", sys.executable)                    # any existing program stands for the editor
+        labels = [label for label, _ in app._track_menu_entries(fx_tracks[0])]
+        check({"Open in Audacity", "Show in Explorer", "Open pre-mastered copy in Audacity",
+               "Show pre-mastered copy in Explorer"} <= set(labels), f"the track menu offers the editors, got {labels}")
+        app.config.set("editor_audacity", "")
+        check(app._track_menu_entries(fx_tracks[1])[0][1] is None, "without an editor the menu says where to set one")
+        check(set(app.cfg_editor_vars) == {"audacity", "renoise", "ableton", "mixbus"} and hasattr(app, "cfg_ffmpeg_var"),
+              "the Configuration tab has FFmpeg and the audio editors")
         update = app._refresh_transition_measurements()
         check(update is not None and pump(lambda: update.state == "done", 30.0), "the transition sheet is measured again")
         check(pump(lambda: app.project.data["transitions"]["tracks"][0].get("measured_file") == premaster_copy, 5.0),

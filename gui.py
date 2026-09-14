@@ -34,6 +34,8 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
         self.config = Config()
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
         self.apply_font_size(self.config.get("font_size"), redraw=False)  # before any widget uses the fonts
+        import audio_tools
+        audio_tools.apply_ffmpeg_path(self.config.get("ffmpeg_path"))  # the M4A/AAC decoders find it on the PATH
 
         self.task_manager = TaskManager()
 

@@ -28,6 +28,12 @@ DEFAULTS: Dict[str, Any] = {
     "mono_bass_hz": 120.0,         # pre-master: force mono bass below this frequency (0 = off)
     "output_format": "same",       # same | wav | flac | mp3 | ogg
     "font_size": 9,                # GUI text size in points (ui_fonts.py), charts included
+    "ffmpeg_path": "",             # optional (M4A/AAC decoding); empty = the one on the PATH
+    # audio editors a track can be opened in (audio_tools.py): path, and arguments where {file} is the audio file
+    "editor_audacity": "", "editor_audacity_args": "{file}",
+    "editor_renoise": "", "editor_renoise_args": "{file}",
+    "editor_ableton": "", "editor_ableton_args": "",
+    "editor_mixbus": "", "editor_mixbus_args": "",
 }
 
 
@@ -109,7 +115,16 @@ def environment_report() -> List[Tuple[str, bool, str]]:
     except Exception:
         rows.append(("numba (fast limiter)", False, "not installed: the limiter uses a slower pure-Python loop"))
     ffmpeg = shutil.which("ffmpeg")
-    rows.append(("FFmpeg (optional, M4A/AAC only)", bool(ffmpeg), ffmpeg or "not on PATH"))
+    rows.append(("FFmpeg (optional, M4A/AAC only)", bool(ffmpeg), ffmpeg or "not found: set it in the Configuration tab"))
+    try:
+        import audio_tools
+        cfg = Config()
+        for spec in audio_tools.EDITORS:
+            path = (cfg.get(f"editor_{spec['key']}") or "").strip()
+            rows.append((f"Audio editor: {spec['label']}", bool(path) and os.path.isfile(path),
+                         path or "not set (Configuration tab, Detect)"))
+    except Exception as exc:
+        rows.append(("Audio editors", False, str(exc)))
     try:
         from mixxx_export import find_mixxx_db
         detected = find_mixxx_db()
