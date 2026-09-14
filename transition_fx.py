@@ -322,6 +322,16 @@ class TransitionContext:
     def a_period(self) -> float:
         return median_period(self.a_beats)
 
+    def a_beat(self, offset_beats: float) -> float:
+        """Seconds in A of the beat offset_beats away from the junction (the nudge included)."""
+        j = self.a_junction_index
+        return beat_time(self.a_beats, j, offset_beats) + (self.junction_a - float(self.a_beats[j]))
+
+    def b_beat(self, offset_beats: float) -> float:
+        """Seconds in B of the beat offset_beats away from the junction (the nudge included)."""
+        j = self.b_junction_index
+        return beat_time(self.b_beats, j, offset_beats) + (self.junction_b - float(self.b_beats[j]))
+
 
 def make_context(a_audio: np.ndarray, a_sr: int, a_beats: Sequence[float], a_outro_start: float, a_outro_end: float,
                  b_audio: np.ndarray, b_sr: int, b_beats: Sequence[float], b_intro_start: float,
@@ -368,13 +378,12 @@ def _add_layer(ctx: TransitionContext, layer: np.ndarray, start_t: float) -> Non
 
 # ------------------------------------------------------------------ effects
 def _apply_freeze(ctx: TransitionContext, fx: Dict) -> None:
-    j = ctx.a_junction_index
     capture_offset = int(fx.get("capture_offset_beats", 0))
-    capture_t = beat_time(ctx.a_beats, j, capture_offset)
+    capture_t = ctx.a_beat(capture_offset)
     capture_i = ctx.a_index(capture_t)
     pieces = []
     for step in fx.get("steps") or []:
-        seg_start = ctx.a_index(beat_time(ctx.a_beats, j, capture_offset - float(step["beats"])))
+        seg_start = ctx.a_index(ctx.a_beat(capture_offset - float(step["beats"])))
         segment = _fade(ctx.a[max(0, seg_start):capture_i], ctx.a_sr)
         pieces.extend([segment] * int(step["repeats"]))
     freeze = np.concatenate(pieces) if pieces else np.zeros((0, 2), dtype=np.float32)
@@ -398,21 +407,20 @@ def _apply_freeze(ctx: TransitionContext, fx: Dict) -> None:
     head = _fade(ctx.a[:capture_i], ctx.a_sr, fade_in_s=0.0)
     ctx.a = np.concatenate([head, body]).astype(np.float32)
     ctx.outro_start = capture_t
+    ctx.junction_a = capture_t  # B now enters on the capture point
     ctx.a_end = capture_t + len(body) / ctx.a_sr
 
 
 def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
     q = filter_q(fx["kind"], fx.get("resonance", 0.707), fx.get("width_octaves", 1.0))
     if fx.get("side", "outgoing") == "outgoing":
-        j = ctx.a_junction_index
-        start_i = max(0, ctx.a_index(beat_time(ctx.a_beats, j, -int(fx["beats"]))))
+        start_i = max(0, ctx.a_index(ctx.a_beat(-int(fx["beats"]))))
         sweep = max(1, ctx.a_index(ctx.junction_a) - start_i)
         ctx.a[start_i:] = sweep_filter(ctx.a[start_i:], ctx.a_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q, sweep,
                                        fx.get("curve", "exponential"))
     else:
-        j = ctx.b_junction_index
         junction_i = max(0, ctx.b_index(ctx.junction_b))
-        sweep_end_i = ctx.b_index(beat_time(ctx.b_beats, j, int(fx["beats"])))
+        sweep_end_i = ctx.b_index(ctx.b_beat(int(fx["beats"])))
         back_i = min(len(ctx.b), sweep_end_i + int(round(median_period(ctx.b_beats) * ctx.b_sr)))
         wet = sweep_filter(ctx.b[:back_i], ctx.b_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
                            max(1, sweep_end_i - junction_i), fx.get("curve", "exponential"), hold_start=junction_i)
@@ -425,8 +433,7 @@ def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
 
 
 def _apply_echo(ctx: TransitionContext, fx: Dict) -> None:
-    j = ctx.a_junction_index
-    start_t = beat_time(ctx.a_beats, j, int(fx.get("start_offset_beats", -4)))
+    start_t = ctx.a_beat(int(fx.get("start_offset_beats", -4)))
     start_i = max(0, ctx.a_index(start_t))
     end_i = min(len(ctx.a), ctx.a_index(ctx.a_end))
     if end_i <= start_i:
@@ -444,7 +451,7 @@ def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
     fade_in = float(fx.get("fade_in_ms", 5)) / 1000.0
     fade_out = float(fx.get("fade_out_ms", 5)) / 1000.0
     data = _fade(data, ctx.a_sr, fade_in, fade_out) * _db(float(fx.get("gain_db", -3.0)))
-    anchor_t = beat_time(ctx.a_beats, ctx.a_junction_index, float(fx.get("offset_beats", 0.0)))
+    anchor_t = ctx.a_beat(float(fx.get("offset_beats", 0.0)))
     length_s = len(data) / ctx.a_sr
     anchor = fx.get("anchor", "end_at_junction")
     if anchor == "end_at_junction":
@@ -460,13 +467,15 @@ _APPLY = {"freeze": _apply_freeze, "filter": _apply_filter, "echo": _apply_echo,
 
 
 def apply_effects(ctx: TransitionContext, effects: Sequence[Dict]) -> TransitionContext:
-    """Apply the enabled effects in order (each must pass validate_effect), then mix the overflow into B."""
-    for fx in effects:
-        if not fx.get("enabled", True):
-            continue
+    """Apply the enabled effects (each must pass validate_effect): freezes first, then the others in stack order; then mix the overflow into B."""
+    enabled = [fx for fx in effects if fx.get("enabled", True)]
+    for fx in enabled:
         problems = validate_effect(fx)
         if problems:
             raise ValueError("; ".join(problems))
+    # a freeze redefines where A ends and where B enters: freezes first, then the other effects in stack order
+    ordered = [fx for fx in enabled if fx["type"] == "freeze"] + [fx for fx in enabled if fx["type"] != "freeze"]
+    for fx in ordered:
         _APPLY[fx["type"]](ctx, dict(new_effect(fx["type"]), **fx))
     mix_overflow(ctx)
     return ctx
@@ -504,7 +513,7 @@ def preview_mix(ctx: TransitionContext, b_intro_end: float, length: str = "short
         start_t = ctx.junction_a - 20.0
         stop_t = max(ctx.junction_a + 10.0, ctx.a_end + 2.0)
     else:
-        start_t = beat_time(ctx.a_beats, ctx.a_junction_index, -8)
+        start_t = ctx.a_beat(-8)
         stop_t = ctx.a_end + 8 * period
     start_t = max(start_t, ctx.a_offset)
     n = int(round((stop_t - start_t) * sr))

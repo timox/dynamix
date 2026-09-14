@@ -83,6 +83,12 @@ class TestRenderSet(unittest.TestCase):
         self.assertGreater(len(clip), SR * 5)
         self.assertEqual(warnings, [])
 
+    def test_track_without_rhythm_uses_a_regular_grid(self):
+        from fx_render import _beats_for
+        beats, warning = _beats_for(dict(self.profiles[0], has_beat=False), {self.paths[0]: self.grid}, 12.0)
+        self.assertIsNotNone(warning)
+        self.assertAlmostEqual(beats[1], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

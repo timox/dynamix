@@ -187,5 +187,54 @@ class TestEchoAndSample(unittest.TestCase):
         self.assertLessEqual(float(np.max(np.abs(clip))), 10 ** (-1 / 20) + 1e-3)
 
 
+class TestStacking(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="dynamix_fx_")
+        self.hit = os.path.join(self.tmp, "hit.wav")
+        sf.write(self.hit, np.full(SR, 0.5, dtype="float32"), SR)
+        self.sample = dict(tfx.new_effect("sample"), file=self.hit, anchor="start_at_junction", gain_db=0.0,
+                           fade_in_ms=0, fade_out_ms=0)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def _start(x, sr=SR):
+        active = np.nonzero(np.abs(x[:, 0]) > 0.25)[0]
+        return active[0] / sr if len(active) else None
+
+    def test_freeze_moves_the_junction_for_later_effects(self):
+        a = np.zeros((int(8 * SR), 2), dtype=np.float32)
+        ctx = ctx_for(a, np.zeros((int(10 * SR), 2), dtype=np.float32), outro_start=4.0, outro_end=6.0)
+        freeze = dict(tfx.new_effect("freeze"), capture_offset_beats=-4, steps=[{"beats": 1, "repeats": 4}])
+        tfx.apply_effects(ctx, [self.sample, freeze])  # listed first, applied after the freeze
+        self.assertAlmostEqual(ctx.junction_a, 2.0)
+        self.assertAlmostEqual(ctx.outro_start, 2.0)
+        self.assertAlmostEqual(ctx.a_end, 4.0, places=3)
+        self.assertAlmostEqual(self._start(ctx.a), 2.0, delta=0.002)
+
+    def test_nudge_shifts_every_position(self):
+        b = np.zeros((int(10 * SR), 2), dtype=np.float32)
+        ctx = tfx.make_context(np.zeros((int(8 * SR), 2), dtype=np.float32), SR, grid(), 4.0, 6.0, b, SR, grid(), 2.0,
+                               nudge_ms=20)
+        tfx.apply_effects(ctx, [self.sample])
+        self.assertAlmostEqual(self._start(ctx.a), 4.02, delta=0.002)
+        ctx2 = tfx.make_context(sine(440, 8), SR, grid(), 4.0, 6.0, b, SR, grid(), 2.0, nudge_ms=20)
+        tfx.apply_effects(ctx2, [dict(tfx.new_effect("freeze"), steps=[{"beats": 1, "repeats": 2}])])
+        self.assertAlmostEqual(ctx2.outro_start, 4.02, places=4)
+        self.assertAlmostEqual(ctx2.a_end, 5.02, places=3)
+
+    def test_overflow_is_placed_after_the_freeze_end(self):
+        a = np.zeros((int(8 * SR), 2), dtype=np.float32)
+        b = np.zeros((int(10 * SR), 2), dtype=np.float32)
+        ctx = ctx_for(a, b, outro_start=4.0, outro_end=4.5)
+        sample = dict(self.sample, offset_beats=3)  # starts at 5.5 s: 0.5 s before the freeze ends (6.0 s), 0.5 s after
+        freeze = dict(tfx.new_effect("freeze"), steps=[{"beats": 1, "repeats": 4}])
+        tfx.apply_effects(ctx, [sample, freeze])
+        self.assertAlmostEqual(ctx.a_end, 6.0, places=3)
+        self.assertAlmostEqual(self._start(ctx.a), 5.5, delta=0.002)
+        self.assertAlmostEqual(self._start(ctx.b), 4.0, delta=0.002)  # B junction 2.0 + (6.0 - 4.0)
+
+
 if __name__ == "__main__":
     unittest.main()
