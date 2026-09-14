@@ -329,6 +329,11 @@ def scenario():
         app._set_track_source("original")
         check("File analysed: original" in app.track_source_label.cget("text"), "the Track tab can analyse the original instead")
         app._track_source_choice = None
+        update = app._refresh_transition_measurements()
+        check(update is not None and pump(lambda: update.state == "done", 30.0), "the transition sheet is measured again")
+        check(pump(lambda: app.project.data["transitions"]["tracks"][0].get("measured_file") == premaster_copy, 5.0),
+              "the transition sheet measures the pre-mastered copy the set plays")
+        check(app.project.data["transitions"]["tracks"][0]["intro_start"] == 1.0, "measuring again keeps the cue positions")
 
         import time as _time
 
@@ -347,6 +352,9 @@ def scenario():
         check(pump(lambda: task.state == "stopped", 3.0), "a stopped task ends after its current step")
         check(pump(lambda: app.notebook.tab(app.tasks_frame, "text") == "Tasks", 2.0), "the Tasks title goes back when nothing runs")
         check(pump(lambda: app.tasks_tree.item(str(task.id), "values")[4] == "stopped", 2.0), "the stopped task stays listed")
+        app.notebook.select(app.log_frame)  # earlier background reports (the updated transition sheet) are seen
+        pump(seconds=0.3)
+        app.notebook.select(0)
         shown = app.notebook.select()
         app.add_report("Background report", "text", show=False)
         check(app.notebook.select() == shown, "a report finished in the background does not change the tab")

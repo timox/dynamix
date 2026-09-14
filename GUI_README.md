@@ -40,7 +40,11 @@ python gui.py
     1. Select and analyze (BPM, key, energy; cached per file)
     2. Propose a set list (several variants from the selection; use one)
     3. Plan Transitions (intro/outro sections; the transition sheet is a
-       report in the Log tab, its data goes to exports/transitions.json)
+       report in the Log tab, its data goes to exports/transitions.json). Like
+       the Track tab and the reports, the sheet's mastering and band figures
+       are measured on the files the set plays: after a pre-master (or a
+       change of "Use pre-mastered copies") the sheet is measured again, the
+       cue positions do not change
     4. Pre-master Set (optional, into the project's premaster folder)
     5. Transition FX (optional, copies with FX into the project's fx folder)
     6. Create Playlist (optional, M3U into exports/)

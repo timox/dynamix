@@ -308,7 +308,9 @@ def main():
         sys.exit(1)
 
     planner = TransitionPlanner(tracks, mix_bars=args.mix_bars, check_mastering=not args.no_mastering)
-    planner.plan(progress_callback=lambda i, n, name: print(f"Planning {i}/{n}: {name}"))
+    # a project's measurements are taken on the files the set plays (its pre-mastered copies unless --originals)
+    measure = project.premaster_map() if project is not None and not args.originals else None
+    planner.plan(progress_callback=lambda i, n, name: print(f"Planning {i}/{n}: {name}"), measure=measure)
     print()
     print(planner.to_text())
     if args.sheet:

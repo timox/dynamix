@@ -513,6 +513,7 @@ class SetBuilderMixin:
         self._save_project()
         self._refresh_tables()
         self._render_overview()
+        self._refresh_transition_measurements()
         if self.fx_panel is not None:
             self.fx_panel.refresh_sources()
             self.fx_panel.schedule_chart()
@@ -1044,11 +1045,12 @@ class SetBuilderMixin:
         if tracks is None:
             return
         project = self.project
-        
+        measure = project.premaster_map()  # measured on the files the set plays; the cues come from the tracks
+
         def work(task):
             try:
                 planner = TransitionPlanner(tracks, mix_bars=int(project.options.get("mix_bars", 8)))
-                planner.plan(progress_callback=lambda i, n, name: task.progress(i - 1, n, name))
+                planner.plan(progress_callback=lambda i, n, name: task.progress(i - 1, n, name), measure=measure)
                 task.check()
                 
                 def done():
@@ -1177,6 +1179,7 @@ class SetBuilderMixin:
                     self._save_project()
                     self._render_premaster()
                     self._refresh_fx_tab()
+                    self._refresh_transition_measurements()
                     self.add_report("Pre-master", summary, show=False)
                     self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir} "
                                        "(report in the Log tab)")
@@ -1324,7 +1327,35 @@ class SetBuilderMixin:
         self.update_status(f"Mixxx export: {report['cues_written']} cues written, {len(report['missing'])} tracks missing")
     
     # ------------------------------------------------------------------ windows & charts
-    def _transition_report(self):
+    def _refresh_transition_measurements(self):
+        """Measure the planned tracks again on the files the set plays (after a pre-master or a change of the option)."""
+        project = self.project
+        data = project.data.get("transitions") if project is not None else None
+        if not data or not data.get("tracks"):
+            return None
+        planner = TransitionPlanner(project.set_list_tracks() or project.tracks)
+        planner.profiles = [dict(p) for p in data["tracks"]]  # the project's plan is replaced only if nothing changed meanwhile
+        planner.transitions = list(data.get("transitions") or [])
+        measure = project.premaster_map()
+        cues = project._plan_cues(data)
+
+        def work(task):
+            changed = planner.refresh_measurements(measure, progress_callback=lambda i, n, name: task.progress(i, n, name))
+            task.check()
+
+            def done():
+                if not changed or self.project is not project or project._plan_cues(project.data.get("transitions")) != cues:
+                    return  # nothing new, or re-planned / another project meanwhile
+                project.set_transitions(planner.to_dict())
+                self.transition_planner = planner
+                self._save_project()
+                self._refresh_tables()
+                self._render_overview()
+                self._transition_report(updated=True)
+            self.root.after(0, done)
+        return self._start_task("Update transition sheet", work)
+
+    def _transition_report(self, updated=False):
         """The transition sheet as a report in the Log tab, and its data as exports/transitions.json."""
         planner = self.transition_planner
         note = ""
@@ -1334,7 +1365,10 @@ class SetBuilderMixin:
         except Exception as e:
             self._report_error(f"Cannot save transitions.json: {e}", e)
         self.add_report("Transition Sheet", planner.to_text(f"DynaMix Transition Sheet - {self.project.name}"), show=False)
-        self.update_status(f"Transitions planned: {len(planner.transitions)}{note} - transition sheet in the Log tab")
+        if updated:
+            self.update_status("Transition sheet updated with the measurements of the files the set plays (Log tab)")
+        else:
+            self.update_status(f"Transitions planned: {len(planner.transitions)}{note} - transition sheet in the Log tab")
     
     def _clear_frame(self, container, placeholder=None):
         for child in container.winfo_children():

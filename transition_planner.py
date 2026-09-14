@@ -18,7 +18,7 @@ or pushed to Mixxx (see mixxx_export.py) so that Auto DJ follows them.
 
 import json
 import os
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -200,20 +200,7 @@ class TransitionPlanner:
             outro_start = max(intro_end, duration - mix_dur)
             outro_end = duration
 
-        mastering = None
-        bands = None
-        if self.check_mastering:
-            try:
-                from mastering import analyze_mastering_cached
-                mastering = analyze_mastering_cached(path)
-            except Exception as exc:  # keep planning even if the check fails
-                mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
-            try:
-                from band_analysis import analyze_bands_cached
-                full = analyze_bands_cached(path, bpm=bpm if bpm > 0 else None)
-                bands = {k: full[k] for k in ('mud', 'resonances', 'flags', 'eq_suggestions', 'verdict', 'stats')}
-            except Exception as exc:
-                bands = {'error': str(exc), 'flags': [], 'verdict': 'ok', 'resonances': [], 'eq_suggestions': [], 'mud': {}}
+        mastering, bands = self._measurements(path, bpm) if self.check_mastering else (None, None)
 
         # coarse energy envelope (about 2 points per second) for the charts
         step = max(1, len(rms) // max(1, int(duration * 2)))
@@ -240,15 +227,68 @@ class TransitionPlanner:
             'outro_end': float(outro_end),
         }
 
-    def plan(self, progress_callback: Optional[Callable[[int, int, str], None]] = None) -> List[Dict]:
-        """Profile every track and build the transition list."""
+    @staticmethod
+    def _measurements(path: str, bpm: float) -> Tuple[Optional[Dict], Optional[Dict]]:
+        """(mastering report, band summary) of one audio file (cached per file)."""
+        try:
+            from mastering import analyze_mastering_cached
+            mastering = analyze_mastering_cached(path)
+        except Exception as exc:  # keep planning even if the check fails
+            mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
+        try:
+            from band_analysis import analyze_bands_cached
+            full = analyze_bands_cached(path, bpm=bpm if bpm and bpm > 0 else None)
+            bands = {k: full[k] for k in ('mud', 'resonances', 'flags', 'eq_suggestions', 'verdict', 'stats')}
+        except Exception as exc:
+            bands = {'error': str(exc), 'flags': [], 'verdict': 'ok', 'resonances': [], 'eq_suggestions': [], 'mud': {}}
+        return mastering, bands
+
+    def measure(self, profile: Dict, path: Optional[str] = None) -> bool:
+        """
+        Put the mastering and band measurements of `path` (default: the track itself, e.g. its pre-mastered copy
+        otherwise) into a profile; the intro/outro positions do not change. True when the measured file changed.
+        """
+        target = path or profile['file_path']
+        if profile.get('measured_file', profile['file_path']) == target and (profile.get('mastering') or not self.check_mastering):
+            return False
+        if self.check_mastering:
+            profile['mastering'], profile['bands'] = self._measurements(target, float(profile.get('bpm') or 0))
+        profile['measured_file'] = target
+        return True
+
+    def plan(self, progress_callback: Optional[Callable[[int, int, str], None]] = None,
+             measure: Optional[Dict[str, str]] = None) -> List[Dict]:
+        """
+        Profile every track and build the transition list. `measure` maps a track to the file its mastering and band
+        measurements are taken on (the pre-mastered copy the set plays); the cues always come from the track itself.
+        """
         self.profiles = []
         total = len(self.tracks)
         for i, track in enumerate(self.tracks):
             if progress_callback:
                 progress_callback(i + 1, total, os.path.basename(track['file_path']))
-            self.profiles.append(self.profile_track(track))
+            profile = self.profile_track(track)
+            target = (measure or {}).get(track['file_path'])
+            if target and target != track['file_path']:
+                self.measure(profile, target)
+            self.profiles.append(profile)
+        return self._build_transitions()
 
+    def refresh_measurements(self, measure: Optional[Dict[str, str]] = None,
+                             progress_callback: Optional[Callable[[int, int, str], None]] = None) -> int:
+        """Measure the planned tracks on the files the set plays now (after a pre-master); returns how many changed."""
+        changed = 0
+        for i, profile in enumerate(self.profiles):
+            if progress_callback:
+                progress_callback(i, len(self.profiles), profile.get('filename', ''))
+            if self.measure(profile, (measure or {}).get(profile['file_path'], profile['file_path'])):
+                changed += 1
+        if changed:
+            self._build_transitions()
+        return changed
+
+    def _build_transitions(self) -> List[Dict]:
+        """The transition list (scores, notes) from the profiles."""
         self.transitions = []
         for i in range(len(self.profiles) - 1):
             a, b = self.profiles[i], self.profiles[i + 1]
@@ -303,11 +343,15 @@ class TransitionPlanner:
         """One block per track: identity, energy, sections, mastering, what to watch."""
         lines = [f"{index:2d}. {p['filename']}"]
         beat = "" if p.get('has_beat', True) else " (no clear beat)"
-        lines.append(f"    {p['bpm']:.1f} BPM{beat} | {p['key'] or '-'} | energy {p['energy_level']:.1f}/10 | {self._fmt(p['duration'])}")
+        lines.append(f"    {float(p.get('bpm') or 0):.1f} BPM{beat} | {p.get('key') or '-'} | "
+                     f"energy {float(p.get('energy_level') or 0):.1f}/10 | {self._fmt(p.get('duration') or 0)}")
         lines.append(f"    intro {self._fmt(p['intro_start'])} -> {self._fmt(p['intro_end'])}"
                      f"   outro {self._fmt(p['outro_start'])} -> {self._fmt(p['outro_end'])}"
-                     f"   blend ~{p['mix_duration']:.0f}s")
+                     f"   blend ~{float(p.get('mix_duration') or 0):.0f}s")
         m = p.get('mastering')
+        measured = p.get('measured_file')
+        if measured and measured != p['file_path']:
+            lines.append(f"    measured on the pre-mastered copy: {measured}")
         if m and m.get('lufs') is not None:
             phase = m.get('phase', {})
             stereo = (f"stereo corr {phase.get('correlation', 1.0):+.2f}, bass {phase.get('correlation_low', 1.0):+.2f}, "
