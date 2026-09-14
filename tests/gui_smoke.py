@@ -159,7 +159,7 @@ def scenario():
             fx_tracks.append(path)
         fx_samples = os.path.join(HOME, "fx_samples")
         os.makedirs(fx_samples)
-        sf.write(os.path.join(fx_samples, "riser.wav"), np.full(sr, 0.2, dtype="float32"), sr)
+        sf.write(os.path.join(fx_samples, "riser 120BPM.wav"), np.full(sr, 0.2, dtype="float32"), sr)
         app.config.set("fx_samples_folder", fx_samples)
         project = app.project
         project.set_tracks([{"file_path": p, "filename": os.path.basename(p), "duration": 12.0, "bpm": 120.0} for p in fx_tracks])
@@ -202,9 +202,11 @@ def scenario():
         sample_list = win.sample_list
         sample_list.selection_set(0)
         sample_list.event_generate("<<ListboxSelect>>")  # a single click
-        check(pump(lambda: (win.effects()[1].get("file") or "").endswith("riser.wav"), 3.0), "a single click picks the sample")
+        check(pump(lambda: (win.effects()[1].get("file") or "").endswith("riser 120BPM.wav"), 3.0), "a single click picks the sample")
         check(win.sample_list is sample_list and win.sample_list.winfo_exists(), "picking a sample keeps the list (no rebuild)")
-        check(win.sample_current_label.cget("text").endswith("riser.wav"), "the current sample is shown")
+        check("riser 120BPM.wav" in win.sample_current_label.cget("text"), "the current sample is shown")
+        check(win.effects()[1].get("sample_bpm") == 120.0, "picking a sample reads its BPM from the file name")
+        check("120 → 120 BPM" in win.sample_current_label.cget("text"), "the sample's tempo fit is shown")
         win.fx_tree.selection_set("F0")
         check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)

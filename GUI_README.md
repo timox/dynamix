@@ -64,7 +64,10 @@ python gui.py
   optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
   low-pass or band-pass sweep with resonance, closing the outgoing track or
   opening the incoming one), **Echo** (tempo-synced) and **Sample** (from the
-  FX samples folder, anchored to end at, start at or centre on the junction; it
+  FX samples folder — click to use, double-click to hear; its BPM is read from
+  the file name and the sample is fitted to the track's tempo by *varispeed*
+  or *stretch*, or played as it is with *off* —, anchored to end at, start at
+  or centre on the junction; it
   may run over into the next track). **▶ Preview (loop)** plays the transition
   in a loop and re-renders it when a setting changes; **Nudge (ms)** shifts the
   junction by ear. **Apply all FX** writes copies into `fx/` (the library and

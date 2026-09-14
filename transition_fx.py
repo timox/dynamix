@@ -15,6 +15,8 @@ Pure numpy / scipy: arrays in, arrays out (float32, shape (n, 2)).
 """
 
 import math
+import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -96,13 +98,15 @@ _RANGES = {
                "beats": (2, 16)},
     "echo": {"start_offset_beats": (-16, 0), "delay_beats": (0.25, 1), "feedback": (0, 0.85), "mix": (0, 1),
              "damping_hz": (1000, 20000)},
-    "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000)},
+    "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000),
+               "sample_bpm": (40, 250)},
 }
 _CHOICES = {
     "filter": {"side": ("outgoing", "incoming"), "kind": ("highpass", "lowpass", "bandpass"),
                "curve": ("exponential", "linear"), "beats": (2, 4, 8, 16)},
     "echo": {"delay_beats": (0.25, 0.5, 0.75, 1)},
-    "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction")},
+    "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction"),
+               "tempo": ("varispeed", "stretch", "off")},
 }
 DEFAULTS = {
     "freeze": {"enabled": True, "capture_offset_beats": 0, "steps": [{"beats": 1, "repeats": 4}], "loop_filter": None,
@@ -112,7 +116,7 @@ DEFAULTS = {
     "echo": {"enabled": True, "start_offset_beats": -4, "delay_beats": 0.5, "feedback": 0.5, "mix": 0.5,
              "damping_hz": 6000.0},
     "sample": {"enabled": True, "file": "", "anchor": "end_at_junction", "offset_beats": 0.0, "gain_db": -3.0,
-               "fade_in_ms": 5, "fade_out_ms": 5},
+               "fade_in_ms": 5, "fade_out_ms": 5, "tempo": "varispeed", "sample_bpm": None},
 }
 
 
@@ -286,6 +290,48 @@ def load_sample(path: str, sr: int) -> np.ndarray:
     return data
 
 
+MIN_TEMPO_RATIO, MAX_TEMPO_RATIO = 0.5, 2.0
+
+
+def bpm_from_name(path: str) -> Optional[float]:
+    """The tempo written in a sample's file name ('... 143BPM.wav', 'riser 128.5 bpm.flac'), or None."""
+    match = re.search(r"(\d{2,3}(?:[.,]\d+)?)\s*bpm", os.path.basename(path or ""), re.IGNORECASE)
+    return float(match.group(1).replace(",", ".")) if match else None
+
+
+def sample_tempo(fx: Dict, target_bpm: float) -> Tuple[float, Optional[float], Optional[str]]:
+    """
+    (ratio, sample_bpm, problem) to fit a sample effect to target_bpm: ratio = target / sample BPM.
+    The sample BPM is the one set on the effect, else the one in the file name. A sample played as it is
+    (tempo "off", no BPM known, or a ratio outside 0.5..2) gets ratio 1.0; only the last case is a problem.
+    """
+    if fx.get("tempo", "varispeed") == "off" or not target_bpm:
+        return 1.0, None, None
+    sample_bpm = fx.get("sample_bpm") or bpm_from_name(fx.get("file") or "")
+    if not sample_bpm:
+        return 1.0, None, None
+    ratio = float(target_bpm) / float(sample_bpm)
+    if not MIN_TEMPO_RATIO <= ratio <= MAX_TEMPO_RATIO:
+        return 1.0, float(sample_bpm), (f"sample {float(sample_bpm):g} BPM vs track {float(target_bpm):.0f} BPM: "
+                                        f"out of range (x{ratio:.2f}), played as it is")
+    return ratio, float(sample_bpm), None
+
+
+def fit_tempo(data: np.ndarray, sr: int, ratio: float, mode: str) -> np.ndarray:
+    """Play a (n, 2) sample `ratio` times faster: varispeed (resampled, the pitch follows) or stretch (pitch kept)."""
+    if mode == "off" or abs(ratio - 1.0) < 1e-6:
+        return data
+    if mode == "stretch":
+        import librosa
+        channels = [librosa.effects.time_stretch(np.ascontiguousarray(data[:, c]), rate=float(ratio))
+                    for c in range(data.shape[1])]
+        n = min(len(c) for c in channels)
+        return np.stack([c[:n] for c in channels], axis=1).astype(np.float32)
+    from fractions import Fraction
+    step = Fraction(1.0 / float(ratio)).limit_denominator(1000)
+    return signal.resample_poly(data, step.numerator, step.denominator, axis=0).astype(np.float32)
+
+
 # ------------------------------------------------------------------ transition context
 @dataclass
 class TransitionContext:
@@ -321,6 +367,12 @@ class TransitionContext:
     @property
     def a_period(self) -> float:
         return median_period(self.a_beats)
+
+    def a_local_bpm(self) -> float:
+        """Tempo of A around the junction (median of the 8 beats before it)."""
+        j = self.a_junction_index
+        near = self.a_beats[max(0, j - 8):j + 1]
+        return 60.0 / (median_period(near) if len(near) >= 3 else self.a_period)
 
     def a_beat(self, offset_beats: float) -> float:
         """Seconds in A of the beat offset_beats away from the junction (the nudge included)."""
@@ -452,6 +504,10 @@ def _apply_echo(ctx: TransitionContext, fx: Dict) -> None:
 
 def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
     data = load_sample(fx["file"], ctx.a_sr)
+    ratio, _, problem = sample_tempo(fx, ctx.a_local_bpm())
+    if problem:
+        ctx.warnings.append(f"{os.path.basename(fx['file'])}: {problem}")
+    data = fit_tempo(data, ctx.a_sr, ratio, fx.get("tempo", "varispeed"))
     fade_in = float(fx.get("fade_in_ms", 5)) / 1000.0
     fade_out = float(fx.get("fade_out_ms", 5)) / 1000.0
     data = _fade(data, ctx.a_sr, fade_in, fade_out) * _db(float(fx.get("gain_db", -3.0)))

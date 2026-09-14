@@ -265,5 +265,60 @@ class TestStacking(unittest.TestCase):
         self.assertAlmostEqual(self._start(ctx.b), 4.0, delta=0.002)  # B junction 2.0 + (6.0 - 4.0)
 
 
+class TestSampleTempo(unittest.TestCase):
+    def test_bpm_from_name(self):
+        self.assertEqual(tfx.bpm_from_name("E:/fx/VFX1 FX Loops 005 143BPM.wav"), 143.0)
+        self.assertEqual(tfx.bpm_from_name("riser 128.5 bpm.flac"), 128.5)
+        self.assertEqual(tfx.bpm_from_name("hit_90Bpm.wav"), 90.0)
+        self.assertIsNone(tfx.bpm_from_name("white noise sweep.wav"))
+        self.assertIsNone(tfx.bpm_from_name(""))
+
+    def test_sample_tempo_ratio_and_problems(self):
+        fx = dict(tfx.new_effect("sample"), file="loop 143BPM.wav")
+        ratio, sample_bpm, problem = tfx.sample_tempo(fx, 124.0)
+        self.assertAlmostEqual(ratio, 124.0 / 143.0)
+        self.assertEqual((sample_bpm, problem), (143.0, None))
+        self.assertAlmostEqual(tfx.sample_tempo(dict(fx, sample_bpm=124.0), 124.0)[0], 1.0)   # manual BPM wins
+        self.assertEqual(tfx.sample_tempo(dict(fx, tempo="off"), 124.0), (1.0, None, None))
+        self.assertEqual(tfx.sample_tempo(dict(fx, file="noise.wav"), 124.0), (1.0, None, None))  # played as it is
+        ratio, _, problem = tfx.sample_tempo(dict(fx, sample_bpm=60.0), 150.0)
+        self.assertEqual(ratio, 1.0)
+        self.assertIn("out of range", problem)
+        self.assertTrue(any("sample_bpm" in p for p in tfx.validate_effect(dict(fx, sample_bpm=20.0))))
+        self.assertTrue(any("tempo" in p for p in tfx.validate_effect(dict(fx, tempo="fast"))))
+
+    def test_fit_tempo_lengths(self):
+        data = sine(440, 1.0)
+        fast = tfx.fit_tempo(data, SR, 2.0, "varispeed")
+        self.assertAlmostEqual(len(fast) / SR, 0.5, delta=0.01)
+        slow = tfx.fit_tempo(data, SR, 124.0 / 143.0, "stretch")
+        self.assertAlmostEqual(len(slow) / SR, 143.0 / 124.0, delta=0.02)
+        self.assertEqual(slow.shape[1], 2)
+        self.assertIs(tfx.fit_tempo(data, SR, 1.3, "off"), data)
+        self.assertIs(tfx.fit_tempo(data, SR, 1.0, "varispeed"), data)
+
+    def test_sample_is_fitted_to_the_track_tempo(self):
+        tmp = tempfile.mkdtemp(prefix="dynamix_fx_")
+        try:
+            loop = os.path.join(tmp, "loop 240BPM.wav")   # 1 s at 240 BPM -> 2 s at the track's 120 BPM
+            sf.write(loop, np.full(SR, 0.5, dtype="float32"), SR)
+            base = dict(tfx.new_effect("sample"), anchor="end_at_junction", gain_db=0.0, fade_in_ms=0, fade_out_ms=0)
+            ctx = ctx_for(np.zeros((int(8 * SR), 2), dtype=np.float32), np.zeros((int(10 * SR), 2), dtype=np.float32))
+            tfx.apply_effects(ctx, [dict(base, file=loop)])
+            active = np.nonzero(np.abs(ctx.a[:, 0]) > 0.25)[0]
+            self.assertAlmostEqual(active[0] / SR, 2.0, delta=0.02)
+            self.assertAlmostEqual((active[-1] + 1) / SR, 4.0, delta=0.02)
+            self.assertEqual(ctx.warnings, [])
+            far = os.path.join(tmp, "loop 50BPM.wav")      # 120 / 50 = 2.4: out of range, played as it is
+            sf.write(far, np.full(SR, 0.5, dtype="float32"), SR)
+            ctx = ctx_for(np.zeros((int(8 * SR), 2), dtype=np.float32), np.zeros((int(10 * SR), 2), dtype=np.float32))
+            tfx.apply_effects(ctx, [dict(base, file=far)])
+            active = np.nonzero(np.abs(ctx.a[:, 0]) > 0.25)[0]
+            self.assertAlmostEqual(active[0] / SR, 3.0, delta=0.02)
+            self.assertTrue(any("out of range" in w for w in ctx.warnings))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

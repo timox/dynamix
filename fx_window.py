@@ -7,6 +7,7 @@ preview while tweaking, and "Apply all FX" which renders the copies into fx/.
 
 import copy
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -51,7 +52,9 @@ FIELDS = {
                ("offset_beats", "Offset (beats)", "float", (-16, 16)),
                ("gain_db", "Gain (dB)", "float", (-24, 6)),
                ("fade_in_ms", "Fade in (ms)", "int", (0, 2000)),
-               ("fade_out_ms", "Fade out (ms)", "int", (0, 2000))],
+               ("fade_out_ms", "Fade out (ms)", "int", (0, 2000)),
+               ("tempo", "Tempo", "choice", ("varispeed", "stretch", "off")),
+               ("sample_bpm", "Sample BPM", "float", (40, 250))],
 }
 LOOP_FILTER_FIELDS = [f for f in FIELDS["filter"] if f[0] not in ("side", "beats")]
 LOOP_ECHO_FIELDS = [f for f in FIELDS["echo"] if f[0] != "start_offset_beats"]
@@ -98,7 +101,7 @@ def effect_summary(fx: dict) -> str:
         return f"Echo {float(fx.get('delay_beats', 0)):g} beat, feedback {float(fx.get('feedback', 0)):.2f}"
     if t == "sample":
         name = os.path.basename(fx.get("file") or "") or "(choose a sample)"
-        return f"Sample {name} ({fx.get('anchor')})"
+        return f"Sample {name} ({fx.get('anchor')}, tempo {fx.get('tempo', 'varispeed')})"
     return str(t)
 
 
@@ -376,6 +379,8 @@ class TransitionFxWindow(tk.Toplevel):
             return
         effects[self.fx_index].update(changes)
         self._store(effects, rebuild_settings)
+        if not rebuild_settings:
+            self._refresh_sample_label()
 
     # ------------------------------------------------------------------ settings panel
     def show_settings(self):
@@ -388,24 +393,29 @@ class TransitionFxWindow(tk.Toplevel):
         ttk.Label(self.settings, text=FX_NAMES[fx["type"]], font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         form = ttk.Frame(self.settings)
         form.pack(fill=tk.X, pady=4)
-        self._fields(form, FIELDS[fx["type"]], fx, lambda key, value: self.update_effect({key: value}))
+        self._form_vars = self._fields(form, FIELDS[fx["type"]], fx, lambda key, value: self.update_effect({key: value}))
         if fx["type"] == "freeze":
             self._freeze_extras(fx)
         if fx["type"] == "sample":
             self._sample_extras(fx)
 
     def _fields(self, parent, fields, values, on_change):
+        """Build one row per field; returns {key: StringVar} so a field can be updated without a rebuild."""
+        variables = {}
         for row, (key, label, kind, spec) in enumerate(fields):
             ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
-            var = tk.StringVar(value=str(values.get(key)))
+            value = values.get(key)
+            var = tk.StringVar(value="" if value is None else (f"{value:g}" if isinstance(value, float) else str(value)))
             if kind == "choice":
                 widget = ttk.Combobox(parent, textvariable=var, values=[str(c) for c in spec], width=18, state="readonly")
             else:
                 lo, hi = spec
-                step = 1 if kind == "int" else (0.05 if hi <= 1 else (0.1 if hi <= 20 else 10))
+                step = 1 if kind == "int" else (0.05 if hi <= 1 else (0.1 if hi <= 20 else (1 if hi <= 300 else 10)))
                 widget = ttk.Spinbox(parent, from_=lo, to=hi, increment=step, textvariable=var, width=10)
             widget.grid(row=row, column=1, sticky="w", padx=6)
             var.trace_add("write", lambda *a, k=key, v=var, kd=kind, s=spec: self._field_changed(k, v, kd, s, on_change))
+            variables[key] = var
+        return variables
 
     @staticmethod
     def _field_changed(key, var, kind, spec, on_change):
@@ -504,8 +514,9 @@ class TransitionFxWindow(tk.Toplevel):
         ttk.Entry(top, textvariable=filter_var, width=20).pack(side=tk.LEFT, padx=4)
         ttk.Button(top, text="▶ Sample", command=self.audition_sample).pack(side=tk.LEFT, padx=4)
         ttk.Label(box, text="Click a sample to use it, double-click to hear it.", foreground=MUTED).pack(anchor="w", padx=4)
-        self.sample_current_label = ttk.Label(box, text=f"Current: {os.path.basename(fx.get('file') or '') or '-'}")
+        self.sample_current_label = ttk.Label(box, text="", wraplength=420, justify=tk.LEFT)
         self.sample_current_label.pack(anchor="w", padx=4)
+        self._refresh_sample_label()
         self.sample_list = tk.Listbox(box, height=8, exportselection=False)
         self.sample_list.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
         self._shown_samples = []
@@ -536,9 +547,40 @@ class TransitionFxWindow(tk.Toplevel):
             self.status(f"{entry['filename']} is longer than {tfx.MAX_SAMPLE_SECONDS:.0f} s")
             return
         if self.effects()[self.fx_index].get("file") != entry["file_path"]:
-            self.update_effect({"file": entry["file_path"]})
-        self.sample_current_label.config(text=f"Current: {entry['filename']}")
+            bpm = tfx.bpm_from_name(entry["file_path"])
+            self.update_effect({"file": entry["file_path"], "sample_bpm": bpm})
+            var = (getattr(self, "_form_vars", None) or {}).get("sample_bpm")
+            if var is not None:
+                var.set("" if bpm is None else f"{bpm:g}")
+        self._refresh_sample_label()
         self.status(f"Sample: {entry['filename']}")
+
+    def _tempo_note(self, fx):
+        """How the sample will be fitted to the outgoing track's tempo (for the 'Current' line)."""
+        if self.pair_index is None or fx.get("tempo", "varispeed") == "off":
+            return ""
+        track_bpm = float(self.profiles[self.pair_index].get("bpm") or 0)
+        if not track_bpm:
+            return ""
+        ratio, sample_bpm, problem = tfx.sample_tempo(fx, track_bpm)
+        if problem:
+            return f" · {problem}"
+        if sample_bpm is None:
+            return " · no BPM in the name: played as it is (set Sample BPM)"
+        detail = fx.get("tempo", "varispeed")
+        if detail == "varispeed":
+            detail += f", {12 * math.log2(ratio):+.1f} st"
+        return f" · {sample_bpm:g} → {track_bpm:.0f} BPM ({detail})"
+
+    def _refresh_sample_label(self):
+        label = getattr(self, "sample_current_label", None)
+        if label is None or not label.winfo_exists() or self.fx_index is None or self.pair_index is None:
+            return
+        effects = self.effects()
+        if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "sample":
+            return
+        fx = effects[self.fx_index]
+        label.config(text=f"Current: {os.path.basename(fx.get('file') or '') or '-'}{self._tempo_note(fx)}")
 
     @staticmethod
     def _sample_missing(entry):

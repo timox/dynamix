@@ -142,7 +142,8 @@ this version keep working: their imported `source/` copies become their selectio
 
 **Transition FX** (`transition_fx.py`, `fx_render.py`, `fx_window.py`): per transition, a stack of
 freeze / roll, filter sweeps (high-pass, low-pass, band-pass with resonance), tempo-synced echo
-and FX samples, placed in beats around the junction. The Transition FX window previews a
+and FX samples (fitted to the outgoing track's tempo from the BPM written in their file name, by
+varispeed or time-stretch), placed in beats around the junction. The Transition FX window previews a
 transition in a loop while you tweak it; **Apply all FX** renders copies into the project's
 `fx/` folder (effects that outlast the outgoing track continue at the start of the next one).
 Settings are kept per track pair in `project.json`, so reordering the set keeps them; the
