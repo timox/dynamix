@@ -84,7 +84,9 @@ python gui.py
 - **Track**: energy envelope with intro/outro, loudness figures, stereo
   phase and bass width, tone balance, then the band tracking chart (band
   envelopes over time, low-mid masking map, resonance spectrum with EQ
-  suggestions and, when needed, "mix revision recommended")
+  suggestions and, when needed, "mix revision recommended"). Each resonance
+  shows its nearest note (approximate); blue dots are notes of the track's key,
+  which may simply be the key itself, red dots are other notes
 - **Band Analysis** button: the same diagnostics as a report for the whole
   set, with the list of tracks that need a mix revision
 - **Pre-master**: loudness and true peak before -> after (the actions per

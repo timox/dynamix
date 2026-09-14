@@ -322,7 +322,12 @@ class TransitionPlanner:
             lines.append(f"    low mids (200-500 Hz): {mud.get('excess_median_db', 0):+.0f} dB vs neighbours, "
                          f"build-up {mud.get('buildup_share', 0) * 100:.0f}% of the time, pulse {mud.get('beat_modulation', 0):.2f}")
             if b.get('resonances'):
-                lines.append("    resonances: " + ", ".join(f"{r['freq_hz']:.0f} Hz (+{r['prominence_db']:.0f} dB)" for r in b['resonances'][:4]))
+                from band_analysis import describe_resonance, key_note
+                lines.append("    resonances: " + ", ".join(f"{describe_resonance(r['freq_hz'], p.get('key'))} +{r['prominence_db']:.0f} dB"
+                                                       for r in b['resonances'][:4]))
+                reminder = key_note(b['resonances'][:4], p.get('key'))
+                if reminder:
+                    lines.append(f"    note: {reminder}")
         for flag in (m or {}).get('flags') or []:
             lines.append(f"    ! {flag}")
         for flag in b.get('flags') or []:

@@ -35,6 +35,51 @@ RESONANCE_MIN_PROMINENCE_DB = 5.0
 RESONANCE_MIN_Q = 3.0
 RESONANCE_MIN_PERSISTENCE = 0.6  # share of segments where the peak is present
 
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+SCALE_DEGREES = {True: {0: "tonic", 2: "2nd", 4: "3rd", 5: "4th", 7: "5th", 9: "6th", 11: "7th"},      # major
+                 False: {0: "tonic", 2: "2nd", 3: "3rd", 5: "4th", 7: "5th", 8: "6th", 10: "7th"}}    # natural minor
+
+
+def resonance_note(freq_hz: float, key: Optional[str] = None) -> Dict:
+    """
+    Nearest note of a frequency (A4 = 440 Hz) and, when the track's key is known, whether that note belongs to
+    its scale: a persistent peak on a note of the key is often the key itself (bass line, drone), not a mix problem.
+    Approximate by nature: {'note': 'E4', 'cents': +12, 'in_key': True | False | None, 'degree': '5th' | None}.
+    """
+    midi = 69.0 + 12.0 * np.log2(max(float(freq_hz), 1e-6) / 440.0)
+    nearest = int(round(midi))
+    out = {"note": f"{NOTE_NAMES[nearest % 12]}{nearest // 12 - 1}", "cents": int(round((midi - nearest) * 100)),
+           "in_key": None, "degree": None}
+    from audio_utils import parse_key
+    parsed = parse_key(key) if key else None
+    if parsed:
+        root, is_major = parsed
+        degree = SCALE_DEGREES[is_major].get((nearest - root) % 12)
+        out.update(in_key=degree is not None, degree=degree)
+    return out
+
+
+def describe_resonance(freq_hz: float, key: Optional[str] = None) -> str:
+    """'330 Hz ~ E4 (5th of A minor)' / '233 Hz ~ A#3 -15 ct (not in A minor)' / '320 Hz ~ D#4 +49 ct'."""
+    n = resonance_note(freq_hz, key)
+    text = f"{freq_hz:.0f} Hz ~ {n['note']}" + (f" {n['cents']:+d} ct" if abs(n["cents"]) >= 10 else "")
+    if n["in_key"] is True:
+        text += f" ({n['degree']} of {key})"
+    elif n["in_key"] is False:
+        text += f" (not in {key})"
+    return text
+
+
+def key_note(resonances: List[Dict], key: Optional[str]) -> Optional[str]:
+    """A reminder when the resonances fall on notes of the track's key."""
+    if not key or not resonances:
+        return None
+    in_key = [r for r in resonances if resonance_note(r["freq_hz"], key)["in_key"]]
+    if not in_key:
+        return None
+    return (f"{len(in_key)}/{len(resonances)} resonance(s) on notes of {key}: they may simply be the key of the track "
+            "(bass line, drone), check by ear before cutting")
+
 
 def _band_sos(fs: float, lo: float, hi: float, order: int = 4):
     nyq = fs / 2
@@ -214,7 +259,7 @@ def analyze_bands(path: str, bpm: Optional[float] = None, audio: Optional[Tuple[
         flags.append(f"200-500 Hz {mud['excess_median_db']:+.0f} dB above its neighbours: static excess, fixed cut or high-pass the wide elements")
     strong = [r for r in resonances if r["prominence_db"] >= 8]
     if strong:
-        flags.append("persistent resonances: " + ", ".join(f"{r['freq_hz']:.0f} Hz" for r in strong[:3]))
+        flags.append("persistent resonances: " + ", ".join(describe_resonance(r["freq_hz"]) for r in strong[:3]))
     for r in resonances[:3]:
         gain = -min(6.0, max(2.0, r["prominence_db"] * 0.5))
         suggestions.append(f"cut {abs(gain):.0f} dB at {r['freq_hz']:.0f} Hz, Q {min(r['q'], 12):.0f} (+{r['prominence_db']:.0f} dB, {r['persistence'] * 100:.0f}% of the time)")
@@ -269,7 +314,9 @@ def analyze_bands_cached(path: str, bpm: Optional[float] = None) -> Dict:
     return report
 
 
-def format_band_report(report: Dict) -> str:
+def format_band_report(report: Dict, key: Optional[str] = None) -> str:
+    """Text report of one track; `key` (default: report['key'] when set) names the resonances' notes against the scale."""
+    key = key or report.get("key")
     lines = [f"{report['filename']}  ({report['bpm']:.0f} BPM, release {report['release_s'] * 1000:.0f} ms)" if report.get("bpm")
              else f"{report['filename']}"]
     lines.append("    band      level   range  pulse")
@@ -280,7 +327,11 @@ def format_band_report(report: Dict) -> str:
     lines.append(f"    200-500 Hz vs neighbours: {m['excess_median_db']:+.1f} dB typical, {m['excess_p90_db']:+.1f} dB at worst, "
                  f"build-up {m['buildup_share'] * 100:.0f}% of the time, pulse {m['beat_modulation']:.2f}")
     if report["resonances"]:
-        lines.append("    resonances: " + ", ".join(f"{r['freq_hz']:.0f} Hz (+{r['prominence_db']:.0f} dB, Q {r['q']:.0f})" for r in report["resonances"]))
+        lines.append("    resonances: " + ", ".join(f"{describe_resonance(r['freq_hz'], key)} +{r['prominence_db']:.0f} dB Q {r['q']:.0f}"
+                                                   for r in report["resonances"]))
+        reminder = key_note(report["resonances"], key)
+        if reminder:
+            lines.append(f"    note: {reminder}")
     else:
         lines.append("    resonances: none persistent between 100 and 800 Hz")
     for f in report["flags"]:

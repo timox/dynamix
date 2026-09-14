@@ -159,7 +159,9 @@ is only reported: it cannot be repaired without the stems.
 
 `band_analysis.py` tracks the signal per band over time with tempo-based time constants, maps the
 200-500 Hz masking against its neighbours and finds persistent resonances between 100 and 800 Hz
-with EQ cut suggestions. When they fire, the verdict is **mix revision recommended**: a
+with EQ cut suggestions. Each resonance is named by its nearest note (approximate, like the key
+detection) and marked when that note belongs to the track's key: a peak on the tonic or the fifth
+is often the key itself (bass line, drone) rather than a mix problem. When they fire, the verdict is **mix revision recommended**: a
 pre-master pass levels a set but cannot un-mask a low-mid build-up.
 
 ## Command line

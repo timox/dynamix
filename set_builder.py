@@ -1106,7 +1106,8 @@ class SetBuilderMixin:
                 for i, t in enumerate(tracks, 1):
                     self.root.after(0, self.update_status, f"Band analysis {i}/{len(tracks)}: {t.get('filename', '')}")
                     try:
-                        reports.append(analyze_bands_cached(t["file_path"], bpm=float(t.get("bpm") or 0) or None))
+                        report = analyze_bands_cached(t["file_path"], bpm=float(t.get("bpm") or 0) or None)
+                        reports.append(dict(report, key=t.get("key")))  # the key names the resonances' notes
                     except Exception as exc:
                         reports.append({"filename": t.get("filename", ""), "error": str(exc)})
                 summary = format_band_summary(reports)
@@ -1413,7 +1414,7 @@ class SetBuilderMixin:
                 if self._band_request != path:
                     return  # another track was selected meanwhile
                 placeholder.destroy()
-                self._show_figure(self.track_frame, charts.band_dynamics(report), replace=False)
+                self._show_figure(self.track_frame, charts.band_dynamics(dict(report, key=profile.get("key"))), replace=False)
             self.root.after(0, show)
         threading.Thread(target=work, daemon=True).start()
 

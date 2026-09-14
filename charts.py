@@ -458,18 +458,24 @@ def band_dynamics(report: Dict) -> Figure:
         ax3.set_xticklabels(["100", "150", "200", "300", "400", "500", "600", "800"])
         ymax = max(8.0, float(np.max(r)) + 3)
         ax3.set_ylim(min(-6.0, float(np.min(r)) - 1), ymax)
+        from band_analysis import resonance_note
+        key = report.get("key")
         for res in (report.get("resonances") or [])[:4]:
-            ax3.scatter([res["freq_hz"]], [res["prominence_db"]], s=60, color=RED, edgecolors=SURFACE, linewidths=2, zorder=3)
+            in_key = resonance_note(res["freq_hz"], key)["in_key"]
+            ax3.scatter([res["freq_hz"]], [res["prominence_db"]], s=60, color=BLUE_DARK if in_key else RED,
+                        edgecolors=SURFACE, linewidths=2, zorder=3)
         # label only the two strongest to avoid collisions; the others are in the notes
         for res in (report.get("resonances") or [])[:2]:
-            ax3.annotate(f"{res['freq_hz']:.0f} Hz", (res["freq_hz"], res["prominence_db"]), textcoords="offset points",
-                         xytext=(6, 4), fontsize=8, color=TEXT2)
+            n = resonance_note(res["freq_hz"], key)
+            ax3.annotate(f"{res['freq_hz']:.0f} Hz ~ {n['note']}" + (f" ({n['degree']})" if n["in_key"] else ""),
+                         (res["freq_hz"], res["prominence_db"]), textcoords="offset points", xytext=(6, 4), fontsize=8, color=TEXT2)
     else:
         ax3.text(0.5, 0.5, "Track too short for the resonance spectrum", transform=ax3.transAxes, ha="center", color=TEXT2)
     ax3.set_xlabel("Hz")
     ax3.set_ylabel("above spectral envelope (dB)")
     n_res = len(report.get("resonances") or [])
-    ax3.set_title(f"Resonances 100-800 Hz  —  {n_res} persistent peak(s) (red dots)", loc="left", fontsize=10)
+    legend = f"blue = note of {report['key']}, red = other" if report.get("key") else "red dots"
+    ax3.set_title(f"Resonances 100-800 Hz  —  {n_res} persistent peak(s) ({legend})", loc="left", fontsize=10)
     import textwrap
     lines = [("! " + l) for l in (report.get("flags") or [])] + [f"EQ: {sug}" for sug in (report.get("eq_suggestions") or [])]
     if report.get("verdict") == "mix":
