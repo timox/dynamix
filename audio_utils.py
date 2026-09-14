@@ -137,7 +137,24 @@ class AudioAnalyzer:
     # "beat gate" derived from the percussive share: ~0 for pads, ~1 for drums.
     BEAT_GATED_COMPONENTS = ('tempo', 'onset_rate', 'low_end')
 
-    def compute_energy_level(self, bpm: float = None, excerpt_seconds: float = 120.0) -> Tuple[float, dict]:
+    @classmethod
+    def level_from_components(cls, raw: dict, beat_regular: bool = False) -> float:
+        """
+        Energy level (1-10) from the measured components. The tempo and rhythm terms are weighted by the beat gate
+        (percussive share of the excerpt), or count fully when the track has a steady beat grid: soft percussion,
+        long intros or breaks do not make a steady track "beatless".
+        """
+        gate = 1.0 if beat_regular else float(raw.get('beat_gate', 1.0))
+        score = 0.0
+        for name, (center, scale, weight) in cls.ENERGY_COMPONENTS.items():
+            normalised = 1.0 / (1.0 + np.exp(-(float(raw.get(name, 0.0)) - center) / scale))
+            if name in cls.BEAT_GATED_COMPONENTS:
+                normalised *= gate
+            score += weight * normalised
+        return round(float(np.clip(1.0 + 9.0 * score, 1.0, 10.0)), 1)
+
+    def compute_energy_level(self, bpm: float = None, excerpt_seconds: float = 120.0,
+                             beat_regular: bool = False) -> Tuple[float, dict]:
         """
         Estimate the perceived energy of the track on a 1-10 scale, independent of
         its mastering loudness (the signal is RMS-normalised first). The analysis
@@ -189,14 +206,7 @@ class AudioAnalyzer:
         }
         beat_gate = 1.0 / (1.0 + np.exp(-(perc_share - 0.15) / 0.04))
         raw['beat_gate'] = float(beat_gate)
-        score = 0.0
-        for name, (center, scale, weight) in self.ENERGY_COMPONENTS.items():
-            normalised = 1.0 / (1.0 + np.exp(-(raw[name] - center) / scale))
-            if name in self.BEAT_GATED_COMPONENTS:
-                normalised *= beat_gate
-            score += weight * normalised
-        level = float(np.clip(1.0 + 9.0 * score, 1.0, 10.0))
-        return round(level, 1), raw
+        return self.level_from_components(raw, beat_regular), raw
 
     def get_audio_features(self) -> dict:
         """
@@ -213,24 +223,55 @@ class AudioAnalyzer:
         features['bpm'], features['bpm_confidence'] = self.detect_bpm()
         features['key'], features['key_confidence'] = self.detect_key()
         
+        # Beat analysis over the whole track: a steady grid means the track has a beat
+        beat_times, beat_strengths = self.analyze_beat_grid()
+        features['beat_count'] = len(beat_times)
+        features['avg_beat_strength'] = np.mean(beat_strengths)
+        features['beat_regular'] = grid_is_regular(beat_times)
+
         # Energy analysis
         times, rms = self.analyze_energy_profile()
         features['avg_energy'] = np.mean(rms)
         features['max_energy'] = np.max(rms)
         features['energy_std'] = np.std(rms)
-        features['energy_level'], features['energy_components'] = self.compute_energy_level(bpm=features['bpm'])
+        features['energy_level'], features['energy_components'] = self.compute_energy_level(
+            bpm=features['bpm'], beat_regular=features['beat_regular'])
         # Beatless material (pads, ambient) has no meaningful tempo to match
-        features['has_beat'] = bool(features['energy_components'].get('beat_gate', 1.0) >= 0.5)
-        
-        # Beat analysis
-        beat_times, beat_strengths = self.analyze_beat_grid()
-        features['beat_count'] = len(beat_times)
-        features['avg_beat_strength'] = np.mean(beat_strengths)
+        features['has_beat'] = bool(features['beat_regular'] or features['energy_components'].get('beat_gate', 1.0) >= 0.5)
 
         return features
     
 _PITCH_CLASSES = {'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3, 'E': 4, 'F': 5, 'F#': 6, 'GB': 6,
                   'G': 7, 'G#': 8, 'AB': 8, 'A': 9, 'A#': 10, 'BB': 10, 'B': 11}
+
+
+def grid_is_regular(beats, min_beats: int = 8, tolerance: float = 0.10, share: float = 0.8) -> bool:
+    """True when most beat intervals stay within `tolerance` of the median period: a real, steady beat."""
+    beats = np.asarray(beats, dtype=float)
+    if len(beats) < min_beats:
+        return False
+    intervals = np.diff(beats)
+    period = float(np.median(intervals))
+    return period > 0 and float(np.mean(np.abs(intervals - period) <= tolerance * period)) >= share
+
+
+def upgrade_features(path: str, features: dict) -> dict:
+    """
+    Features cached by an older DynaMix have no steady-beat check: add it from the track's beat grid (cached, the
+    file is decoded once when missing) and derive has_beat and the energy level again from the cached components.
+    Returns the features unchanged when the beat grid cannot be computed.
+    """
+    try:
+        from transition_fx import beat_grid
+        regular = grid_is_regular(beat_grid(path).get('beats') or [])
+    except Exception:
+        return features
+    out = dict(features, beat_regular=regular)
+    components = features.get('energy_components') or {}
+    out['has_beat'] = bool(regular or components.get('beat_gate', 1.0) >= 0.5)
+    if all(name in components for name in AudioAnalyzer.ENERGY_COMPONENTS):
+        out['energy_level'] = AudioAnalyzer.level_from_components(components, regular)
+    return out
 
 
 def parse_key(key: str):

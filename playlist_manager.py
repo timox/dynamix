@@ -2,7 +2,7 @@ import os
 import logging
 import numpy as np
 from typing import List, Dict
-from audio_utils import AudioAnalyzer
+from audio_utils import AudioAnalyzer, upgrade_features
 from analysis_store import get_store
 from set_proposer import energy_value, propose, transition_cost
 
@@ -96,7 +96,16 @@ class PlaylistManager:
                             store.put(file_path, 'features', features)
                         except OSError:
                             pass  # file not reachable for stat (e.g. mocked): skip caching
-                
+                elif 'beat_regular' not in features:
+                    # cached by an older version: add the steady-beat check once (beat grid, cached components)
+                    upgraded = upgrade_features(file_path, features)
+                    if upgraded is not features and store:
+                        try:
+                            store.put(file_path, 'features', upgraded)
+                        except OSError:
+                            pass
+                    features = upgraded
+
                 self.tracks.append(self.track_record(file_path, features))
                 self.analysis_cache[file_path] = features
                 self.last_run[status] += 1

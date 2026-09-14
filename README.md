@@ -108,7 +108,9 @@ tracks to be analysed again. Projects created by older versions keep working: th
 Each track gets an **energy level from 1 to 10**, computed on the loudness-normalised body of the
 track (a quiet and a loud master of the same tune get the same level) from the tempo, the
 percussive events per second, the share of percussive energy, the low end and the brightness;
-the tempo and rhythm terms only count when the track has a beat.
+the tempo and rhythm terms count fully when the track has a steady beat (a regular beat grid over
+the whole track, so soft percussion, long intros or breaks do not make it "beatless"), and are
+weighted by the share of percussion otherwise.
 
 Set lists (`set_proposer.py`) come from a beam search over the selected tracks: they fit the
 requested duration (crossfade overlaps deducted), follow the chosen curve in time (`build`,

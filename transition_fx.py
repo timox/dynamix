@@ -84,12 +84,9 @@ def beat_grid(path: str, use_cache: bool = True) -> Dict:
 
 
 def grid_is_regular(beats: Sequence[float], tolerance: float = 0.10, share: float = 0.8) -> bool:
-    """True when most beat intervals stay within `tolerance` of the median period: a real, steady beat."""
-    if len(beats) < MIN_GRID_BEATS:
-        return False
-    intervals = np.diff(np.asarray(beats, dtype=float))
-    period = float(np.median(intervals))
-    return period > 0 and float(np.mean(np.abs(intervals - period) <= tolerance * period)) >= share
+    """True when most beat intervals stay within `tolerance` of the median period (audio_utils.grid_is_regular)."""
+    from audio_utils import grid_is_regular as regular
+    return regular(beats, MIN_GRID_BEATS, tolerance, share)
 
 
 def usable_beats(grid: Dict, fallback_bpm: float, duration: float, name: str = "") -> Tuple[List[float], Optional[str]]:

@@ -154,15 +154,17 @@ class TransitionPlanner:
             bpm, _ = analyzer.detect_bpm()
         if not key:
             key, _ = analyzer.detect_key()
+        beat_times, _ = analyzer.analyze_beat_grid()
+        beat_times = np.asarray(beat_times, dtype=float)
         if energy_level <= 0:
-            energy_level, components = analyzer.compute_energy_level(bpm=bpm)
-            has_beat = bool(components.get('beat_gate', 1.0) >= 0.5)
+            from audio_utils import grid_is_regular
+            regular = grid_is_regular(beat_times)
+            energy_level, components = analyzer.compute_energy_level(bpm=bpm, beat_regular=regular)
+            has_beat = bool(regular or components.get('beat_gate', 1.0) >= 0.5)
 
         times, rms = analyzer.analyze_energy_profile()
         if avg_energy <= 0:
             avg_energy = float(np.mean(rms))
-        beat_times, _ = analyzer.analyze_beat_grid()
-        beat_times = np.asarray(beat_times, dtype=float)
 
         mix_dur = self._mix_duration(bpm)
         beat_len = 60.0 / bpm if bpm > 0 else 0.5
