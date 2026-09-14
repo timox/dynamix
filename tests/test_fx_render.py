@@ -61,12 +61,64 @@ class TestRenderSet(unittest.TestCase):
         self.assertAlmostEqual(a["outro_end"], 10.0, places=3)        # 4 beats of freeze = 2 s
         self.assertAlmostEqual(a["duration"], 10.0, places=2)
         self.assertAlmostEqual(b["intro_start"], 1.0)
+        # B's intro lasts at least as long as A's outro, so that Mixxx brings B in on the junction
+        self.assertGreaterEqual(b["intro_end"], b["intro_start"] + (a["outro_end"] - a["outro_start"]) - 1e-3)
         data, sr = sf.read(b["output"], dtype="float32")
         original, _ = sf.read(self.paths[1], dtype="float32")
         self.assertEqual(data.shape[1], 2)   # FX copies are always stereo
         diff = np.abs(data[int(3.0 * SR):int(3.5 * SR), 0] - original[int(3.0 * SR):int(3.5 * SR)])
         self.assertGreater(float(np.max(diff)), 0.1)   # sample overflow: A ends at 10 s = B 1.0 + 2.0 s
         self.assertLessEqual(float(np.max(np.abs(data))), 10 ** (-1 / 20) + 1e-3)
+
+    def test_track_both_incoming_and_outgoing(self):
+        from fx_render import render_set
+        fx = dict(self.fx)
+        fx[(self.paths[1], self.paths[2])] = {"effects": [
+            dict(tfx.new_effect("filter"), kind="highpass", start_hz=20, end_hz=2000, beats=4)]}
+        out_dir = os.path.join(self.tmp, "fx")
+        results, problems = render_set(self.profiles, lambda a, b: fx.get((a, b)), {}, out_dir,
+                                       grids={p: self.grid for p in self.paths})
+        self.assertEqual(problems, [])
+        self.assertEqual([r["source"] for r in results], self.paths)
+        self.assertEqual(sorted(os.listdir(out_dir)), ["t0.wav", "t1.wav", "t2.wav"])
+        data, _ = sf.read(results[1]["output"], dtype="float32")
+        base, _ = sf.read(self.paths[1], dtype="float32")
+        start = slice(int(3.0 * SR), int(3.5 * SR))   # overflow of the sample of transition 1
+        self.assertGreater(float(np.max(np.abs(data[start, 0] - base[start]))), 0.1)
+        end = slice(int(7.8 * SR), int(8.3 * SR))     # outgoing high-pass of transition 2 (junction 8.0 s)
+        rms = lambda x: 20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-12)
+        self.assertLess(rms(data[end, 0]), rms(base[end]) - 6)
+        self.assertEqual([sha1(p) for p in self.paths], self.hashes)
+
+    def test_copy_is_identical_outside_the_modified_spans(self):
+        from fx_render import render_set
+        sr = 8000
+        folder = os.path.join(self.tmp, "long")
+        os.makedirs(folder)
+        paths, profiles, grids = [], [], {}
+        for k, (freq, seconds) in enumerate(zip((220, 330, 440), (12.0, 200.0, 12.0))):
+            t = np.arange(int(seconds * sr)) / sr
+            path = os.path.join(folder, f"l{k}.wav")
+            sf.write(path, (0.8 * np.sin(2 * np.pi * freq * t)).astype("float32"), sr)
+            paths.append(path)
+            profiles.append({"file_path": path, "filename": os.path.basename(path), "duration": seconds, "bpm": 120.0,
+                             "intro_start": 1.0, "intro_end": 3.0, "outro_start": seconds - 4.0, "outro_end": seconds - 2.0})
+            grids[path] = {"beats": [i * 0.5 for i in range(int(seconds * 2) + 1)], "bpm": 120.0, "has_beat": True,
+                           "duration": seconds}
+        fx = {(paths[0], paths[1]): self.fx[(self.paths[0], self.paths[1])],   # the sample overflows into l1 (0.8 + 0.2)
+              (paths[1], paths[2]): {"effects": [dict(tfx.new_effect("filter"), beats=4)]}}
+        results, problems = render_set(profiles, lambda a, b: fx.get((a, b)), {}, os.path.join(self.tmp, "fx_long"),
+                                       grids=grids)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(results), 3)
+        data, _ = sf.read(results[1]["output"], dtype="float32")
+        base, _ = sf.read(paths[1], dtype="float32")
+        self.assertEqual(len(data), len(base))
+        self.assertGreater(results[1]["limiter_reduction_db"], 0.0)
+        self.assertLessEqual(float(np.max(np.abs(data))), 10 ** (-1 / 20) + 1e-3)
+        # incoming region: until B's junction (1 s) + 120 s; outgoing region: from A's junction (196 s) - 45 s
+        middle = slice(int(125 * sr), int(148 * sr))
+        np.testing.assert_array_equal(data[middle, 0], base[middle])
 
     def test_invalid_transition_is_reported_and_skipped(self):
         from fx_render import render_set

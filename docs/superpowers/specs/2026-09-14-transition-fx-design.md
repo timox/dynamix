@@ -30,6 +30,7 @@ Pour une transition entre le morceau sortant A et le morceau entrant B, la fiche
 - **Positions des FX** : toutes sont exprimées **en temps musicaux par rapport à la jonction**, en s'appuyant sur les vraies grilles de temps de A et de B.
 - **Règle de débordement** : un FX est écrit dans la copie de A tant que A est audible, c'est-à-dire jusqu'à la fin de A (`A.outro_end`, ou la fin du freeze s'il y en a un). Tout ce qui dépasse la fin de A est ajouté à la copie de B au même instant musical, à `B.intro_start + (t − jonction_A)`. Rien n'est ainsi joué en double pendant le crossfade.
 - **Freeze** : il remplace la fin de A à partir du point de capture. Les repères de la copie de A sont recalculés : `outro_start` = point de capture et `outro_end` = fin du freeze, traîne comprise.
+- **Durée de l'intro de B** : la paire rendue garde l'intro de B au moins aussi longue que l'outro de A (`B.intro_end ≥ jonction_B + (A.outro_end − jonction_A)`), pour que Mixxx, qui termine la transition à `A.outro_end`, fasse entrer B sur la jonction.
 
 ### Données (`project.json`, bloc `fx`)
 
