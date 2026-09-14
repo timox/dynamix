@@ -44,8 +44,9 @@ python gui.py
     2. Propose a set list (several variants from the selection; use one)
     3. Plan Transitions (intro/outro sections, transition sheet)
     4. Pre-master Set (optional, into the project's premaster folder)
-    5. Create Playlist (optional, M3U into exports/)
-    6. Export to Mixxx (uses the database set in the Configuration tab)
+    5. Transition FX (optional, copies with FX into the project's fx folder)
+    6. Create Playlist (optional, M3U into exports/)
+    7. Export to Mixxx (uses the database set in the Configuration tab)
   Redoing an early step resets the later ones, so the status is always true.
 - **Tracks tab**, three columns:
   **Library** (every track of the library folder, with a filter; double-click
@@ -57,6 +58,18 @@ python gui.py
   transition). Click a variant to preview it; **Use this proposal** copies it
   into the set list, which **Up / Down / Remove** and **Add to set list ▶**
   then edit by hand. Select a selection or set row to open it in the Track tab.
+- **Transition FX** window (workflow step 5, or the button of the transition
+  sheet): pick a transition, then stack effects on it — **Freeze** (loops the
+  last beats of the outgoing track, with a roll such as 4×1 → 2×2 → 1×4, an
+  optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
+  low-pass or band-pass sweep with resonance, closing the outgoing track or
+  opening the incoming one), **Echo** (tempo-synced) and **Sample** (from the
+  FX samples folder, anchored to end at, start at or centre on the junction; it
+  may run over into the next track). **▶ Preview (loop)** plays the transition
+  in a loop and re-renders it when a setting changes; **Nudge (ms)** shifts the
+  junction by ear. **Apply all FX** writes copies into `fx/` (the library and
+  the pre-mastered copies are never modified); the playlist and the Mixxx
+  export then use those copies, with the cue positions of the rendered files.
 - **Log tab**: everything DynaMix prints and every error with its traceback,
   filterable by level, also written to `<DynaMix home>/logs/dynamix.log`
   (**Open log folder**). The tab title counts new warnings and errors.
@@ -72,7 +85,8 @@ python gui.py
 
 ### 3 bis. Configuration Tab
 - **Paths**: the projects folder, the Mixxx database (Browse / Detect, empty
-  = auto-detect), and where DynaMix keeps its cache and configuration
+  = auto-detect), the music library folder, the FX samples folder, and where
+  DynaMix keeps its cache and configuration
 - **Defaults for new projects**: set duration, energy curve, crossfade
   length, target loudness, tone matching, phase repair, pre-master format
 - **Environment**: what DynaMix found on this machine (Python, Tkinter,

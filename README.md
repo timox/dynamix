@@ -139,6 +139,15 @@ selected tracks to be analysed again. The **Log** tab shows every message and er
 (`app_log.py`, also written to `<DynaMix home>/logs/dynamix.log`). Projects created before
 this version keep working: their imported `source/` copies become their selection.
 
+**Transition FX** (`transition_fx.py`, `fx_render.py`, `fx_window.py`): per transition, a stack of
+freeze / roll, filter sweeps (high-pass, low-pass, band-pass with resonance), tempo-synced echo
+and FX samples, placed in beats around the junction. The Transition FX window previews a
+transition in a loop while you tweak it; **Apply all FX** renders copies into the project's
+`fx/` folder (effects that outlast the outgoing track continue at the start of the next one).
+Settings are kept per track pair in `project.json`, so reordering the set keeps them; the
+library and the pre-mastered copies are never modified. Playback files are chosen in this
+order: FX copy, pre-mastered copy, original.
+
 - **Analysis cache** (`analysis_store.py`): every per-file result is stored in
   `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows or `~/.dynamix/analysis.sqlite`
   elsewhere (`DYNAMIX_HOME` overrides). A track is analysed once.
@@ -146,11 +155,12 @@ this version keep working: their imported `source/` copies become their selectio
   database, defaults for new projects, and an environment report (Tkinter, libsndfile MP3
   support, FFmpeg, Mixxx database, cache).
 - **Command line**: `mixxx_export.py --project <folder>` reuses the project's set list, writes
-  the sheet and charts into `exports/` and records the steps; `mastering.py fix <project folder>`
+  the sheet and charts into `exports/`, exports the FX or pre-mastered copies when they exist
+  (`--originals` to skip them) and records the steps; `mastering.py fix <project folder>`
   pre-masters the set list into `premaster/`.
 
-Charts (`charts.py`): set energy curve vs. target and tempo, set map with intro/outro sections
-and transition scores, per-track energy envelope and tone balance against the set, and
+Charts (`charts.py`): set energy curve vs. target and tempo, set map with intro/outro sections,
+transition scores and transition FX, per-track energy envelope and tone balance against the set, and
 loudness / true-peak before → after of the pre-master pass.
 
 ### Energy Level and Set Ordering
