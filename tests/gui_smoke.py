@@ -195,9 +195,16 @@ def scenario():
         win.add_effect("freeze")
         win.add_effect("sample")
         check(pump(lambda: hasattr(win, "sample_list") and win.sample_list.size() == 1, 5.0), "the sample list is shown")
-        win.sample_list.selection_set(0)
-        win.pick_sample()
-        check(win.effects()[1]["file"].endswith("riser.wav"), "a sample can be picked")
+        win.start_preview()  # the sample effect has no file yet
+        check(pump(lambda: "Choose a file" in win.status_label.cget("text"), 3.0),
+              "a preview with a sample effect without a file asks to choose one (no error)")
+        win.stop_preview()
+        sample_list = win.sample_list
+        sample_list.selection_set(0)
+        sample_list.event_generate("<<ListboxSelect>>")  # a single click
+        check(pump(lambda: (win.effects()[1].get("file") or "").endswith("riser.wav"), 3.0), "a single click picks the sample")
+        check(win.sample_list is sample_list and win.sample_list.winfo_exists(), "picking a sample keeps the list (no rebuild)")
+        check(win.sample_current_label.cget("text").endswith("riser.wav"), "the current sample is shown")
         win.fx_tree.selection_set("F0")
         check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)

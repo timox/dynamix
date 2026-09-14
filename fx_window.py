@@ -24,6 +24,7 @@ from fx_render import render_preview, render_set
 log = logging.getLogger("dynamix.fx")
 MUTED = "#52514e"
 PLAN_CHANGED = "The transitions or the set list changed: close and reopen Transition FX"
+NO_SAMPLE_FILE = "Choose a file for the Sample effect: click a sample in the list"
 
 FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample"}
 
@@ -502,8 +503,10 @@ class TransitionFxWindow(tk.Toplevel):
         filter_var = tk.StringVar()
         ttk.Entry(top, textvariable=filter_var, width=20).pack(side=tk.LEFT, padx=4)
         ttk.Button(top, text="▶ Sample", command=self.audition_sample).pack(side=tk.LEFT, padx=4)
-        ttk.Label(box, text=f"Current: {os.path.basename(fx.get('file') or '') or '-'}", foreground=MUTED).pack(anchor="w", padx=4)
-        self.sample_list = tk.Listbox(box, height=8)
+        ttk.Label(box, text="Click a sample to use it, double-click to hear it.", foreground=MUTED).pack(anchor="w", padx=4)
+        self.sample_current_label = ttk.Label(box, text=f"Current: {os.path.basename(fx.get('file') or '') or '-'}")
+        self.sample_current_label.pack(anchor="w", padx=4)
+        self.sample_list = tk.Listbox(box, height=8, exportselection=False)
         self.sample_list.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
         self._shown_samples = []
 
@@ -519,19 +522,29 @@ class TransitionFxWindow(tk.Toplevel):
         filter_var.trace_add("write", fill)
         fill()
 
-        self.sample_list.bind("<Double-1>", lambda e: self.pick_sample())
+        self.sample_list.bind("<<ListboxSelect>>", lambda e: self.pick_sample())
         self.sample_list.bind("<Return>", lambda e: self.pick_sample())
+        self.sample_list.bind("<Double-1>", lambda e: self.audition_sample())
 
     def pick_sample(self):
-        """Use the sample selected in the list for the current sample effect."""
+        """Use the sample selected in the list for the current sample effect (the list is kept as it is)."""
         sel = self.sample_list.curselection()
-        if not sel:
+        if not sel or self.fx_index is None:
             return
         entry = self._shown_samples[sel[0]]
         if (entry.get("duration") or 0) > tfx.MAX_SAMPLE_SECONDS:
             self.status(f"{entry['filename']} is longer than {tfx.MAX_SAMPLE_SECONDS:.0f} s")
             return
-        self.update_effect({"file": entry["file_path"]}, rebuild_settings=True)
+        if self.effects()[self.fx_index].get("file") != entry["file_path"]:
+            self.update_effect({"file": entry["file_path"]})
+        self.sample_current_label.config(text=f"Current: {entry['filename']}")
+        self.status(f"Sample: {entry['filename']}")
+
+    @staticmethod
+    def _sample_missing(entry):
+        """True when an enabled sample effect of the transition has no file yet."""
+        return any(fx.get("type") == "sample" and fx.get("enabled", True) and not fx.get("file")
+                   for fx in (entry or {}).get("effects") or [])
 
     def scan_samples(self):
         folder = (self.app.config.get("fx_samples_folder") or "").strip()
@@ -599,6 +612,9 @@ class TransitionFxWindow(tk.Toplevel):
         if self._plan_changed():
             self.status(PLAN_CHANGED)
             return
+        if self._sample_missing(self.entry()):
+            self.status(NO_SAMPLE_FILE)
+            return
         self._preview_seq += 1
         seq = self._preview_seq
         index = self.pair_index
@@ -658,6 +674,10 @@ class TransitionFxWindow(tk.Toplevel):
         pairs = self.project.active_fx_pairs()
         if not pairs:
             messagebox.showinfo("Transition FX", "No active FX on the transitions of the set list", parent=self)
+            return
+        if any(self._sample_missing(self.project.fx_for_pair(a, b)) for a, b in pairs):
+            self.status(NO_SAMPLE_FILE)
+            messagebox.showinfo("Transition FX", NO_SAMPLE_FILE, parent=self)
             return
         self.stop_preview()
         self._applying = True
