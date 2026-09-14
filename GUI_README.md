@@ -1,5 +1,8 @@
 # DynaMix GUI - Quick Start Guide
 
+The GUI of this fork is built around set projects; it replaces the analysis tabs of the original
+makalin/dynamix GUI (see "About this fork" in [README.md](README.md)).
+
 ## Launching the GUI
 
 To start the DynaMix graphical user interface:
@@ -101,50 +104,34 @@ python gui.py
   folder**). The tab title counts new warnings and errors.
 - **Show**: All / Reports (hides the log) / Warnings and errors / Errors.
 
-The former Track Analysis, Two-Track Analysis, DJ Tools, Audio Effects and
-Export Tools tabs are gone from the GUI: the Set Builder covers the analysis
-of the set's tracks and its export, and the modules remain usable from the
-command line (see README.md).
+The Track Analysis, Two-Track Analysis, DJ Tools, Audio Effects and Export
+Tools tabs of the original project were removed: the Set Builder covers the
+analysis of the set's tracks and its export, and those modules remain usable
+from the command line (see README.md).
 
 ## Usage Tips
 
-1. **Analysis**: analysis runs in the background and is cached per file
-2. **Status Bar**: check the bottom status bar for the current operation
-3. **Errors**: the Log tab keeps every warning and error with its traceback
-
-## Keyboard Shortcuts
-
-- **Ctrl+O**: Open file (in file selection dialogs)
-- **Ctrl+S**: Save (in export dialogs)
-- **Esc**: Close dialogs
+1. **Analysis** runs in the background and is cached per file: a track is
+   analysed once, whatever the project.
+2. **Status bar**: the bottom bar shows the current operation and its progress.
+3. **Errors**: the Log tab keeps every warning and error with its traceback;
+   copy it from there when reporting a problem.
 
 ## Troubleshooting
 
-### GUI Won't Start
-- Ensure Python 3.8+ is installed
-- Check that all dependencies are installed: `pip install -r requirements.txt`
-- Verify tkinter is available (usually included with Python)
-
-### Analysis Takes Too Long
-- Large audio files take longer to process
-- Use batch analysis for multiple files
-- Check the status bar for progress
-
-### No Visualizations Appearing
-- Ensure matplotlib is properly installed
-- Check that analysis completed successfully
-- Try resizing the window
+- **The GUI does not start**: run `python check_install.py`; on Windows,
+  Tkinter comes with the "tcl/tk and IDLE" option of the Python installer.
+- **The first analysis is slow**: `numba` compiles its code the first time;
+  later runs are faster, and analysed tracks come from the cache.
+- **A chart stays empty**: analyse the selection and build a set list first;
+  the FX tab needs planned transitions (step 3).
+- **The Mixxx export misses tracks**: the tracks, and the project's `fx/` and
+  `premaster/` folders when copies are used, must be in the Mixxx library;
+  close Mixxx during the export.
 
 ## System Requirements
 
-- Python 3.8 or higher
-- All dependencies from requirements.txt
-- Tkinter (usually included with Python)
-- Sufficient RAM for large playlists (recommended: 4GB+)
-
-## Notes
-
-- The GUI runs analysis in background threads to keep the interface responsive
-- Large playlists may take several minutes to analyze
-- Export formats are optimized for compatibility with popular DJ software
+- Python 3.11 or 3.12 recommended, with Tkinter
+- The dependencies of `requirements.txt`
+- 4 GB of RAM or more for FX renders of long sets
 

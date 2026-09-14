@@ -3,6 +3,12 @@
 Ce guide décrit l'installation de DynaMix sur Windows 10 ou 11. Aucune
 connaissance particulière de Python n'est nécessaire.
 
+DynaMix est parti d'un fork de [makalin/dynamix](https://github.com/makalin/dynamix),
+dont il s'est depuis dissocié : il est devenu un outil de préparation de sets
+(projets, propositions de set, transitions, pré-mastering, FX, export Mixxx)
+qui va très au-delà de correctifs. Voir « About this fork » dans le
+[README](README.md).
+
 ## 1. Installer Python
 
 1. Téléchargez **Python 3.11 ou 3.12** (64 bits) sur
@@ -25,7 +31,7 @@ connaissance particulière de Python n'est nécessaire.
 Avec Git pour Windows (<https://git-scm.com/download/win>) :
 
 ```bat
-git clone https://github.com/<votre-compte>/dynamix.git
+git clone https://github.com/timox/dynamix.git
 cd dynamix
 ```
 
@@ -70,7 +76,7 @@ puis réessayez `venv\Scripts\activate`.
 
 ## 4. FFmpeg : optionnel
 
-Le README d'origine présente FFmpeg comme requis. Ce n'est plus le cas pour
+Le projet d'origine présentait FFmpeg comme requis. Ce n'est plus le cas pour
 les MP3 : le paquet `soundfile` embarque `libsndfile` 1.1+, qui décode
 nativement **MP3, WAV, FLAC et OGG**. `check_install.py` le confirme sur la
 ligne « MP3 decoding via soundfile ».
@@ -93,61 +99,62 @@ de terminal :
 venv\Scripts\activate
 ```
 
-Puis, par exemple :
+Puis lancez l'interface graphique (ou double-cliquez sur `run_gui.bat`) :
 
 ```bat
-:: Interface graphique (ou double-cliquez sur run_gui.bat)
 python gui.py
-
-:: Analyse de transition entre deux morceaux
-python mix_enhanced.py "C:\Musique\track1.mp3" "C:\Musique\track2.mp3" --visualize
-
-:: Analyse d'un dossier complet et proposition de set de 60 minutes
-python mix_enhanced.py --playlist "C:\Musique\Set" --set-duration 60
-
-:: Notes DJ pour un morceau, ou pour tout un dossier
-python dj_tools.py "C:\Musique\track1.mp3" --export notes.txt
-python dj_tools.py --batch "C:\Musique\Set" --output-dir "C:\Musique\Notes"
 ```
 
 Mettez les chemins entre guillemets s'ils contiennent des espaces.
 
 ## 5 bis. L'onglet Set Builder : le fil conducteur
 
+Tous vos morceaux mixés sont rassemblés dans un seul **dossier de
+bibliothèque**, indiqué dans l'onglet **Configuration** (avec le dossier des
+samples FX). DynaMix le lit sans jamais le modifier.
+
 Un set est un **projet**, c'est-à-dire un dossier créé par DynaMix dans le
-dossier des projets (réglable dans l'onglet **Configuration**, par défaut
-`Documents\..\DynaMix Projects` dans votre profil) :
+dossier des projets (réglable dans l'onglet Configuration, par défaut
+`DynaMix Projects` dans votre profil) :
 
 ```
 DynaMix Projects\Samedi soir\
-    project.json     options, morceaux analysés, set list, état des étapes
-    source\          les fichiers audio importés (copies) dans le projet
+    project.json     options, sélection, morceaux analysés, set list, état des étapes, réglages FX
     premaster\       les copies corrigées du pré-mastering
-    exports\         playlists M3U, feuilles de transitions, JSON, graphiques
+    fx\              les copies avec les FX de transition
+    exports\         playlists M3U, transitions.json, graphiques
+    exports\reports\ les rapports (un fichier texte chacun)
 ```
 
-Vos dossiers de musique ne sont jamais modifiés : **New project...** crée le
-projet, **Import audio...** y copie les fichiers d'un dossier. Le menu
-déroulant rouvre n'importe quel projet avec tout ce qu'il contient.
+**New project...** crée le projet, le menu déroulant rouvre n'importe quel
+projet. **Reset project...** repart d'une sélection vide, **Clear analysis
+cache...** fait réanalyser les morceaux sélectionnés.
 
-Le panneau *Workflow* liste les six étapes avec leur état, leur date et un
+Le panneau *Workflow* liste les sept étapes avec leur état, leur date et un
 rappel « Next : » :
 
-1. **Analyze** : BPM, tonalité, énergie. Chaque fichier n'est analysé qu'une
-   fois, le résultat est conservé dans `%LOCALAPPDATA%\DynaMix\analysis.sqlite`.
-2. **Propose** : un ordre proposé selon la durée et la courbe d'énergie.
-   C'est un point de départ : dans l'onglet *Tracks*, la **bibliothèque**
-   reste affichée à gauche et la **set list** à droite, avec les boutons
-   Add / Remove / Up / Down pour corriger la proposition à la main.
-3. **Plan Transitions** : repères d'intro et d'outro, feuille de transitions.
+1. **Select and analyze** : dans l'onglet *Tracks*, ajoutez des morceaux de la
+   bibliothèque à la sélection, puis analysez-les (BPM, tonalité, énergie).
+   Chaque fichier n'est analysé qu'une fois, le résultat est conservé dans
+   `%LOCALAPPDATA%\DynaMix\analysis.sqlite`.
+2. **Propose** : plusieurs set lists calculées sur la sélection selon la durée
+   et la courbe d'énergie. Utilisez-en une, puis corrigez-la avec
+   Up / Down / Remove.
+3. **Plan Transitions** : repères d'intro et d'outro calés sur les temps ; la
+   feuille de transitions est un rapport de l'onglet Log.
 4. **Pre-master Set** (optionnel) : copies corrigées dans `premaster\`.
-5. **Create Playlist** (optionnel) : fichier M3U dans `exports\`.
-6. **Export to Mixxx** : repères et playlist dans la base Mixxx indiquée dans
+5. **Transition FX** (optionnel) : ouvre l'onglet *FX* (voir 6 bis).
+6. **Create Playlist** (optionnel) : fichier M3U dans `exports\`.
+7. **Export to Mixxx** : repères et playlist dans la base Mixxx indiquée dans
    l'onglet Configuration.
 
 Les onglets de droite montrent les graphiques : courbe d'énergie du set face à
 la cible, carte du set avec les zones d'intro et d'outro, détail d'un morceau
 et, pour le pré-mastering, le volume et la crête vraie avant et après.
+
+L'onglet **Log** réunit en haut les rapports du projet (résumé, mastering,
+analyse par bande, feuille de transitions, pré-mastering, export Mixxx) et en
+bas tous les messages et erreurs.
 
 ## 5 ter. L'onglet Configuration
 
@@ -163,8 +170,9 @@ librosa, numba, FFmpeg, base Mixxx, cache d'analyses. Cliquez sur
 
 Si vos fichiers ont des niveaux très différents, du clipping, un grave en
 opposition de phase ou une couleur sonore incohérente, ReplayGain ne suffira
-pas : il n'aligne que le volume moyen. DynaMix propose deux outils, dans
-l'onglet **Playlist Manager**, cadre *Mastering* :
+pas : il n'aligne que le volume moyen. DynaMix propose deux outils dans
+l'onglet **Set Builder** (bouton *Mastering Report* sous les options, et
+étape 4) :
 
 - **Mastering Report** : mesure chaque morceau (sonie en LUFS, plage de sonie,
   crête vraie, clipping, offset DC, équilibre spectral, corrélation stéréo,
@@ -190,8 +198,20 @@ pré-mastering aligne les niveaux d'un set mais ne peut pas démasquer un
 bas-médium encombré. En ligne de commande : `python mastering.py bands <dossier>`.
 
 L'onglet **Pre-master** montre ensuite, morceau par morceau, le volume et la
-crête vraie avant et après, et la liste des actions appliquées (gain, timbre,
-polarité, grave en mono). Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
+crête vraie avant et après ; la liste des actions appliquées (gain, timbre,
+polarité, grave en mono) est dans le rapport *Pre-master* de l'onglet Log.
+
+## 6 bis. Les FX de transition
+
+L'onglet **FX** du Set Builder (étape 5) règle chaque transition : choisissez
+une transition, puis empilez des effets — **Freeze** (répète les derniers
+temps du morceau sortant, par exemple 4×1 → 2×2 → 1×4), **Filter** (balayage
+passe-haut, passe-bas ou passe-bande avec résonance), **Echo** (calé au tempo)
+et **Sample** (un sample du dossier de samples FX, calé au tempo du morceau
+d'après le BPM écrit dans son nom, répétable). Le graphique en haut de
+l'onglet montre A et B avec leurs fondus et chaque effet sur un axe en temps ;
+**▶ Preview (loop)** fait écouter la transition en boucle. **Apply all FX**
+écrit des copies dans `fx\` ; la playlist et l'export Mixxx les utilisent. Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
 Mixxx et la playlist utilisent automatiquement les copies corrigées. En ligne de commande :
 
 ```bat
@@ -214,15 +234,17 @@ playlist dans le bon ordre. Il n'y a alors plus rien à préparer.
    cochez **ReplayGain** (analyse et application). Mixxx analysera les morceaux
    et alignera leur volume à la lecture, sans modifier vos fichiers.
 2. **Fermez Mixxx.** Il garde sa base ouverte et écraserait les modifications.
-3. Dans DynaMix, onglet **Playlist Manager** : choisissez le dossier, créez
-   éventuellement une set list, puis cliquez sur **Plan Transitions**. Une
-   fenêtre affiche la feuille de transitions. Cliquez sur **Export to Mixxx**,
-   confirmez l'emplacement de `mixxxdb.sqlite` (détecté automatiquement dans
-   `%LOCALAPPDATA%\Mixxx`) et le nom de la playlist.
+3. Dans DynaMix, onglet **Set Builder** : une fois les transitions planifiées
+   (étape 3), cliquez sur **Export to Mixxx** (étape 7), confirmez
+   l'emplacement de `mixxxdb.sqlite` (détecté automatiquement dans
+   `%LOCALAPPDATA%\Mixxx`) et le nom de la playlist. Le compte rendu est un
+   rapport de l'onglet Log. Si le projet utilise des copies, ajoutez aussi ses
+   dossiers `fx\` et `premaster\` à la bibliothèque Mixxx.
 
-   En ligne de commande, l'équivalent en une seule étape :
+   En ligne de commande, pour un projet ou en une seule étape depuis un dossier :
 
    ```bat
+   python mixxx_export.py --project "%USERPROFILE%\DynaMix Projects\Samedi soir"
    python mixxx_export.py --playlist "C:\Musique\Set" --set-duration 60
    ```
 

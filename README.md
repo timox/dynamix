@@ -1,620 +1,221 @@
 # DynaMix
 
-**DynaMix** is an advanced audio transition analysis tool designed for DJs and music enthusiasts to ensure smooth and energetic transitions between tracks. By analyzing the RMS (Root Mean Square) energy levels, BPM, musical key, and other audio features of MP3 files, DynaMix helps you identify the optimal mixing points so that the energy flow on the dance floor remains consistent.
+**DynaMix** prepares DJ sets from your own mixes: pick tracks from your music library, let it
+propose set lists that fit a duration and an energy curve, plan every transition on the beat,
+level badly mastered tracks, add transition FX (freeze / roll, filter sweeps, echo, FX samples)
+and push the result into [Mixxx](https://mixxx.org) so that its Auto DJ plays the whole set.
 
-[🇹🇷 Türkçe - Benioku](BENIOKU.md)
+## About this fork
 
-## 🚀 New Features
+DynaMix started as a fork of [makalin/dynamix](https://github.com/makalin/dynamix) by
+Mehmet T. Akalın (MIT License), a two-track energy analysis tool with BPM / key detection,
+DJ notes and playlist helpers.
 
-### Enhanced Analysis Tools
-- **BPM Detection:** Accurate tempo analysis with confidence scoring
-- **Key Detection:** Musical key identification for harmonic mixing
-- **Beat Grid Analysis:** Precise beat timing and strength analysis
-- **Section Detection:** Automatic identification of intro, verse, chorus, bridge, outro
-- **Drop Detection:** Energy breakdown and build-up point identification
+This repository has since **parted ways with the original project**. It went far beyond fixes:
+the work is organised around set projects with a guided workflow, and most of the code is new
+(music library and selection, set proposals, transition planning and Mixxx export, mastering
+check and pre-master pass, band analysis, transition FX with a preview and a transition chart,
+analysis cache, reports and log, a rebuilt GUI, a test suite). It follows its own direction,
+does not track the upstream repository and is not meant to be merged back. The analysis
+modules inherited from the original project are still here (see
+[Tools inherited from the original project](#tools-inherited-from-the-original-project)).
 
-### Playlist Management
-- **Energy Level (1-10):** Perceived energy independent of mastering loudness, from tempo, percussive drive, rhythmic density, low end and brightness
-- **Playlist Analysis:** Analyze entire music collections
-- **Set List Generation:** Create optimal track sequences for DJ sets
-- **Energy Curve Optimization:** Build-up, wave, or custom energy patterns
-- **Compatibility Matrix:** Track-to-track compatibility scoring
-- **Export/Import:** Save and load playlist analyses
+## Installation
 
-### DJ Performance Tools
-- **Cue Point Detection:** Optimal cue points for DJ performance
-- **Loop Suggestions:** Musical phrase and section-based loop recommendations
-- **Performance Zones:** Intro, build, drop, breakdown, outro analysis
-- **DJ Notes Generation:** Comprehensive performance notes for each track
-- **Batch Analysis:** Process entire directories automatically
-
-### Advanced Visualization
-- **Comprehensive Charts:** Energy profiles, beat grids, chromagrams
-- **Compatibility Radar:** Visual compatibility scoring
-- **Performance Zones:** Color-coded track sections
-- **Cue Point Visualization:** Onset strength and timing analysis
-
-## 📋 Requirements
-
-- **Python 3.8+**
-- [Librosa](https://librosa.org/) for audio processing
-- [NumPy](https://numpy.org/) for numerical operations
-- [Matplotlib](https://matplotlib.org/) for visualization
-- [Pandas](https://pandas.pydata.org/) for data analysis
-- [Seaborn](https://seaborn.pydata.org/) for enhanced plotting
-- **FFmpeg** or **AVbin** (if required) to support MP3 file decoding
-
-## 🛠️ Installation
-
-> **Windows users:** see the step-by-step guide in [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) (French) or simply run `install_windows.bat`. After any install, `python check_install.py` verifies the setup.
-
-1. **Clone or Download the Repository:**
-
-   ```bash
-   git clone https://github.com/makalin/dynamix.git
-   cd dynamix
-   ```
-
-2. **Install the Required Python Packages:**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Install FFmpeg (if not already installed):**
-
-   - **FFmpeg Download:** [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
-   - Alternatively, you can use package managers like `apt`, `brew`, or `chocolatey` depending on your OS.
-
-## 🎵 Usage
-
-### Basic Two-Track Analysis
-
-Run the original DynaMix tool for basic energy analysis:
+> **Windows:** step-by-step guide in French in [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md), or run
+> `install_windows.bat`, then double-click `run_gui.bat`.
 
 ```bash
-python mix_analiz.py path/to/track1.mp3 path/to/track2.mp3 --gecis_suresi 10 --threshold_factor 1.2
+git clone https://github.com/timox/dynamix.git
+cd dynamix
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python check_install.py           # checks Python, packages, Tkinter, MP3 decoding
 ```
 
-### Enhanced Analysis
+Python 3.11 or 3.12 is recommended (`numba`, used by librosa, lags behind new Python releases).
+Tkinter is needed for the GUI. No FFmpeg is needed for MP3, WAV, FLAC and OGG (decoded by
+soundfile / libsndfile); FFmpeg is only needed for M4A / AAC.
 
-Use the enhanced version for comprehensive analysis:
-
-```bash
-python mix_enhanced.py track1.mp3 track2.mp3 --visualize
-```
-
-### Playlist Analysis
-
-Analyze entire music collections:
-
-```bash
-python mix_enhanced.py --playlist /path/to/music/folder --set-duration 90 --visualize
-```
-
-### DJ Performance Tools
-
-Generate DJ notes for individual tracks:
-
-```bash
-python dj_tools.py track.mp3 --export dj_notes.txt --visualize
-```
-
-Batch analyze entire directories:
-
-```bash
-python dj_tools.py --batch /path/to/music/folder --output-dir /path/to/notes
-```
-
-### Graphical User Interface
-
-Launch the GUI application:
+## Quick start
 
 ```bash
 python gui.py
 ```
 
-The GUI provides access to all DynaMix features through an intuitive interface.
+1. **Configuration** tab: set the projects folder, your **music library folder** (one folder with
+   every track you mixed), the **FX samples folder** and the Mixxx database (auto-detected).
+2. **Set Builder** tab: **New project...**, then follow the workflow panel:
+   1. **Select and analyze**: add tracks from the library to the selection (BPM, key, energy;
+      each file is analysed once and cached).
+   2. **Propose**: several set lists from the selection for the chosen duration and energy curve;
+      use one, then adjust it with Up / Down / Remove.
+   3. **Plan Transitions**: beat-aligned intro and outro sections for every track.
+   4. **Pre-master Set** (optional): corrected copies with consistent loudness and tone.
+   5. **Transition FX** (optional): effects per transition, previewed in a loop, drawn on a chart.
+   6. **Create Playlist** (optional): an M3U of the set.
+   7. **Export to Mixxx**: intro / outro cues and the playlist, ready for Auto DJ.
+3. **Log** tab: the reports of the project (summary, mastering, band analysis, transition sheet,
+   pre-master, Mixxx export) and every message and error.
 
-### Set Builder: projects, a guided workflow, and a set list you can edit
+Redoing an early step resets the later ones, so the workflow status is always true. The GUI is
+described tab by tab in [GUI_README.md](GUI_README.md).
 
-A set is a **project folder** under the projects folder chosen in the GUI's Configuration tab
-(default `~/DynaMix Projects`):
+## Set projects
+
+A set is a **project folder** under the projects folder (default `~/DynaMix Projects`):
 
 ```
 <projects folder>/<set name>/
-    project.json     options, selection, analysed tracks, proposals, set list, step status, results
+    project.json     options, selection, analysed tracks, proposals, set list, step status, FX settings
     premaster/       corrected copies written by the pre-master pass
-    fx/              copies with transition FX (freeze, filters, echo, samples)
-    exports/         M3U playlists, transition sheets, JSON, charts
+    fx/              copies with the transition FX
+    exports/         M3U playlists, transitions.json, charts
+    exports/reports/ reports, one text file each
 ```
 
-Every track you mixed lives in one **music library folder** (Configuration tab), scanned in
-place and never written to (`library.py`). For each set you pick tracks from the library into
-the project's **selection**; the Set Builder tab then walks through seven steps (Select and
-analyze → Propose → Plan Transitions → Pre-master → Transition FX → Create Playlist → Export to Mixxx) and shows
-what is done, when, and what comes next. **Propose** computes several variants from the
-selection only (`set_proposer.py`); you use one and adjust it with Up / Down / Remove.
-**Reset project...** starts a set again from scratch and **Clear analysis cache...** forces the
-selected tracks to be analysed again. The **Log** tab shows every message and error
-(`app_log.py`, also written to `<DynaMix home>/logs/dynamix.log`). Projects created before
-this version keep working: their imported `source/` copies become their selection.
+The music library is scanned in place and never written to (`library.py`); the originals and
+the pre-mastered copies are never modified. Playback files are chosen in this order: FX copy,
+pre-mastered copy, original. **Reset project...** starts a set again from an empty selection
+(name, options and the analysis cache are kept); **Clear analysis cache...** forces the selected
+tracks to be analysed again. Projects created by older versions keep working: their imported
+`source/` copies become their selection.
 
-**Transition FX** (`transition_fx.py`, `fx_render.py`, `fx_window.py`): per transition, a stack of
-freeze / roll, filter sweeps (high-pass, low-pass, band-pass with resonance), tempo-synced echo
-and FX samples (fitted to the outgoing track's tempo from the BPM written in their file name, by
-varispeed or time-stretch), placed in beats around the junction. The FX tab of the Set Builder previews a
-transition in a loop while you tweak it; **Apply all FX** renders copies into the project's
-`fx/` folder (effects that outlast the outgoing track continue at the start of the next one).
-Settings are kept per track pair in `project.json`, so reordering the set keeps them; the
-library and the pre-mastered copies are never modified. Playback files are chosen in this
-order: FX copy, pre-mastered copy, original. The project's `fx/` and `premaster/` folders must be
-part of the Mixxx library (Mixxx music directories) for the export to match those copies.
+- **Analysis cache** (`analysis_store.py`): `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows,
+  `~/.dynamix/analysis.sqlite` elsewhere (`DYNAMIX_HOME` overrides).
+- **Configuration** (`config.py`): `config.json` next to the cache.
+- **Log** (`app_log.py`): `<DynaMix home>/logs/dynamix.log`.
 
-- **Analysis cache** (`analysis_store.py`): every per-file result is stored in
-  `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows or `~/.dynamix/analysis.sqlite`
-  elsewhere (`DYNAMIX_HOME` overrides). A track is analysed once.
-- **Configuration** (`config.py`, `config.json` next to the cache): projects folder, Mixxx
-  database, defaults for new projects, and an environment report (Tkinter, libsndfile MP3
-  support, FFmpeg, Mixxx database, cache).
-- **Command line**: `mixxx_export.py --project <folder>` reuses the project's set list, writes
-  the sheet and charts into `exports/`, exports the FX or pre-mastered copies when they exist
-  (`--originals` to skip them) and records the steps; `mastering.py fix <project folder>`
-  pre-masters the set list into `premaster/`.
+## Energy level and set proposals
 
-Charts (`charts.py`): set energy curve vs. target and tempo, set map with intro/outro sections,
-transition scores and transition FX, per-track energy envelope and tone balance against the set, and
-loudness / true-peak before → after of the pre-master pass.
+Each track gets an **energy level from 1 to 10**, computed on the loudness-normalised body of the
+track (a quiet and a loud master of the same tune get the same level) from the tempo, the
+percussive events per second, the share of percussive energy, the low end and the brightness;
+the tempo and rhythm terms only count when the track has a beat.
 
-### Energy Level and Set Ordering
+Set lists (`set_proposer.py`) come from a beam search over the selected tracks: they fit the
+requested duration (crossfade overlaps deducted), follow the chosen curve in time (`build`,
+`wave`, `peak_middle`, `constant`, or `all` to get one variant per curve) and keep neighbours
+within a few BPM and harmonically compatible (Camelot wheel). The best distinct variants are
+shown with their score and weakest transition.
 
-Each track gets an **energy level from 1 to 10**. It is computed on the loudness-normalised
-body of the track, so a quiet master and a loud master of the same tune get the same level.
-The components are the tempo, the number of percussive events per second, the share of
-percussive energy, the share of low end and the brightness; the tempo and rhythm terms only
-count when the track actually has a beat, so pads and ambient pieces stay low.
+## Transition planning and Mixxx Auto DJ
 
-Set lists (`set_proposer.propose`, used by the GUI's Propose button and by `create_set_list` /
-`--playlist`) come from a beam search over the selected tracks: it fits the requested duration
-(crossfade overlaps deducted), follows the chosen curve in time (`build`, `wave`, `peak_middle`,
-`constant`) and keeps neighbours within a few BPM and harmonically compatible (Camelot-wheel
-logic: same key, relative major/minor, fifth neighbours). The GUI shows the best distinct
-variants with their score and weakest transition.
+For each track DynaMix computes a beat-aligned **intro** section (where it starts under the
+previous track, until its energy kicks in) and an **outro** section (where the previous track
+starts fading, until it must be gone) (`transition_planner.py`). The transition sheet includes a
+track-by-track synthesis with the mastering and band measurements.
 
-### Mastering Check and Pre-master Pass
+**Export to Mixxx** (`mixxx_export.py`) writes them as Mixxx intro / outro cues and creates a
+playlist in the set order. In Mixxx, add that playlist to the Auto DJ queue and pick the
+**Full Intro + Outro** transition mode. The tracks must be in the Mixxx library (for a project
+that uses copies, its `fx/` and `premaster/` folders too) and Mixxx must be closed during the
+export; `mixxxdb.sqlite` is backed up first.
 
-Badly mastered collections make automatic transitions sound uneven even with ReplayGain, which
-only fixes the average level. `mastering.py` measures every track like a mastering engineer and
-can write corrected copies (the originals are never touched):
+## Transition FX
+
+Per transition, a stack of effects placed in beats around the junction (`transition_fx.py`,
+`fx_render.py`, FX tab in `fx_window.py`):
+
+- **Freeze / roll**: loops the last beats of the outgoing track (for example 4×1 → 2×2 → 1×4),
+  with an optional loop filter and echo, a fade and a tail; the incoming track enters on the
+  capture point.
+- **Filter**: high-pass, low-pass or band-pass sweep with resonance, closing the outgoing track or
+  opening the incoming one.
+- **Echo**: tempo-synced, with damping; its tail may run into the next track.
+- **Sample**: an FX sample from the samples folder, fitted to the outgoing track's tempo from the
+  BPM written in its file name (varispeed or time-stretch), repeated if needed, anchored to end
+  at, start at or centre on the junction.
+
+The **transition chart** shows A and B with their fades, one lane per effect and the rendered
+result on a beat axis. **▶ Preview (loop)** re-renders the transition when a setting changes and
+**Nudge (ms)** shifts the junction by ear. **Apply all FX** renders copies into `fx/` with the
+new cue positions. Settings are kept per track pair, so reordering the set keeps them.
+
+## Mastering check, pre-master pass and band analysis
+
+`mastering.py` measures every track like a mastering engineer: loudness (LUFS, ITU BS.1770),
+loudness range, true peak, clipping, DC offset, tone balance, stereo phase (L/R correlation, bass
+phase, mono compatibility, comb filtering). Flags are relative to the set ("darker than the rest
+of the set", "quieter than the rest of the set"). The **pre-master pass** writes corrected copies:
+loudness normalised (default -14 LUFS), true-peak limited at -1 dBTP, DC removed, polarity / bass
+phase repaired, optional mono bass and tone matching to the set's median balance. Comb filtering
+is only reported: it cannot be repaired without the stems.
+
+`band_analysis.py` tracks the signal per band over time with tempo-based time constants, maps the
+200-500 Hz masking against its neighbours and finds persistent resonances between 100 and 800 Hz
+with EQ cut suggestions. When they fire, the verdict is **mix revision recommended**: a
+pre-master pass levels a set but cannot un-mask a low-mid build-up.
+
+## Command line
 
 ```bash
-# Report: loudness (LUFS, ITU BS.1770), loudness range, true peak, clipping, DC offset,
-# tone balance, stereo phase (L/R correlation, bass phase, mono compatibility, comb filtering)
-python mastering.py check /path/to/music
-python mastering.py check my_set.m3u --json report.json
-
-# Corrected copies: loudness normalised to -14 LUFS, true-peak limited at -1 dBTP, DC removed,
-# polarity/bass phase repaired, optional tone matching to the set's median balance
-python mastering.py fix /path/to/music --tone            # copies go to /path/to/music/premaster
+# Mastering check, pre-master copies, band analysis (folders, .m3u files or a project folder)
+python mastering.py check /path/to/music --json report.json
 python mastering.py fix "~/DynaMix Projects/Saturday"      # a project: its set list, into premaster/
-python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac
-```
+python mastering.py fix my_set.m3u --out out_dir --lufs -12 --format flac --tone
+python mastering.py bands /path/to/music
 
-Flags are set-relative where it matters ("darker than the rest of the set", "quieter than the
-rest of the set") so that the goal is a consistent set, not an abstract reference. Comb
-filtering cannot be repaired automatically (it needs the original stems); it is only reported.
-No FFmpeg needed: decoding and encoding go through soundfile/libsndfile (WAV, FLAC, OGG, MP3).
-In the GUI: Set Builder tab, **Mastering Report** and **Pre-master Set** (copies go to the project's `premaster/` folder; the playlist and the Mixxx export then use those copies). The transition
-sheet ("Plan Transitions" / `mixxx_export.py`) includes a track-by-track synthesis with the same
-measurements, and can be saved as JSON.
-
-### Band Analysis: signal tracking per band, low-mid masking, resonances
-
-Mixing by bands is about giving each frequency region room to breathe, and the 200-500 Hz
-region is where most elements pile up. `band_analysis.py` measures, per track:
-
-- **band envelopes over time** (RMS per band, attack 10 ms, release a quarter beat) and how
-  strongly each band pulses at the beat rate: a 200-500 Hz band that stays full while the low end
-  pumps calls for sidechain or dynamic EQ on the low mids;
-- **low-mid masking**: how far 200-500 Hz exceeds its neighbours (60-120 Hz and 0.5-2 kHz) over
-  time, with the share of time it builds up (masking between elements, not a fixed-EQ problem);
-- **resonances**: narrow peaks between 100 and 800 Hz that persist over the track, with
-  frequency, prominence and Q, turned into EQ cut suggestions.
-
-These are mix-stage diagnostics: when they fire, the report says **mix revision recommended**,
-because a pre-master pass levels a set but cannot un-mask a low-mid build-up. The verdict shows
-in the Tracks tables, the track-by-track sheet and the Band Analysis report; the Track tab draws
-the band tracking, the masking map and the resonance spectrum.
-
-```bash
-python mastering.py bands /path/to/music        # or a project folder, an .m3u, files
-python mastering.py bands set.m3u --json bands.json
-```
-
-### Transition Planning and Mixxx Auto DJ
-
-Plan every transition of a set and push the result into [Mixxx](https://mixxx.org) so that
-its Auto DJ mixes the whole playlist by itself:
-
-```bash
-# Analyze a folder, build a set list, print the transition sheet, write cues + playlist into Mixxx
+# Transition planning and Mixxx export
+python mixxx_export.py --project "~/DynaMix Projects/Saturday"   # uses the FX / pre-mastered copies (--originals to skip)
 python mixxx_export.py --playlist /path/to/music --set-duration 60
-
-# Keep the order of an existing playlist and save the sheet
 python mixxx_export.py --m3u my_set.m3u --sheet transitions.txt
-
-# Plan only (no Mixxx) / preview what would be written
-python mixxx_export.py --m3u my_set.m3u --no-mixxx
-python mixxx_export.py --m3u my_set.m3u --dry-run
+python mixxx_export.py --m3u my_set.m3u --no-mixxx               # plan only; --dry-run to preview the export
 ```
 
-For each track DynaMix computes a beat-aligned **intro** section (where it should start under
-the previous track, until its energy kicks in) and an **outro** section (where the previous
-track should start fading, until it must be gone). They are written as Mixxx intro/outro cues
-and a Mixxx playlist is created with the set order. In Mixxx, add that playlist to the Auto DJ
-queue and pick the **Full Intro + Outro** transition mode. The tracks must already be in the
-Mixxx library (for a project that uses copies, its `fx/` and `premaster/` folders too) and Mixxx
-must be closed during the export; a backup of `mixxxdb.sqlite` is made
-first. The same is available in the GUI: Playlist Manager tab, **Plan Transitions**, then
-**Export to Mixxx**.
+## Tools inherited from the original project
 
-### Audio Effects Analysis
+These modules come from makalin/dynamix. They still work from the command line or as Python
+modules, but they are not part of the set workflow and their tabs were removed from the GUI:
 
-Analyze audio effects and advanced characteristics:
+| Module | What it does |
+| --- | --- |
+| `mix_analiz.py` | the original two-track energy analysis (`python mix_analiz.py a.mp3 b.mp3`) |
+| `mix_enhanced.py` | two-track compatibility and mix points, playlist analysis (`--playlist`, `--visualize`) |
+| `dj_tools.py` | cue points, loop suggestions, performance zones, DJ notes (`--batch`) |
+| `audio_effects.py` | dynamics, spectrum, transients, clipping and phasing analysis |
+| `export_tools.py` | JSON, CSV, M3U, Rekordbox XML and Traktor NML export |
+| `audio_utils.py`, `playlist_manager.py` | BPM, key, sections and playlist analysis, still used by the set workflow |
 
-```python
-from audio_effects import AudioEffects
+`examples.py` shows these APIs.
 
-effects = AudioEffects("track.mp3")
-analysis = effects.get_comprehensive_effects_analysis()
-print(analysis)
-```
-
-### Export Tools
-
-Export analysis results in various formats:
-
-```python
-from export_tools import ExportTools
-
-# Export to different formats
-ExportTools.export_to_json(data, "analysis.json")
-ExportTools.export_to_m3u(playlist, "playlist.m3u")
-ExportTools.export_to_rekordbox_xml(playlist, "rekordbox.xml")
-```
-
-## 📊 Command-Line Arguments
-
-### Enhanced Mix Analysis (`mix_enhanced.py`)
-
-- **`track1`** - First MP3 file path
-- **`track2`** - Second MP3 file path
-- **`--visualize`** - Show enhanced visualizations
-- **`--playlist`** - Analyze entire playlist directory
-- **`--export`** - Export analysis to file (JSON/CSV)
-- **`--set-duration`** - Set duration in minutes for playlist analysis
-
-### DJ Tools (`dj_tools.py`)
-
-- **`audio_file`** - Audio file to analyze
-- **`--export`** - Export DJ notes to file
-- **`--visualize`** - Show performance visualization
-- **`--batch`** - Batch analyze directory
-- **`--output-dir`** - Output directory for batch analysis
-
-## 🔧 Advanced Features
-
-### Audio Analysis (`audio_utils.py`)
-
-```python
-from audio_utils import AudioAnalyzer
-
-# Initialize analyzer
-analyzer = AudioAnalyzer("track.mp3")
-
-# Get comprehensive features
-features = analyzer.get_audio_features()
-print(f"BPM: {features['bpm']}")
-print(f"Key: {features['key']}")
-
-# Detect sections
-sections = analyzer.detect_sections()
-
-# Analyze beat grid
-beat_times, beat_strengths = analyzer.analyze_beat_grid()
-
-# Create comprehensive visualization
-analyzer.plot_comprehensive_analysis()
-```
-
-### Playlist Management (`playlist_manager.py`)
-
-```python
-from playlist_manager import PlaylistManager
-
-# Initialize playlist manager
-manager = PlaylistManager("/path/to/music")
-
-# Analyze playlist
-df = manager.analyze_playlist()
-
-# Create optimized set list
-set_list = manager.create_set_list(duration_minutes=60, energy_curve='build')
-
-# Export analysis
-manager.export_playlist("playlist_analysis.json", format='json')
-```
-
-### DJ Performance Tools (`dj_tools.py`)
-
-```python
-from dj_tools import DJTools
-
-# Initialize DJ tools
-dj_tools = DJTools("track.mp3")
-
-# Detect cue points
-cue_points = dj_tools.detect_cue_points(sensitivity=0.7)
-
-# Suggest loops
-loops = dj_tools.suggest_loops(min_duration=4.0, max_duration=16.0)
-
-# Generate DJ notes
-notes = dj_tools.generate_dj_notes()
-
-# Create performance visualization
-dj_tools.create_performance_visualization()
-```
-
-## 📈 Analysis Output
-
-### Track Information
-- **Duration:** Track length in seconds
-- **BPM:** Tempo with confidence score
-- **Key:** Musical key with confidence score
-- **Energy Profile:** Average, maximum, and standard deviation
-- **Sections:** Number and timing of detected sections
-- **Drops:** Number and timing of energy drops
-
-### Compatibility Analysis
-- **BPM Compatibility:** Percentage based on tempo difference
-- **Key Compatibility:** Harmonic compatibility score
-- **Energy Compatibility:** Energy level matching
-- **Overall Score:** Weighted combination of all factors
-
-### Mix Recommendations
-- **Mix Duration:** Recommended transition length
-- **Exit Points:** Optimal points to exit from track 1
-- **Entry Points:** Optimal points to enter track 2
-- **BPM Sync:** Whether tempo synchronization is required
-- **Mixing Strategy:** Detailed technique recommendations
-
-## 🎯 Use Cases
-
-### DJ Performance
-- **Set Planning:** Create optimal track sequences
-- **Cue Point Preparation:** Identify best mixing points
-- **Harmonic Mixing:** Ensure key compatibility
-- **Energy Management:** Maintain dance floor energy
-
-### Music Production
-- **Reference Analysis:** Analyze reference tracks
-- **Structure Analysis:** Understand song sections
-- **Energy Mapping:** Visualize track dynamics
-
-### Music Discovery
-- **Playlist Optimization:** Create better playlists
-- **Compatibility Testing:** Test track combinations
-- **Genre Analysis:** Understand musical characteristics
-
-## 🔄 How It Works
-
-1. **Audio Loading:** Each MP3 file is loaded and converted to a mono audio signal using Librosa.
-
-2. **Feature Extraction:** Multiple audio features are extracted:
-   - RMS energy levels
-   - BPM detection using multiple algorithms
-   - Musical key analysis via chromagram
-   - Beat grid analysis
-   - Section detection using MFCC features
-
-3. **Compatibility Analysis:** Tracks are compared across multiple dimensions:
-   - BPM difference and compatibility
-   - Key compatibility using music theory
-   - Energy level matching
-   - Overall compatibility scoring
-
-4. **Mix Point Detection:** Optimal mixing points are identified:
-   - Energy valleys in track 1 (exit points)
-   - Energy peaks in track 2 (entry points)
-   - Beat-synchronized points
-   - Section boundaries
-
-5. **Visualization:** Comprehensive charts show:
-   - Energy profiles over time
-   - Beat grids and timing
-   - Chromagram for key analysis
-   - Performance zones and sections
-
-6. **Recommendations:** Detailed mixing advice including:
-   - Recommended mix duration
-   - Specific timing suggestions
-   - Technique recommendations
-   - Potential challenges and solutions
-
-## 🎨 Customization
-
-You can fine-tune the following parameters to suit your mixing style:
-
-### Energy Analysis
-- **`--gecis_suresi`:** Adjust the duration of track 1's tail end used for analysis
-- **`--threshold_factor`:** Modify the sensitivity of energy increase detection in track 2
-
-### Cue Point Detection
-- **`sensitivity`:** Adjust cue point detection sensitivity (0.0-1.0)
-
-### Loop Suggestions
-- **`min_duration`:** Minimum loop duration in seconds
-- **`max_duration`:** Maximum loop duration in seconds
-
-### Playlist Analysis
-- **`energy_curve`:** Choose from 'build', 'wave', 'peak_middle', 'constant'
-- **`key_compatibility`:** Enable/disable key-based optimization
-- **`bpm_transitions`:** Enable/disable BPM-based optimization
-
-## 📁 File Structure
+## Project layout
 
 ```
-dynamix/
-├── mix_analiz.py          # Original basic analysis tool
-├── mix_enhanced.py        # Enhanced analysis with all features
-├── audio_utils.py         # Core audio analysis utilities
-├── playlist_manager.py    # Playlist and set list management
-├── dj_tools.py           # DJ performance tools
-├── audio_effects.py      # Audio effects and advanced analysis
-├── export_tools.py       # Export tools for various formats
-├── gui.py                # Graphical user interface
-├── examples.py           # Usage examples
-├── requirements.txt      # Python dependencies
-├── README.md            # This file
-├── BENIOKU.md           # Turkish documentation
-└── LICENSE              # MIT License
+gui.py                GUI entry point (Set Builder, Configuration, Log tabs)
+set_builder.py        Set Builder and Configuration tabs
+fx_window.py          FX tab: effect stack, preview, transition chart
+log_tab.py, reports.py, app_log.py   Log tab, project reports, log capture
+set_project.py        project folder and project.json
+library.py            music library and FX samples scan
+set_proposer.py       set list proposals
+transition_planner.py intro / outro planning and transition sheet
+mixxx_export.py       Mixxx cues and playlist
+mastering.py, band_analysis.py       mastering check, pre-master pass, band analysis
+transition_fx.py, fx_render.py       FX engine, rendering of copies and previews
+charts.py             matplotlib charts
+analysis_store.py, config.py         analysis cache and configuration
+check_install.py, install_windows.bat, run_gui.bat   installation helpers
+docs/                 design specs and implementation plans
+tests/                unit tests and the GUI smoke test
 ```
 
-## 🖥️ Graphical User Interface
-
-DynaMix includes a GUI application to build a set as a project:
+## Tests
 
 ```bash
-python gui.py
+python -m unittest discover -s tests     # unit tests
+python tests/gui_smoke.py                # drives the GUI end to end (opens a window briefly)
 ```
 
-### GUI Features
+The older tests of the inherited modules (`tests/test_audio_utils.py`, `tests/test_dj_tools.py`)
+currently fail (13 tests) and are not maintained.
 
-- **Set Builder Tab**: library, selection, set proposals, transitions, pre-master, transition FX, playlist and Mixxx export
-- **Configuration Tab**: paths, defaults for new projects and environment check
-- **Log Tab**: the project's reports (mastering, band analysis, transition sheet, pre-master, Mixxx export,
-  saved in `exports/reports/`) and everything DynaMix prints, with the errors and their tracebacks
+## License
 
-The single-track, two-track, DJ tools, audio effects and export tools remain available from the command line
-and as Python modules (see below). See [GUI_README.md](GUI_README.md) for the details.
+MIT License, see [LICENSE](LICENSE). The original project is © 2025 Mehmet T. Akalın; the
+changes of this fork are © 2026 timox.
 
-## 🆕 Additional Tools and Functions
-
-### Audio Effects Analysis (`audio_effects.py`)
-
-New advanced audio analysis capabilities:
-
-- **Dynamics Analysis**: Analyze dynamic range, compression, and crest factor
-- **Frequency Spectrum Analysis**: Analyze spectral characteristics, bass/mid/treble distribution
-- **Transient Response**: Analyze attack characteristics and onset detection
-- **Clipping Detection**: Detect potential audio clipping/overload
-- **Phasing Detection**: Detect potential phasing issues in stereo audio
-- **Track Comparison**: Compare multiple tracks for optimal mixing sequences
-
-```python
-from audio_effects import AudioEffects, TrackComparer
-
-# Analyze audio effects
-effects = AudioEffects("track.mp3")
-analysis = effects.get_comprehensive_effects_analysis()
-
-# Compare multiple tracks
-comparer = TrackComparer()
-comparer.add_track("track1.mp3")
-comparer.add_track("track2.mp3")
-comparer.add_track("track3.mp3")
-best_sequence = comparer.find_best_mix_sequence()
-```
-
-### Export Tools (`export_tools.py`)
-
-Export analysis results in various formats:
-
-- **JSON/CSV**: Standard data formats
-- **M3U**: Playlist format for media players
-- **Rekordbox XML**: Pioneer Rekordbox format
-- **Traktor NML**: Native Instruments Traktor format
-- **Text Reports**: Human-readable analysis reports
-
-```python
-from export_tools import ExportTools
-
-# Export to various formats
-ExportTools.export_to_json(data, "analysis.json")
-ExportTools.export_to_m3u(playlist, "playlist.m3u")
-ExportTools.export_to_rekordbox_xml(playlist, "rekordbox.xml")
-ExportTools.export_to_traktor_nml(playlist, "traktor.nml")
-```
-
-## 🗺️ Future Improvements Roadmap
-
-### Short-term (Next Release)
-
-- [ ] **Real-time Audio Analysis**: Live audio input analysis for DJ performance
-- [ ] **Cloud Sync**: Sync playlists and analysis data across devices
-- [ ] **Machine Learning Enhancements**: Improved BPM and key detection using ML models
-- [ ] **Advanced Visualization**: Interactive charts with zoom, pan, and export capabilities
-- [ ] **Audio Preview**: Built-in audio player for previewing tracks and cue points
-- [ ] **Database Integration**: SQLite database for storing analysis results and metadata
-- [ ] **Batch Processing Improvements**: Progress bars and cancellation for batch operations
-
-### Medium-term (3-6 Months)
-
-- [ ] **AI-Powered Mix Suggestions**: Machine learning models for optimal mix recommendations
-- [ ] **Genre Classification**: Automatic genre detection and classification
-- [ ] **Mood Detection**: Analyze and categorize tracks by mood/energy
-- [ ] **Harmonic Mixing Calculator**: Advanced harmonic mixing with Camelot wheel integration
-- [ ] **Waveform Display**: Visual waveform display with zoom and navigation
-- [ ] **Multi-format Support**: Enhanced support for more audio formats (OGG, FLAC, etc.)
-- [ ] **Plugin System**: Extensible plugin architecture for custom analysis tools
-- [ ] **REST API**: Web API for remote access and integration with other tools
-- [ ] **Mobile App**: Companion mobile app for iOS and Android
-
-### Long-term (6-12 Months)
-
-- [ ] **Cloud-based Processing**: Server-side processing for large collections
-- [ ] **Collaborative Playlists**: Share and collaborate on playlists with other DJs
-- [ ] **DJ Software Integration**: Direct integration with Serato, Traktor, Rekordbox
-- [ ] **Live Performance Mode**: Real-time analysis during live DJ sets
-- [ ] **Advanced Audio Effects**: Built-in audio effects and processing tools
-- [ ] **Video Analysis**: Analyze music videos and sync with audio
-- [ ] **Social Features**: Share mixes, get feedback, discover new tracks
-- [ ] **Machine Learning Training**: User feedback loop to improve ML models
-- [ ] **Multi-language Support**: Internationalization for multiple languages
-- [ ] **Accessibility Features**: Screen reader support and keyboard navigation
-
-### Technical Improvements
-
-- [ ] **Performance Optimization**: Faster analysis algorithms and parallel processing
-- [ ] **Memory Management**: Optimized memory usage for large playlists
-- [ ] **Error Handling**: Comprehensive error handling and recovery
-- [ ] **Testing Suite**: Unit tests, integration tests, and performance benchmarks
-- [ ] **Documentation**: Comprehensive API documentation and user guides
-- [ ] **Code Quality**: Code refactoring, type hints, and linting improvements
-- [ ] **Docker Support**: Containerized deployment for easy setup
-- [ ] **CI/CD Pipeline**: Automated testing and deployment
-
-### Feature Requests & Community
-
-We welcome feature requests and contributions! Please open an issue on GitHub to suggest new features or improvements.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
-
-## 🙏 Acknowledgements
-
-- [Librosa](https://librosa.org/) - Audio and music signal processing
-- [NumPy](https://numpy.org/) - Numerical computing
-- [Matplotlib](https://matplotlib.org/) - Plotting and visualization
-- [Pandas](https://pandas.pydata.org/) - Data manipulation and analysis
-- [Seaborn](https://seaborn.pydata.org/) - Statistical data visualization
-
----
-
-🎵 **Enjoy seamless transitions and keep the energy high with DynaMix!** 🎵
+Built with [librosa](https://librosa.org/), [NumPy](https://numpy.org/),
+[SciPy](https://scipy.org/), [soundfile](https://github.com/bastibe/python-soundfile),
+[Matplotlib](https://matplotlib.org/) and [pandas](https://pandas.pydata.org/).

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Setup script for DynaMix
-Advanced Audio Transition Analysis Tool for DJs
+DJ set builder: set proposals, transition planning, pre-master, transition FX, Mixxx export.
+Started as a fork of makalin/dynamix; developed independently since.
 """
 
 from setuptools import setup, find_packages
@@ -30,16 +31,14 @@ def get_version():
 setup(
     name="dynamix",
     version=get_version(),
-    author="makalin",
-    author_email="your.email@example.com",
-    description="Advanced Audio Transition Analysis Tool for DJs",
+    author="timox (fork of makalin/dynamix by Mehmet T. Akalin)",
+    description="DJ set builder: set proposals, transition planning, pre-master, transition FX and Mixxx export",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/makalin/dynamix",
+    url="https://github.com/timox/dynamix",
     project_urls={
-        "Bug Tracker": "https://github.com/makalin/dynamix/issues",
-        "Documentation": "https://github.com/makalin/dynamix/docs",
-        "Source Code": "https://github.com/makalin/dynamix",
+        "Source Code": "https://github.com/timox/dynamix",
+        "Original project": "https://github.com/makalin/dynamix",
     },
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -79,7 +78,16 @@ setup(
         "config",
         "set_builder",
         "gui",
-        "examples"
+        "examples",
+        "app_log",
+        "library",
+        "set_proposer",
+        "transition_fx",
+        "fx_render",
+        "fx_window",
+        "log_tab",
+        "reports",
+        "check_install",
     ],
     python_requires=">=3.8",
     install_requires=read_requirements(),
@@ -162,8 +170,7 @@ setup(
     zip_safe=False,
     platforms=["any"],
     license="MIT",
-    maintainer="makalin",
-    maintainer_email="your.email@example.com",
+    maintainer="timox",
     provides=["dynamix"],
     requires_python=">=3.8",
     setup_requires=[
