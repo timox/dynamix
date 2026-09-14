@@ -81,7 +81,11 @@ python gui.py
   The tab follows the open project and its transition plan (it is rebuilt
   after a new plan); leaving the tab stops the looped preview.
 - **Overview**: set energy curve against the target, tempo, and the set map
-- **Track**: energy envelope with intro/outro, loudness figures, stereo
+- **Track**: the line at the top says which file is analysed. By default it
+  is the file the set plays (the pre-mastered copy when there is one and it is
+  used); **Analyse: original | pre-mastered copy** switches between the two
+  (judge the mix on the original, the result on the copy). Then: energy
+  envelope with intro/outro, loudness figures, stereo
   phase and bass width, tone balance, then the band tracking chart (band
   envelopes over time, low-mid masking map, resonance spectrum with EQ
   suggestions and, when needed, "mix revision recommended"). Each resonance

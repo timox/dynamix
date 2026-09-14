@@ -313,6 +313,23 @@ def scenario():
         check(dialog is not None and dialog.winfo_exists(), "the Snapshots window opens")
         dialog.destroy()
 
+        premaster_copy = os.path.join(app.project.premaster_dir, os.path.basename(fx_tracks[0]))
+        shutil.copy(fx_tracks[0], premaster_copy)
+        app.project.data["premaster"] = {"results": [{"input": fx_tracks[0], "output": premaster_copy}]}
+        app._track_source_choice = None
+        app._refresh_tables()
+        app.set_tree.selection_set("S1")
+        app.on_track_selected(app.set_tree)
+        check("pre-mastered copy" in app.track_source_label.cget("text"),
+              "the Track tab analyses the pre-mastered copy the set plays, and says so")
+        check(pump(lambda: not any(w.winfo_class() == "TLabel" and str(w.cget("text")).startswith("Analysing")
+                                   for w in app.track_frame.winfo_children())
+                   and any(w.winfo_class() == "Canvas" for w in app.track_frame.winfo_children()), 20.0),
+              "the mastering and band charts of the copy are drawn")
+        app._set_track_source("original")
+        check("File analysed: original" in app.track_source_label.cget("text"), "the Track tab can analyse the original instead")
+        app._track_source_choice = None
+
         import time as _time
 
         def slow(task):

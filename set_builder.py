@@ -23,7 +23,8 @@ import ui_fonts
 import set_proposer
 from analysis_store import get_store, dynamix_home
 from config import format_environment_report
-from mastering import check_files, format_check_summary, premaster_files, format_premaster_summary, playlist_tone_target
+from mastering import (analyze_mastering_cached, check_files, format_check_summary, premaster_files, format_premaster_summary,
+                       playlist_tone_target)
 from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
@@ -417,6 +418,7 @@ class SetBuilderMixin:
         if mono_hz > 0:
             self.mono_bass_hz_var.set(mono_hz)
         self.use_premaster_var.set(bool(opts.get("use_premaster", True)))
+        self._track_source_choice = None  # the Track tab analyses the file the set plays again
         
         manager = PlaylistManager(project.folder)
         manager.tracks = list(project.tracks)
@@ -1072,16 +1074,20 @@ class SetBuilderMixin:
         if not self._require_project():
             return
         tracks = self.project.set_list_tracks() or self.project.tracks
-        files = [t["file_path"] for t in tracks] or self.project.selection_files()
-        if not files:
+        originals = [t["file_path"] for t in tracks] or self.project.selection_files()
+        if not originals:
             messagebox.showwarning("Warning", "No audio files in the project")
             return
-        
+        files, note = self._played_files(originals)
+
         def work(task):
             try:
                 reports = check_files(files, progress=lambda i, n, name: task.progress(i, n, name))
                 task.check()
-                summary = format_check_summary(reports)
+                for report, original, path in zip(reports, originals, files):
+                    if path != original:
+                        report["filename"] = f"{report.get('filename', '')} [pre-mastered copy]"
+                summary = note + "\n\n" + format_check_summary(reports)
                 self.root.after(0, self.add_report, "Mastering Report", summary, False)
                 flagged = sum(1 for r in reports if r.get("flags"))
                 self.root.after(0, self.update_status, f"Mastering check done: {flagged}/{len(reports)} tracks with issues "
@@ -1101,18 +1107,21 @@ class SetBuilderMixin:
             messagebox.showwarning("Warning", "Analyze the tracks first")
             return
         
+        files, note = self._played_files([t["file_path"] for t in tracks])
+
         def work(task):
             try:
                 reports = []
-                for i, t in enumerate(tracks, 1):
+                for i, (t, path) in enumerate(zip(tracks, files), 1):
                     task.progress(i - 1, len(tracks), t.get("filename", ""))
+                    label = os.path.basename(path) + (" [pre-mastered copy]" if path != t["file_path"] else "")
                     try:
-                        report = analyze_bands_cached(t["file_path"], bpm=float(t.get("bpm") or 0) or None)
-                        reports.append(dict(report, key=t.get("key")))  # the key names the resonances' notes
+                        report = analyze_bands_cached(path, bpm=float(t.get("bpm") or 0) or None)
+                        reports.append(dict(report, key=t.get("key"), filename=label))  # the key names the resonances' notes
                     except Exception as exc:
-                        reports.append({"filename": t.get("filename", ""), "error": str(exc)})
+                        reports.append({"filename": label, "error": str(exc)})
                 task.progress(len(tracks), len(tracks))
-                summary = format_band_summary(reports)
+                summary = note + "\n\n" + format_band_summary(reports)
                 needs_mix = [r["filename"] for r in reports if r.get("verdict") == "mix"]
                 if needs_mix:
                     summary = (f"MIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix)
@@ -1397,29 +1406,89 @@ class SetBuilderMixin:
             reports = [p.get("mastering") for p in planner.profiles if p.get("mastering") and p["mastering"].get("lufs") is not None]
             if reports:
                 median = playlist_tone_target(reports)
-        self._show_figure(self.track_frame, charts.track_detail(profile, median))
-        # band tracking chart, computed in the background (cached afterwards)
-        path = track.get("file_path")
+        # which file to analyse: by default the one the set plays (the pre-mastered copy when it is used)
+        original = track.get("file_path")
+        copy_path = self.project._premaster_outputs().get(original) if self.project else None
+        plays_copy = bool(copy_path) and self.project.premaster_map().get(original) == copy_path
+        choice = getattr(self, "_track_source_choice", None)
+        source = choice if copy_path and choice in ("original", "premaster") else ("premaster" if plays_copy else "original")
+        path = copy_path if source == "premaster" else original
+        self._clear_frame(self.track_frame)
+        self._track_source_header(original, copy_path, source, plays_copy)
         bpm = float(track.get("bpm") or 0) or None
-        placeholder = ttk.Label(self.track_frame, text="Computing band tracking, low-mid masking and resonances ...", foreground=MUTED)
+        key = profile.get("key")
+        need_mastering = source == "premaster" or (profile.get("mastering") or {}).get("lufs") is None
+        if not need_mastering:
+            self._track_section("Mastering: loudness, stereo phase, tone balance")
+            self._show_figure(self.track_frame, charts.track_detail(profile, median), replace=False)
+        placeholder = ttk.Label(self.track_frame, text=f"Analysing {os.path.basename(path)}: "
+                                + ("mastering, " if need_mastering else "") + "bands, low-mid masking and resonances ...",
+                                foreground=MUTED)
         placeholder.pack(anchor="w", padx=20, pady=8)
-        self._band_request = path
-        
+        request = self._band_request = (original, source)
+
         def work():
             try:
+                mastering = analyze_mastering_cached(path) if need_mastering else None
                 report = analyze_bands_cached(path, bpm=bpm)
             except Exception as exc:
-                message = f"Band analysis failed: {exc}"  # `exc` is deleted before the callback runs
-                self.root.after(0, lambda: placeholder.config(text=message))
+                message = f"Analysis of {os.path.basename(path)} failed: {exc}"  # `exc` is deleted before the callback runs
+                self.root.after(0, lambda: placeholder.winfo_exists() and placeholder.config(text=message))
                 return
-            
+
             def show():
-                if self._band_request != path:
-                    return  # another track was selected meanwhile
+                if self._band_request != request or not placeholder.winfo_exists():
+                    return  # another track or version was selected meanwhile
                 placeholder.destroy()
-                self._show_figure(self.track_frame, charts.band_dynamics(dict(report, key=profile.get("key"))), replace=False)
+                if mastering is not None:
+                    self._track_section("Mastering: loudness, stereo phase, tone balance")
+                    shown = dict(profile, mastering=mastering, filename=os.path.basename(path))
+                    self._show_figure(self.track_frame, charts.track_detail(shown, median), replace=False)
+                self._track_section("Band analysis: band tracking, low-mid masking, resonances")
+                self._show_figure(self.track_frame, charts.band_dynamics(dict(report, key=key)), replace=False)
             self.root.after(0, show)
         threading.Thread(target=work, daemon=True).start()
+
+    def _track_section(self, text):
+        ttk.Label(self.track_frame, text=text, font=ui_fonts.BOLD).pack(anchor="w", padx=8, pady=(10, 0))
+
+    def _track_source_header(self, original, copy_path, source, plays_copy):
+        """Which file the Track tab analyses, and the choice between the original and the pre-mastered copy."""
+        row = ttk.Frame(self.track_frame)
+        row.pack(fill=tk.X, padx=8, pady=(8, 2))
+        shown = copy_path if source == "premaster" else original
+        self.track_source_label = ttk.Label(
+            row, text=f"File analysed: {'pre-mastered copy' if source == 'premaster' else 'original'} — {shown}",
+            font=ui_fonts.BOLD, wraplength=900, justify=tk.LEFT)
+        self.track_source_label.pack(anchor="w")
+        if not copy_path:
+            ttk.Label(row, text="No pre-mastered copy of this track: 'Pre-master Set' makes one to compare with.",
+                      foreground=MUTED).pack(anchor="w")
+            return
+        choice = ttk.Frame(row)
+        choice.pack(anchor="w", pady=(2, 0))
+        ttk.Label(choice, text="Analyse:").pack(side=tk.LEFT)
+        self.track_source_var = tk.StringVar(value=source)
+        for value, text in (("original", "original"), ("premaster", "pre-mastered copy")):
+            ttk.Radiobutton(choice, text=text, value=value, variable=self.track_source_var,
+                            command=lambda: self._set_track_source(self.track_source_var.get())).pack(side=tk.LEFT, padx=4)
+        ttk.Label(choice, text=f"(the set plays the {'pre-mastered copy' if plays_copy else 'original'}; "
+                               "judge the mix on the original)", foreground=MUTED).pack(side=tk.LEFT, padx=8)
+
+    def _set_track_source(self, source):
+        self._track_source_choice = source
+        tree = getattr(self, "_track_tree_shown", None)
+        if tree is not None:
+            self.on_track_selected(tree)
+
+    def _played_files(self, originals):
+        """(files the set plays, header line saying how many are pre-mastered copies) for a report."""
+        played = self.project.premaster_map()
+        files = [played.get(p, p) for p in originals]
+        copies = sum(1 for o, f in zip(originals, files) if f != o)
+        note = (f"Files analysed: the ones the set plays - {copies} pre-mastered copies, {len(files) - copies} originals "
+                "(the Track tab can show the other version)")
+        return files, note
 
 
 class ConfigTabMixin:
