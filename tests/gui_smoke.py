@@ -323,6 +323,15 @@ def scenario():
         check("Sequence error" in win.scratch_info.cget("text"), "an unreadable sequence is reported in the settings")
         win.remove_effect()
         check(all(fx["type"] != "scratch" for fx in win.effects()), "the scratch effect can be removed")
+        win.add_effect("filter")
+        check("release_beats" in win._form_vars and len(win._filter_figure.axes) == 1,
+              "the filter settings show the return to dry and the filter response")
+        win._form_vars["side"].set("across")
+        win._form_vars["kind"].set("bandpass")
+        check(win.effects()[-1]["side"] == "across" and win.effects()[-1]["kind"] == "bandpass"
+              and "width" in " ".join(t.get_text() for t in win._filter_figure.axes[0].texts),
+              "a filter can sweep across the junction and its response follows the settings")
+        win.remove_effect()
         check(app.set_notebook.select() == str(app.fx_tab), "Transition FX opens the FX tab")
         win.start_preview()
         stops_before = player.stops

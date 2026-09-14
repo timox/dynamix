@@ -70,6 +70,16 @@ class TestTransitionLayout(unittest.TestCase):
         self.assertAlmostEqual(out["curve"][12][1], 200.0 * 40 ** (12 / 23), places=3)   # exponential
         inc = layout([dict(tfx.new_effect("filter"), side="incoming", beats=4)])["lanes"][0]
         self.assertEqual(spans(inc), [(4.0, 6.0, "sweep"), (6.0, 6.5, "release")])
+        across = layout([dict(tfx.new_effect("filter"), side="across", beats=8, start_offset_beats=-4, release_beats=2)])["lanes"][0]
+        self.assertEqual(spans(across), [(2.0, 6.0, "sweep"), (6.0, 7.0, "release")])
+        self.assertEqual(across["label"], "Filter highpass (A+B)")
+        self.assertEqual(across["curve"][0][0], 2.0)
+
+    def test_filter_response_chart(self):
+        for kind in ("highpass", "lowpass", "bandpass"):
+            fig = charts.filter_response(dict(tfx.new_effect("filter"), kind=kind, resonance=4.0))
+            self.assertEqual(len(fig.axes), 1)
+            charts.save(fig, os.path.join(tempfile.gettempdir(), f"dynamix_filter_{kind}.png"))
 
     def test_echo_and_its_tail(self):
         echo = dict(tfx.new_effect("echo"), start_offset_beats=-4, delay_beats=0.5, feedback=0.5, mix=0.5)

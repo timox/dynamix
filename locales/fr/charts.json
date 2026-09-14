@@ -80,5 +80,10 @@
   "speed": "vitesse",
   "ahead / behind (s)": "avance / retard (s)",
   "seconds of the effect": "secondes de l'effet",
-  "catch-up ×{speed:.2f}": "rattrapage ×{speed:.2f}"
+  "catch-up ×{speed:.2f}": "rattrapage ×{speed:.2f}",
+  "start {hz:.0f} Hz": "début {hz:.0f} Hz",
+  "end {hz:.0f} Hz": "fin {hz:.0f} Hz",
+  "resonance +{db:.0f} dB": "résonance +{db:.0f} dB",
+  "Hz (bass ← → treble)": "Hz (graves ← → aigus)",
+  "width {octaves:.1f} oct": "largeur {octaves:.1f} oct"
 }

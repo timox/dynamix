@@ -9,6 +9,7 @@ status colours only where they mean something (clipping, warnings) and always
 next to a label; thin marks, hairline solid grid, no dual axes.
 """
 
+import math
 import os
 from typing import Dict, List, Optional, Sequence
 
@@ -544,6 +545,60 @@ def scratch_head(plan: Dict, head: Dict, length_s: float, highlight: Optional[in
     offset_ax.plot(t, head["offset"], color=BLUE_DARK, linewidth=1.4)
     offset_ax.set_ylabel(tr("ahead / behind (s)"), fontsize=8)
     offset_ax.set_xlabel(tr("seconds of the effect"), fontsize=8)
+    return _finish(fig)
+
+
+def filter_response(fx: Dict, sr: int = 44100, fig: Optional[Figure] = None) -> Figure:
+    """
+    What a filter effect lets through, bass on the left and treble on the right: its response at the start and at the
+    end of the sweep (and faintly in between). The resonance is the bump at the cutoff; for a band-pass the bell is the
+    band, its width in octaves is marked at -3 dB.
+    """
+    from scipy import signal
+    import transition_fx as tfx
+    if fig is None:
+        fig = _figure(4.2, 2.2)
+    else:
+        fig.clear()
+    ax = fig.add_subplot(1, 1, 1)
+    _style(ax, grid_axis="both")
+    kind = fx.get("kind", "highpass")
+    start_hz, end_hz = float(fx.get("start_hz", 20.0)), float(fx.get("end_hz", 1000.0))
+    q = tfx.filter_q(kind, float(fx.get("resonance", 0.707)), float(fx.get("width_octaves", 1.0)))
+    freqs = np.geomspace(20.0, 20000.0, 400)
+
+    def response(cutoff):
+        b, a = tfx.biquad_coefficients(kind, cutoff, q, sr)
+        _, h = signal.freqz(b, a, worN=freqs, fs=sr)
+        return 20 * np.log10(np.maximum(np.abs(h), 1e-6))
+
+    for p in (0.25, 0.5, 0.75):
+        ax.plot(freqs, response(start_hz * (end_hz / start_hz) ** p), color=GRID, linewidth=1.0)
+    ax.plot(freqs, response(start_hz), color=BLUE_LIGHT, linewidth=1.6, label=tr("start {hz:.0f} Hz", hz=start_hz))
+    end = response(end_hz)
+    ax.plot(freqs, end, color=BLUE_DARK, linewidth=1.8, label=tr("end {hz:.0f} Hz", hz=end_hz))
+    peak = float(end.max())
+    if kind == "bandpass":
+        # the bell as it really is: the resonance narrows the band set by the width
+        level = peak - 3.0
+        inside = freqs[end >= level]
+        if len(inside) >= 2:
+            lo, hi = float(inside[0]), float(inside[-1])
+            ax.annotate("", xy=(lo, level), xytext=(hi, level),
+                        arrowprops={"arrowstyle": "<->", "color": TEXT2, "linewidth": 0.8})
+            ax.text(hi * 1.15, level, tr("width {octaves:.1f} oct", octaves=math.log2(hi / lo)), ha="left", va="center",
+                    fontsize=7, color=TEXT2)
+    elif peak > 1.0:
+        at = float(freqs[int(np.argmax(end))])
+        ax.text(at * 1.15, peak, tr("resonance +{db:.0f} dB", db=peak), ha="left", va="bottom", fontsize=7, color=TEXT2)
+    ax.set_xscale("log")
+    ax.set_xlim(20.0, 20000.0)
+    ax.set_ylim(-36.0, max(9.0, peak + 6.0))
+    ax.set_xticks([50, 200, 1000, 5000, 20000])
+    ax.set_xticklabels(["50", "200", "1k", "5k", "20k"])
+    ax.set_xlabel(tr("Hz (bass ← → treble)"), fontsize=8)
+    ax.set_ylabel("dB", fontsize=8)
+    ax.legend(fontsize=7, frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=2, borderaxespad=0.2)
     return _finish(fig)
 
 

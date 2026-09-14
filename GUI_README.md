@@ -72,8 +72,13 @@ python gui.py
   that point. Then pick a transition, then stack effects on it — **Freeze** (loops the
   last beats of the outgoing track, with a roll such as 4×1 → 2×2 → 1×4, an
   optional loop filter / echo, a fade and a tail), **Filter** (high-pass,
-  low-pass or band-pass sweep with resonance, closing the outgoing track or
-  opening the incoming one), **Echo** (tempo-synced) and **Sample** (from the
+  low-pass or band-pass sweep with resonance, closing the outgoing track,
+  opening the incoming one, or *across* the junction: one sweep from **Start**
+  beats applied to both tracks at the same moments, so the two copies mixed by
+  Mixxx sound like the mix going through one filter; **Return to dry** sets how
+  many beats the track takes to sound normal again after the sweep; the
+  settings draw the filter's response at the start and end of the sweep, bass
+  on the left, the resonance bump at the cutoff and the band-pass width), **Echo** (tempo-synced) and **Sample** (from the
   FX samples folder — click to use, double-click to hear; its BPM is read from
   the file name and the sample is fitted to the track's tempo by *varispeed*
   or *stretch*, or played as it is with *off*; **Repeats** plays a short

@@ -111,6 +111,31 @@ class TestFilters(unittest.TestCase):
         self.assertLess(rms_db(closed), rms_db(dry) - 20)
         self.assertAlmostEqual(rms_db(dry), rms_db(b[int(5.0 * SR):int(6.0 * SR)]), delta=0.5)
 
+    def test_incoming_release_setting(self):
+        b = sine(5000, 10)
+        ctx = ctx_for(np.zeros_like(b), b, intro_start=2.0)
+        fx = dict(tfx.new_effect("filter"), side="incoming", kind="lowpass", start_hz=200, end_hz=200, beats=4, release_beats=4)
+        tfx.apply_effects(ctx, [fx])
+        still = ctx.b[ctx.b_index(4.2):ctx.b_index(4.8)]          # sweep ends at 4.0, back to dry at 6.0
+        dry = ctx.b[ctx.b_index(6.5):ctx.b_index(7.5)]
+        self.assertLess(rms_db(still), rms_db(dry) - 3)
+        self.assertAlmostEqual(rms_db(dry), rms_db(b[int(6.5 * SR):int(7.5 * SR)]), delta=0.5)
+
+    def test_across_filter_is_the_same_on_both_tracks_at_the_same_moment(self):
+        a, b = sine(100, 12), sine(100, 12)
+        ctx = ctx_for(a, b, outro_start=4.0, outro_end=8.0, intro_start=2.0)   # set time t in A = t - 2 in B
+        fx = dict(tfx.new_effect("filter"), side="across", kind="highpass", start_hz=20, end_hz=2000, beats=4,
+                  start_offset_beats=-2, release_beats=1)                         # sweep 3.0 -> 5.0 s, dry at 5.5 s
+        tfx.apply_effects(ctx, [fx])
+        for t in (4.2, 4.8):
+            a_part = ctx.a[ctx.a_index(t):ctx.a_index(t + 0.1)]
+            b_part = ctx.b[ctx.b_index(t - 2.0):ctx.b_index(t - 2.0 + 0.1)]
+            self.assertAlmostEqual(rms_db(a_part), rms_db(b_part), delta=1.0, msg=f"at {t} s")
+        self.assertLess(rms_db(ctx.a[ctx.a_index(4.8):ctx.a_index(4.9)]), rms_db(a[:SR]) - 20)
+        np.testing.assert_allclose(ctx.a[ctx.a_index(2.0):ctx.a_index(2.9)], a[int(2.0 * SR):int(2.9 * SR)], atol=0.02)
+        dry = ctx.b[ctx.b_index(4.0):ctx.b_index(5.0)]                            # B after the release
+        self.assertAlmostEqual(rms_db(dry), rms_db(b[int(4.0 * SR):int(5.0 * SR)]), delta=0.2)
+
     def test_resonance_and_bandpass_response(self):
         b, a = tfx.biquad_coefficients("highpass", 1000, tfx.filter_q("highpass", 8, 1), SR)
         _, h = signal.freqz(b, a, worN=[1000], fs=SR)

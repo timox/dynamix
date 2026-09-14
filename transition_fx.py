@@ -108,7 +108,7 @@ def usable_beats(grid: Dict, fallback_bpm: float, duration: float, name: str = "
 _RANGES = {
     "freeze": {"capture_offset_beats": (-16, 0), "fade_db": (-60, 0), "tail_beats": (0, 8), "gain_db": (-24, 6)},
     "filter": {"start_hz": (20, 20000), "end_hz": (20, 20000), "width_octaves": (0.3, 4), "resonance": (0.7, 12),
-               "beats": (2, 16)},
+               "beats": (2, 16), "start_offset_beats": (-16, 8)},
     "echo": {"start_offset_beats": (-16, 0), "delay_beats": (0.25, 1), "feedback": (0, 0.85), "mix": (0, 1),
              "damping_hz": (1000, 20000)},
     "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000),
@@ -116,8 +116,8 @@ _RANGES = {
     "scratch": {"start_offset_beats": (-32, 16), "gain_db": (-24, 6)},
 }
 _CHOICES = {
-    "filter": {"side": ("outgoing", "incoming"), "kind": ("highpass", "lowpass", "bandpass"),
-               "curve": ("exponential", "linear"), "beats": (2, 4, 8, 16)},
+    "filter": {"side": ("outgoing", "incoming", "across"), "kind": ("highpass", "lowpass", "bandpass"),
+               "curve": ("exponential", "linear"), "beats": (2, 4, 8, 16), "release_beats": (0, 0.5, 1, 2, 4, 8)},
     "echo": {"delay_beats": (0.25, 0.5, 0.75, 1)},
     "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction"),
                "tempo": ("varispeed", "stretch", "off")},
@@ -127,7 +127,8 @@ DEFAULTS = {
     "freeze": {"enabled": True, "capture_offset_beats": 0, "steps": [{"beats": 1, "repeats": 4}], "loop_filter": None,
                "loop_echo": None, "fade_db": 0.0, "tail_beats": 0, "gain_db": 0.0},
     "filter": {"enabled": True, "side": "outgoing", "kind": "highpass", "start_hz": 20.0, "end_hz": 1000.0,
-               "width_octaves": 1.0, "resonance": 0.707, "beats": 8, "curve": "exponential"},
+               "width_octaves": 1.0, "resonance": 0.707, "beats": 8, "curve": "exponential", "start_offset_beats": -4,
+               "release_beats": 1},
     "echo": {"enabled": True, "start_offset_beats": -4, "delay_beats": 0.5, "feedback": 0.5, "mix": 0.5,
              "damping_hz": 6000.0},
     "sample": {"enabled": True, "file": "", "anchor": "end_at_junction", "offset_beats": 0.0, "gain_db": -3.0,
@@ -486,29 +487,58 @@ def _apply_freeze(ctx: TransitionContext, fx: Dict) -> None:
     ctx.a_end = capture_t + len(body) / ctx.a_sr
 
 
-def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
+def _filter_span(audio: np.ndarray, sr: int, fx: Dict, first: int, sweep_start: int, sweep_end: int,
+                 stop: int, release: Optional[int] = None) -> None:
+    """
+    Filter audio[first:] in place: start_hz until sweep_start, the sweep until sweep_end, then end_hz — held until
+    stop, or back to the dry track over `release` samples after the sweep (never past stop). The indices may lie
+    outside the audio: the frequency at every sample is still the one of the sweep at that moment.
+    """
+    first = max(0, first)
+    last = min(len(audio), stop if release is None else min(stop, sweep_end + release))
+    if last <= first:
+        return
     q = filter_q(fx["kind"], fx.get("resonance", 0.707), fx.get("width_octaves", 1.0))
-    if fx.get("side", "outgoing") == "outgoing":
-        start_i = max(0, ctx.a_index(ctx.a_beat(-int(fx["beats"]))))
-        # up to one beat after A stops being audible (the filter state settles, the rest of A is never heard)
-        end_i = min(len(ctx.a), ctx.a_index(ctx.a_end) + int(round(ctx.a_period * ctx.a_sr)))
-        if end_i <= start_i:
-            return
-        sweep = max(1, ctx.a_index(ctx.junction_a) - start_i)
-        ctx.a[start_i:end_i] = sweep_filter(ctx.a[start_i:end_i], ctx.a_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
-                                            sweep, fx.get("curve", "exponential"))
+    wet = sweep_filter(audio[first:last], sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
+                       max(1, sweep_end - sweep_start), fx.get("curve", "exponential"), hold_start=sweep_start - first)
+    if release is not None:
+        mix = np.ones(last - first, dtype=np.float32)
+        ramp = np.linspace(1.0, 0.0, release, dtype=np.float32) if release > 0 else np.zeros(0, dtype=np.float32)
+        begin = sweep_end - first
+        lo, hi = max(0, begin), min(len(mix), begin + release)
+        if hi > lo:
+            mix[lo:hi] = ramp[lo - begin:hi - begin]
+        mix[max(0, begin + release):] = 0.0
+        wet = wet * mix[:, None] + audio[first:last] * (1.0 - mix[:, None])
+    audio[first:last] = wet
+
+
+def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
+    side = fx.get("side", "outgoing")
+    a_beat_n = int(round(ctx.a_period * ctx.a_sr))
+    # A: up to one beat after it stops being audible (the filter state settles, the rest of A is never heard)
+    a_stop = ctx.a_index(ctx.a_end) + a_beat_n
+    # the return to the dry track lasts at least a few ms (no click)
+    release_s = max(EDGE_FADE_S, float(fx.get("release_beats", 1)) * ctx.a_period)
+    if side == "outgoing":
+        start_i = ctx.a_index(ctx.a_beat(-int(fx["beats"])))
+        _filter_span(ctx.a, ctx.a_sr, fx, start_i, start_i, ctx.a_index(ctx.junction_a), a_stop)
+    elif side == "incoming":
+        junction_i = ctx.b_index(ctx.junction_b)
+        b_release = max(EDGE_FADE_S, float(fx.get("release_beats", 1)) * median_period(ctx.b_beats))
+        _filter_span(ctx.b, ctx.b_sr, fx, 0, junction_i, ctx.b_index(ctx.b_beat(int(fx["beats"]))), len(ctx.b),
+                     int(round(b_release * ctx.b_sr)))
     else:
-        junction_i = max(0, ctx.b_index(ctx.junction_b))
-        sweep_end_i = ctx.b_index(ctx.b_beat(int(fx["beats"])))
-        back_i = min(len(ctx.b), sweep_end_i + int(round(median_period(ctx.b_beats) * ctx.b_sr)))
-        wet = sweep_filter(ctx.b[:back_i], ctx.b_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
-                           max(1, sweep_end_i - junction_i), fx.get("curve", "exponential"), hold_start=junction_i)
-        # back to the dry track over the beat after the sweep
-        n_back = max(0, back_i - sweep_end_i)
-        mix = np.ones(back_i, dtype=np.float32)
-        if n_back:
-            mix[sweep_end_i:back_i] = np.linspace(1.0, 0.0, n_back, dtype=np.float32)
-        ctx.b[:back_i] = wet * mix[:, None] + ctx.b[:back_i] * (1.0 - mix[:, None])
+        # across the junction: one sweep in set time, applied to A and to B at the same moments, so that the two
+        # copies mixed by Mixxx sound like the mix going through one filter
+        offset = int(fx.get("start_offset_beats", -4))
+        sweep_start_t, sweep_end_t = ctx.a_beat(offset), ctx.a_beat(offset + int(fx["beats"]))
+        a_start = ctx.a_index(sweep_start_t)
+        _filter_span(ctx.a, ctx.a_sr, fx, a_start, a_start, ctx.a_index(sweep_end_t), a_stop,
+                     int(round(release_s * ctx.a_sr)))
+        to_b = ctx.junction_b - ctx.junction_a
+        _filter_span(ctx.b, ctx.b_sr, fx, 0, ctx.b_index(sweep_start_t + to_b), ctx.b_index(sweep_end_t + to_b),
+                     len(ctx.b), int(round(release_s * ctx.b_sr)))
 
 
 def _apply_echo(ctx: TransitionContext, fx: Dict) -> None:
@@ -873,20 +903,31 @@ def _layout_freeze(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dic
 
 def _layout_filter(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dict:
     beats = int(fx["beats"])
-    if fx.get("side", "outgoing") == "outgoing":
+    side = fx.get("side", "outgoing")
+    release = float(fx.get("release_beats", 1))
+    if side == "outgoing":
         start, sweep_end = ctx.a_beat(-beats), ctx.junction_a
         blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""},
                   {"start": sweep_end, "end": ctx.a_end, "kind": "hold", "label": "held"}]
-    else:
+    elif side == "incoming":
         shift = ctx.junction_a - ctx.junction_b
         start, sweep_end = ctx.junction_b + shift, ctx.b_beat(beats) + shift
-        blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""},
-                  {"start": sweep_end, "end": sweep_end + median_period(ctx.b_beats), "kind": "release", "label": "dry"}]
+        blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""}]
+        if release > 0:
+            blocks.append({"start": sweep_end, "end": sweep_end + release * median_period(ctx.b_beats), "kind": "release",
+                           "label": "dry"})
+    else:
+        offset = int(fx.get("start_offset_beats", -4))
+        start, sweep_end = ctx.a_beat(offset), ctx.a_beat(offset + beats)
+        blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""}]
+        if release > 0:
+            blocks.append({"start": sweep_end, "end": sweep_end + release * ctx.a_period, "kind": "release", "label": "dry"})
     lo, hi = float(fx["start_hz"]), float(fx["end_hz"])
     blocks[0]["label"] = f"{lo:.0f} → {hi:.0f} Hz"
     pos = np.linspace(0.0, 1.0, 24)
     hz = lo * (hi / lo) ** pos if fx.get("curve", "exponential") == "exponential" and lo > 0 else lo + (hi - lo) * pos
-    return {"type": "filter", "label": f"Filter {fx['kind']} ({'A' if fx.get('side', 'outgoing') == 'outgoing' else 'B'})",
+    track = {"outgoing": "A", "incoming": "B"}.get(side, "A+B")
+    return {"type": "filter", "label": f"Filter {fx['kind']} ({track})",
             "blocks": blocks, "curve": [(float(start + p * (sweep_end - start)), float(h)) for p, h in zip(pos, hz)]}
 
 

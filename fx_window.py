@@ -42,14 +42,16 @@ FIELDS = {
                ("fade_db", "Fade to (dB)", "float", (-60, 0)),
                ("tail_beats", "Tail (beats)", "int", (0, 8)),
                ("gain_db", "Gain (dB)", "float", (-24, 6))],
-    "filter": [("side", "Side", "choice", ("outgoing", "incoming")),
+    "filter": [("side", "Side", "choice", ("outgoing", "incoming", "across")),
                ("kind", "Type", "choice", ("highpass", "lowpass", "bandpass")),
                ("start_hz", "From (Hz)", "float", (20, 20000)),
                ("end_hz", "To (Hz)", "float", (20, 20000)),
                ("width_octaves", "Band width (octaves)", "float", (0.3, 4)),
                ("resonance", "Resonance (Q)", "float", (0.7, 12)),
                ("beats", "Length (beats)", "choice", (2, 4, 8, 16)),
-               ("curve", "Curve", "choice", ("exponential", "linear"))],
+               ("curve", "Curve", "choice", ("exponential", "linear")),
+               ("start_offset_beats", "Start (beats)", "int", (-16, 8)),
+               ("release_beats", "Return to dry (beats)", "choice", (0, 0.5, 1, 2, 4, 8))],
     "echo": [("start_offset_beats", "Start (beats)", "int", (-16, 0)),
              ("delay_beats", "Delay (beats)", "choice", (0.25, 0.5, 0.75, 1)),
              ("feedback", "Feedback", "float", (0, 0.85)),
@@ -70,7 +72,8 @@ FIELDS["scratch"] = [("sequence", "Sequence", "text", None),
                      ("side", "Side", "choice", ("outgoing", "incoming")),
                      ("ramp", "Ramp", "choice", ("exponential", "linear")),
                      ("gain_db", "Gain (dB)", "float", (-24, 6))]
-LOOP_FILTER_FIELDS = [f for f in FIELDS["filter"] if f[0] not in ("side", "beats")]
+LOOP_FILTER_KEYS_OFF = ("side", "beats", "start_offset_beats", "release_beats")  # a loop filter sweeps over the freeze
+LOOP_FILTER_FIELDS = [f for f in FIELDS["filter"] if f[0] not in LOOP_FILTER_KEYS_OFF]
 LOOP_ECHO_FIELDS = [f for f in FIELDS["echo"] if f[0] != "start_offset_beats"]
 
 
@@ -590,6 +593,7 @@ class TransitionFxPanel(ttk.Frame):
         if not rebuild_settings:
             self._refresh_sample_label()
             self._refresh_scratch_info()
+            self._refresh_filter_response()
 
     # ------------------------------------------------------------------ settings panel
     def show_settings(self):
@@ -610,6 +614,34 @@ class TransitionFxPanel(ttk.Frame):
             self._sample_extras(fx)
         if fx["type"] == "scratch":
             self._scratch_extras(fx)
+        if fx["type"] == "filter":
+            self._filter_extras(fx)
+
+    def _filter_extras(self, fx):
+        box = ttk.LabelFrame(self.settings, text=tr("Filter response"))
+        box.pack(fill=tk.X, pady=6)
+        ttk.Label(box, text=tr("Side: outgoing filters the end of A up to the junction, incoming the start of B from the "
+                               "junction, across one sweep over both tracks from Start (beats from the junction). "
+                               "Return to dry: how long B (and A with across) takes to sound normal again after the "
+                               "sweep. Below, what the filter lets through at the start and at the end of the sweep: bass "
+                               "on the left, treble on the right; the resonance is the bump at the cutoff, the band width "
+                               "(band-pass only) is the width of the bell."),
+                  foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
+        self._filter_figure = charts.filter_response(fx)
+        self._filter_canvas = FigureCanvasTkAgg(self._filter_figure, box)
+        self._filter_canvas.get_tk_widget().config(height=charts.pixel_height(self._filter_figure))
+        self._filter_canvas.get_tk_widget().pack(fill=tk.X, padx=4, pady=(0, 4))
+        self._filter_canvas.draw()
+
+    def _refresh_filter_response(self):
+        canvas = getattr(self, "_filter_canvas", None)
+        if canvas is None or not canvas.get_tk_widget().winfo_exists() or self.fx_index is None:
+            return
+        effects = self.effects()
+        if self.fx_index >= len(effects) or effects[self.fx_index].get("type") != "filter":
+            return
+        charts.filter_response(dict(tfx.new_effect("filter"), **effects[self.fx_index]), fig=self._filter_figure)
+        canvas.draw_idle()
 
     def _scratch_extras(self, fx):
         box = ttk.LabelFrame(self.settings, text=tr("Sequence"))
@@ -948,7 +980,7 @@ class TransitionFxPanel(ttk.Frame):
 
         for key, label, fields, defaults in (
                 ("loop_filter", "Loop filter", LOOP_FILTER_FIELDS,
-                 {k: v for k, v in tfx.new_effect("filter").items() if k not in ("type", "enabled", "side", "beats")}),
+                 {k: v for k, v in tfx.new_effect("filter").items() if k not in ("type", "enabled") + LOOP_FILTER_KEYS_OFF}),
                 ("loop_echo", "Loop echo", LOOP_ECHO_FIELDS,
                  {k: v for k, v in tfx.new_effect("echo").items() if k not in ("type", "enabled", "start_offset_beats")})):
             box = ttk.LabelFrame(self.settings, text=tr(label))
