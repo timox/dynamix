@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from i18n import tr
+
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.aiff', '.aif'}
 
 STEPS: List[Tuple[str, str, bool]] = [
@@ -738,19 +740,20 @@ class SetProject:
         return "done", HINTS["done"]
 
     def summary_lines(self) -> List[str]:
-        lines = [f"Set project: {self.name}", f"Folder: {self.folder}",
-                 f"Source music folder: {self.data.get('source_folder') or '-'}",
-                 f"Updated: {self.data['updated']}",
-                 f"Selected: {len(self.data['selection'])} | analysed: {len(self.tracks)} | failed: {len(self.data.get('failed') or [])}"
-                 f" | proposals: {len(self.proposal_variants())} | in set list: {len(self.data['set_list'])}"]
+        lines = [tr("Set project: {name}", name=self.name), tr("Folder: {folder}", folder=self.folder),
+                 tr("Source music folder: {folder}", folder=self.data.get('source_folder') or '-'),
+                 tr("Updated: {when}", when=self.data['updated']),
+                 tr("Selected: {selected} | analysed: {analysed} | failed: {failed} | proposals: {proposals} | in set list: {set_list}",
+                    selected=len(self.data['selection']), analysed=len(self.tracks), failed=len(self.data.get('failed') or []),
+                    proposals=len(self.proposal_variants()), set_list=len(self.data['set_list']))]
         for key, label, required in STEPS:
             state = self.step_state(key)
-            mark = "[x]" if state["done"] else ("[ ]" if required else "[ ] (optional)")
+            mark = "[x]" if state["done"] else ("[ ]" if required else tr("[ ] (optional)"))
             when = f" - {state['at']}" if state.get("at") else ""
             details = state.get("details") or {}
             extra = ", ".join(f"{k}={v}" for k, v in details.items() if k in ("count", "out_dir", "playlist", "db", "file", "cues"))
-            lines.append(f"  {mark} {label}{when}{(' | ' + extra) if extra else ''}")
-        lines.append(self.audio_used_text())
+            lines.append(f"  {mark} {tr(label)}{when}{(' | ' + extra) if extra else ''}")
+        lines.append(self.audio_used_text(translate=tr))
         key, hint = self.next_step()
-        lines.append(f"Next: {hint}")
+        lines.append(tr("Next: {hint}", hint=tr(hint)))
         return lines

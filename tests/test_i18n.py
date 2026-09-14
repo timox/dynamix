@@ -75,7 +75,9 @@ class TestTr(unittest.TestCase):
                        "persistent resonances: {list}": "résonances persistantes : {list}",
                        "{freq} Hz ~ {note} ({degree} of {key})": "{freq} Hz ~ {note} ({degree} de {key})",
                        "tonic": "tonique", "smooth": "fluide",
-                       "{a} then {a}": "{a} puis encore {a}"}, f)
+                       "{a} then {a}": "{a} puis encore {a}",
+                       "{name}: {problem}": "{name} : {problem}",
+                       "could not analyze: {error}": "analyse impossible : {error}"}, f)
         i18n.set_language("fr", user_dir=self.user)
         self.assertEqual(i18n.N_("quieter than the rest of the set ({db:+.1f} dB)").format(db=-3.04),
                          "quieter than the rest of the set (-3.0 dB)")                  # stored data stays English
@@ -86,6 +88,11 @@ class TestTr(unittest.TestCase):
         self.assertEqual(i18n.tr_text("x then x"), "x puis encore x")
         self.assertEqual(i18n.tr_text("x then y"), "x then y")                          # repeated field must match
         self.assertEqual(i18n.tr_text("something new (-3.0 dB)"), "something new (-3.0 dB)")
+        # a template made only of fields and punctuation never recognises a text (nor its values)
+        self.assertEqual(i18n.tr_text("could not analyze: Error opening 'x.wav': System error"),
+                         "analyse impossible : Error opening 'x.wav': System error")
+        self.assertEqual(i18n.tr_text("a.wav: cannot be read"), "a.wav: cannot be read")
+        self.assertEqual(i18n.tr("{name}: {problem}", name="a.wav", problem="x"), "a.wav : x")
         i18n.set_language("en", user_dir=self.user)
         self.assertEqual(i18n.tr_text("quieter than the rest of the set (-3.0 dB)"), "quieter than the rest of the set (-3.0 dB)")
 

@@ -338,3 +338,7 @@ test_settings.py
 
 # PyInstaller recipe of the shareable Windows build
 !packaging/dynamix.spec
+
+# translations of the interface (i18n.py) are JSON files and must be versioned
+!locales/
+!locales/**/*.json

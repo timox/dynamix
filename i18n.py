@@ -129,6 +129,8 @@ def _template_patterns() -> List[Tuple["re.Pattern", str]]:
         for key in _catalog:
             if not _FIELD.search(key):
                 continue
+            if len(re.findall(r"[^\W\d_]", _FIELD.sub("", key))) < 3:
+                continue  # "{name}: {problem}" would match almost any text: used by tr() only, never to recognise one
             regex, position, seen = "", 0, set()
             for match in _FIELD.finditer(key):
                 name = match.group(1)

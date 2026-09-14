@@ -26,7 +26,7 @@ import library
 import transition_fx as tfx
 from analysis_store import dynamix_home
 from fx_render import render_preview, render_set, transition_beats, transition_layout_for
-from i18n import tr
+from i18n import tr, tr_text
 from mastering import load_audio
 
 log = logging.getLogger("dynamix.fx")
@@ -765,7 +765,7 @@ class TransitionFxPanel(ttk.Frame):
             return ""
         ratio, sample_bpm, problem = tfx.sample_tempo(fx, track_bpm)
         if problem:
-            return f" · {problem}"
+            return f" · {tr_text(problem)}"
         if sample_bpm is None:
             return " · " + tr("no BPM in the name: played as it is (set Sample BPM)")
         detail = fx.get("tempo", "varispeed")
@@ -903,7 +903,7 @@ class TransitionFxPanel(ttk.Frame):
                         self._logged_warnings.add(w)
                         log.warning("Preview: %s", w)
                 self.status((tr("Looping the preview") if looping else tr("Preview opened in the default player"))
-                            + (f" - {warnings[0]}" if warnings else ""))
+                            + (f" - {tr_text(warnings[0])}" if warnings else ""))
             self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
 

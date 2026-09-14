@@ -22,6 +22,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from scipy import signal
 
+from i18n import N_, tr, tr_text
+
 BANDS: List[Tuple[str, float, float]] = [
     ("sub", 20, 60), ("low", 60, 120), ("low_mid", 120, 200), ("mud", 200, 500),
     ("mid", 500, 2000), ("high_mid", 2000, 6000), ("high", 6000, 20000),
@@ -36,8 +38,9 @@ RESONANCE_MIN_Q = 3.0
 RESONANCE_MIN_PERSISTENCE = 0.6  # share of segments where the peak is present
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-SCALE_DEGREES = {True: {0: "tonic", 2: "2nd", 4: "3rd", 5: "4th", 7: "5th", 9: "6th", 11: "7th"},      # major
-                 False: {0: "tonic", 2: "2nd", 3: "3rd", 5: "4th", 7: "5th", 8: "6th", 10: "7th"}}    # natural minor
+SCALE_DEGREES = {True: {0: N_("tonic"), 2: N_("2nd"), 4: N_("3rd"), 5: N_("4th"), 7: N_("5th"), 9: N_("6th"), 11: N_("7th")},
+                 False: {0: N_("tonic"), 2: N_("2nd"), 3: N_("3rd"), 5: N_("4th"), 7: N_("5th"), 8: N_("6th"), 10: N_("7th")}}
+# major / natural minor; the degree words are stored English texts inside the resonance descriptions
 
 
 def resonance_note(freq_hz: float, key: Optional[str] = None) -> Dict:
@@ -62,12 +65,19 @@ def resonance_note(freq_hz: float, key: Optional[str] = None) -> Dict:
 def describe_resonance(freq_hz: float, key: Optional[str] = None) -> str:
     """'330 Hz ~ E4 (5th of A minor)' / '233 Hz ~ A#3 -15 ct (not in A minor)' / '320 Hz ~ D#4 +49 ct'."""
     n = resonance_note(freq_hz, key)
-    text = f"{freq_hz:.0f} Hz ~ {n['note']}" + (f" {n['cents']:+d} ct" if abs(n["cents"]) >= 10 else "")
+    values = dict(freq=freq_hz, note=n["note"], cents=n["cents"], degree=n["degree"], key=key)
+    # whole templates: the text is stored in flags (English) and translated when shown, with tr_text
+    if abs(n["cents"]) >= 10:
+        if n["in_key"] is True:
+            return N_("{freq:.0f} Hz ~ {note} {cents:+d} ct ({degree} of {key})").format(**values)
+        if n["in_key"] is False:
+            return N_("{freq:.0f} Hz ~ {note} {cents:+d} ct (not in {key})").format(**values)
+        return N_("{freq:.0f} Hz ~ {note} {cents:+d} ct").format(**values)
     if n["in_key"] is True:
-        text += f" ({n['degree']} of {key})"
-    elif n["in_key"] is False:
-        text += f" (not in {key})"
-    return text
+        return N_("{freq:.0f} Hz ~ {note} ({degree} of {key})").format(**values)
+    if n["in_key"] is False:
+        return N_("{freq:.0f} Hz ~ {note} (not in {key})").format(**values)
+    return N_("{freq:.0f} Hz ~ {note}").format(**values)
 
 
 def key_note(resonances: List[Dict], key: Optional[str]) -> Optional[str]:
@@ -77,8 +87,8 @@ def key_note(resonances: List[Dict], key: Optional[str]) -> Optional[str]:
     in_key = [r for r in resonances if resonance_note(r["freq_hz"], key)["in_key"]]
     if not in_key:
         return None
-    return (f"{len(in_key)}/{len(resonances)} resonance(s) on notes of {key}: they may simply be the key of the track "
-            "(bass line, drone), check by ear before cutting")
+    return N_("{count}/{total} resonance(s) on notes of {key}: they may simply be the key of the track "
+              "(bass line, drone), check by ear before cutting").format(count=len(in_key), total=len(resonances), key=key)
 
 
 def _band_sos(fs: float, lo: float, hi: float, order: int = 4):
@@ -251,18 +261,25 @@ def analyze_bands(path: str, bpm: Optional[float] = None, audio: Optional[Tuple[
 
     flags, suggestions = [], []
     if mud["beat_modulation"] < 0.15 and stats["low"]["beat_modulation"] > 0.3:
-        flags.append("200-500 Hz does not breathe with the beat: sidechain or dynamic EQ on the low mids")
+        flags.append(N_("200-500 Hz does not breathe with the beat: sidechain or dynamic EQ on the low mids"))
     if mud["excess_p90_db"] - mud["excess_median_db"] > 6:
-        flags.append(f"low-mid build-up +{mud['excess_p90_db'] - mud['excess_median_db']:.0f} dB for {mud['buildup_share'] * 100:.0f}% of the time: "
-                     "masking between elements, needs dynamic control")
+        flags.append(N_("low-mid build-up +{db:.0f} dB for {share:.0f}% of the time: masking between elements, needs dynamic control")
+                     .format(db=mud["excess_p90_db"] - mud["excess_median_db"], share=mud["buildup_share"] * 100))
     if mud["excess_median_db"] > 3:
-        flags.append(f"200-500 Hz {mud['excess_median_db']:+.0f} dB above its neighbours: static excess, fixed cut or high-pass the wide elements")
+        flags.append(N_("200-500 Hz {db:+.0f} dB above its neighbours: static excess, fixed cut or high-pass the wide elements")
+                     .format(db=mud["excess_median_db"]))
     strong = [r for r in resonances if r["prominence_db"] >= 8]
     if strong:
-        flags.append("persistent resonances: " + ", ".join(describe_resonance(r["freq_hz"]) for r in strong[:3]))
+        described = [describe_resonance(r["freq_hz"]) for r in strong[:3]]
+        # one whole template per count, so that tr_text finds each description (and translates it) in a stored flag
+        template = [N_("persistent resonances: {first}"), N_("persistent resonances: {first}, {second}"),
+                    N_("persistent resonances: {first}, {second}, {third}")][len(described) - 1]
+        flags.append(template.format(**dict(zip(("first", "second", "third"), described))))
     for r in resonances[:3]:
         gain = -min(6.0, max(2.0, r["prominence_db"] * 0.5))
-        suggestions.append(f"cut {abs(gain):.0f} dB at {r['freq_hz']:.0f} Hz, Q {min(r['q'], 12):.0f} (+{r['prominence_db']:.0f} dB, {r['persistence'] * 100:.0f}% of the time)")
+        suggestions.append(N_("cut {gain:.0f} dB at {freq:.0f} Hz, Q {q:.0f} (+{prominence:.0f} dB, {share:.0f}% of the time)")
+                           .format(gain=abs(gain), freq=r["freq_hz"], q=min(r["q"], 12), prominence=r["prominence_db"],
+                                   share=r["persistence"] * 100))
     # verdict: these problems live in the mix, a pre-master pass cannot fix them
     verdict = "mix" if flags else "ok"
     return {
@@ -296,11 +313,13 @@ def mix_recommendation(bands: Optional[Dict], mastering: Optional[Dict]) -> Tupl
 
 
 def format_recommendation(kind: str, reasons: List[str]) -> str:
+    """The recommendation in the interface language (the reasons are stored English texts)."""
+    listed = "; ".join(tr_text(r) for r in reasons[:4])
     if kind == "mix":
-        return "MIX REVISION RECOMMENDED: " + "; ".join(reasons[:4])
+        return tr("MIX REVISION RECOMMENDED: {reasons}", reasons=listed)
     if kind == "premaster":
-        return "pre-master pass is enough: " + "; ".join(reasons[:4])
-    return "nothing to fix"
+        return tr("pre-master pass is enough: {reasons}", reasons=listed)
+    return tr("nothing to fix")
 
 
 def analyze_bands_cached(path: str, bpm: Optional[float] = None) -> Dict:
@@ -317,37 +336,40 @@ def analyze_bands_cached(path: str, bpm: Optional[float] = None) -> Dict:
 def format_band_report(report: Dict, key: Optional[str] = None) -> str:
     """Text report of one track; `key` (default: report['key'] when set) names the resonances' notes against the scale."""
     key = key or report.get("key")
-    lines = [f"{report['filename']}  ({report['bpm']:.0f} BPM, release {report['release_s'] * 1000:.0f} ms)" if report.get("bpm")
-             else f"{report['filename']}"]
-    lines.append("    band      level   range  pulse")
+    lines = [tr("{filename}  ({bpm:.0f} BPM, release {release:.0f} ms)", filename=report["filename"], bpm=report["bpm"],
+                release=report["release_s"] * 1000) if report.get("bpm") else f"{report['filename']}"]
+    lines.append(f"    {tr('band'):8s} {tr('level'):>6s} {tr('range'):>7s}  {tr('pulse')}")
     for name, _, _ in BANDS:
         st = report["stats"][name]
         lines.append(f"    {BAND_LABELS[name]:8s} {st['mean_db']:6.1f}  {st['range_db']:5.1f}  {st['beat_modulation']:.2f}")
     m = report["mud"]
-    lines.append(f"    200-500 Hz vs neighbours: {m['excess_median_db']:+.1f} dB typical, {m['excess_p90_db']:+.1f} dB at worst, "
-                 f"build-up {m['buildup_share'] * 100:.0f}% of the time, pulse {m['beat_modulation']:.2f}")
+    lines.append("    " + tr("200-500 Hz vs neighbours: {typical:+.1f} dB typical, {worst:+.1f} dB at worst, "
+                              "build-up {share:.0f}% of the time, pulse {pulse:.2f}",
+                              typical=m["excess_median_db"], worst=m["excess_p90_db"], share=m["buildup_share"] * 100,
+                              pulse=m["beat_modulation"]))
     if report["resonances"]:
-        lines.append("    resonances: " + ", ".join(f"{describe_resonance(r['freq_hz'], key)} +{r['prominence_db']:.0f} dB Q {r['q']:.0f}"
-                                                   for r in report["resonances"]))
+        lines.append("    " + tr("resonances: {list}", list=", ".join(
+            f"{tr_text(describe_resonance(r['freq_hz'], key))} +{r['prominence_db']:.0f} dB Q {r['q']:.0f}" for r in report["resonances"])))
         reminder = key_note(report["resonances"], key)
         if reminder:
-            lines.append(f"    note: {reminder}")
+            lines.append("    " + tr("note: {reminder}", reminder=tr_text(reminder)))
     else:
-        lines.append("    resonances: none persistent between 100 and 800 Hz")
+        lines.append("    " + tr("resonances: none persistent between 100 and 800 Hz"))
     for f in report["flags"]:
-        lines.append(f"    ! {f}")
+        lines.append(f"    ! {tr_text(f)}")
     for s in report["eq_suggestions"]:
-        lines.append(f"    EQ: {s}")
-    lines.append("    -> " + ("MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)" if report.get("verdict") == "mix" else "low mids OK"))
+        lines.append("    " + tr("EQ: {suggestion}", suggestion=tr_text(s)))
+    lines.append("    -> " + (tr("MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)") if report.get("verdict") == "mix"
+                             else tr("low mids OK")))
     return "\n".join(lines)
 
 
 def format_band_summary(reports: List[Dict]) -> str:
-    lines = ["BAND ANALYSIS (signal tracking per band, low-mid masking, resonances)", "-" * 60]
+    lines = [tr("BAND ANALYSIS (signal tracking per band, low-mid masking, resonances)"), "-" * 60]
     for r in reports:
         lines.append(format_band_report(r) if "error" not in r else f"{r['filename']}: {r['error']}")
         lines.append("")
-    lines.append("Level in dBFS (band RMS, envelope-followed); range = 10th-90th percentile of the envelope;")
-    lines.append("pulse = modulation at the beat rate (0 flat, 1 fully pumping). These are mix-stage diagnostics:")
-    lines.append("the pre-master pass levels the set but cannot un-mask a low-mid build-up between elements.")
+    lines.append(tr("Level in dBFS (band RMS, envelope-followed); range = 10th-90th percentile of the envelope;"))
+    lines.append(tr("pulse = modulation at the beat rate (0 flat, 1 fully pumping). These are mix-stage diagnostics:"))
+    lines.append(tr("the pre-master pass levels the set but cannot un-mask a low-mid build-up between elements."))
     return "\n".join(lines)

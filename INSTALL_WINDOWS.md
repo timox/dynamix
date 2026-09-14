@@ -177,7 +177,9 @@ en anglais. Pour corriger une traduction sans toucher au programme, créez
 `%LOCALAPPDATA%\DynaMix\locales\fr.json` avec les entrées à changer, par exemple
 `{"Plan Transitions": "Planifier"}` (la clé est le texte anglais, gardez les
 `{…}` tels quels). Les rapports (mastering, analyse par bande, feuille de
-transitions) seront traduits dans une seconde étape.
+transitions, résumé du projet) et les alertes sont traduits aussi, y compris
+ceux des analyses déjà en cache ; seul le fil technique de l'onglet Log reste
+en anglais.
 
 Tout ce qui dépend de votre machine est réuni là : le dossier des projets, la
 base Mixxx (bouton *Detect*, ou laissez vide pour la détection automatique),

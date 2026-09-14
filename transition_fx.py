@@ -23,6 +23,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from scipy import signal
 
+from i18n import N_
+
 FX_TYPES = ("freeze", "filter", "echo", "sample")
 BLOCK = 256
 EDGE_FADE_S = 0.005
@@ -95,8 +97,11 @@ def usable_beats(grid: Dict, fallback_bpm: float, duration: float, name: str = "
     if grid.get("has_beat", True) and len(beats) >= MIN_GRID_BEATS:
         return beats, None
     bpm = float(fallback_bpm or grid.get("bpm") or DEFAULT_BPM)
-    return regular_grid(bpm, duration), (f"{name + ': ' if name else ''}no steady beat found, "
-                                         f"the effects follow a regular {bpm:.0f} BPM grid")
+    if name:
+        warning = N_("{name}: no steady beat found, the effects follow a regular {bpm:.0f} BPM grid").format(name=name, bpm=bpm)
+    else:
+        warning = N_("no steady beat found, the effects follow a regular {bpm:.0f} BPM grid").format(bpm=bpm)
+    return regular_grid(bpm, duration), warning
 
 
 # ------------------------------------------------------------------ validation
@@ -320,8 +325,8 @@ def sample_tempo(fx: Dict, target_bpm: float) -> Tuple[float, Optional[float], O
         return 1.0, None, None
     ratio = float(target_bpm) / float(sample_bpm)
     if not MIN_TEMPO_RATIO <= ratio <= MAX_TEMPO_RATIO:
-        return 1.0, float(sample_bpm), (f"sample {float(sample_bpm):g} BPM vs track {float(target_bpm):.0f} BPM: "
-                                        f"out of range (x{ratio:.2f}), played as it is")
+        return 1.0, float(sample_bpm), N_("sample {sample_bpm:g} BPM vs track {track_bpm:.0f} BPM: out of range (x{ratio:.2f}), "
+                                          "played as it is").format(sample_bpm=float(sample_bpm), track_bpm=float(target_bpm), ratio=ratio)
     return ratio, float(sample_bpm), None
 
 
@@ -515,14 +520,14 @@ def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
     data = load_sample(fx["file"], ctx.a_sr)
     ratio, _, problem = sample_tempo(fx, ctx.a_local_bpm())
     if problem:
-        ctx.warnings.append(f"{os.path.basename(fx['file'])}: {problem}")
+        ctx.warnings.append(N_("{name}: {problem}").format(name=os.path.basename(fx['file']), problem=problem))
     data = fit_tempo(data, ctx.a_sr, ratio, fx.get("tempo", "varispeed"))
     repeats = int(fx.get("repeats", 1))
     if repeats > 1:  # back to back, the fades below apply to the whole run
         fit = max(1, int(MAX_REPEATED_SAMPLE_SECONDS * ctx.a_sr // max(1, len(data))))
         if fit < repeats:
-            ctx.warnings.append(f"{os.path.basename(fx['file'])}: {repeats} repeats would last more than "
-                                f"{MAX_REPEATED_SAMPLE_SECONDS:.0f} s, reduced to {fit}")
+            ctx.warnings.append(N_("{name}: {repeats} repeats would last more than {seconds:.0f} s, reduced to {fit}").format(
+                name=os.path.basename(fx['file']), repeats=repeats, seconds=MAX_REPEATED_SAMPLE_SECONDS, fit=fit))
             repeats = fit
         data = np.tile(data, (repeats, 1))
     fade_in = float(fx.get("fade_in_ms", 5)) / 1000.0
@@ -713,11 +718,12 @@ def _layout_sample(ctx: TransitionContext, fx: Dict, warnings: List[str], sample
     name = os.path.basename(path)
     ratio, _, problem = sample_tempo(fx, ctx.a_local_bpm())
     if problem:
-        warnings.append(f"{name}: {problem}")
+        warnings.append(N_("{name}: {problem}").format(name=name, problem=problem))
     one = length / ratio if fx.get("tempo", "varispeed") != "off" else length
     fit = max(1, int(MAX_REPEATED_SAMPLE_SECONDS // max(one, 1e-6)))
     if repeats > fit:
-        warnings.append(f"{name}: {repeats} repeats would last more than {MAX_REPEATED_SAMPLE_SECONDS:.0f} s, reduced to {fit}")
+        warnings.append(N_("{name}: {repeats} repeats would last more than {seconds:.0f} s, reduced to {fit}").format(
+            name=name, repeats=repeats, seconds=MAX_REPEATED_SAMPLE_SECONDS, fit=fit))
         repeats = fit
     total = one * repeats
     anchor_t = ctx.a_beat(float(fx.get("offset_beats", 0.0)))

@@ -1,0 +1,7 @@
+{
+  "_about": "French texts of DynaMix. Keys are the English texts of the code, values their translation; keep every {placeholder} unchanged. DJ jargon stays English (set list, cue, intro/outro, pre-master, freeze, FX, BPM, LUFS). To correct a text without touching the application, copy the entry into <DynaMix home>/locales/fr.json.",
+  "Language:": "Langue :",
+  "Auto (Windows language)": "Auto (langue de Windows)",
+  "The language is applied at the next start of DynaMix": "La langue sera appliquée au prochain démarrage de DynaMix",
+  "Language": "Langue"
+}

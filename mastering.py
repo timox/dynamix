@@ -38,6 +38,8 @@ import soundfile as sf
 from scipy import signal
 from scipy.ndimage import minimum_filter1d
 
+from i18n import N_, tr, tr_text
+
 try:  # numba ships with librosa; the limiter loop is much faster with it
     from numba import njit
 except Exception:  # pragma: no cover - numba missing
@@ -270,16 +272,18 @@ def analyze_phase(x: np.ndarray, fs: float) -> Dict:
         result['mono_below_hz'] = float(mono_below)
 
         if result['correlation_low'] < -0.5 and result['correlation_high'] < -0.5:
-            result['flags'].append(f"polarity inverted between channels (correlation {result['correlation']:+.2f})")
+            result['flags'].append(N_("polarity inverted between channels (correlation {corr:+.2f})")
+                                   .format(corr=result['correlation']))
         elif result['correlation_low'] < 0.3:
-            result['flags'].append(f"bass out of phase: low end cancels in mono (correlation {result['correlation_low']:+.2f} below 150 Hz)")
+            result['flags'].append(N_("bass out of phase: low end cancels in mono (correlation {corr:+.2f} below 150 Hz)")
+                                   .format(corr=result['correlation_low']))
         if result['mono_loss_db'] < -3.0 and result['correlation'] >= -0.5:
-            result['flags'].append(f"poor mono compatibility ({result['mono_loss_db']:.1f} dB lost in mono)")
+            result['flags'].append(N_("poor mono compatibility ({db:.1f} dB lost in mono)").format(db=result['mono_loss_db']))
         if -0.5 <= result['correlation'] < 0.2 and not result['flags']:
-            result['flags'].append(f"very wide / phasey stereo image (correlation {result['correlation']:+.2f})")
+            result['flags'].append(N_("very wide / phasey stereo image (correlation {corr:+.2f})").format(corr=result['correlation']))
         if not result['flags'] and not result['bass_is_mono']:
-            result['flags'].append(f"stereo bass: side is only {abs(result['bass_width_db']):.0f} dB below mid under 150 Hz "
-                                   f"(mono only below {result['mono_below_hz']:.0f} Hz)")
+            result['flags'].append(N_("stereo bass: side is only {db:.0f} dB below mid under 150 Hz (mono only below {hz:.0f} Hz)")
+                                   .format(db=abs(result['bass_width_db']), hz=result['mono_below_hz']))
 
     # comb filtering: a delayed copy leaves evenly spaced notches over the WHOLE
     # spectrum. Pitched harmonics also look periodic, so only the 1.5-8 kHz band
@@ -321,7 +325,7 @@ def analyze_phase(x: np.ndarray, fs: float) -> Dict:
     result['comb_strength'] = float(min(s1, s2))
     if d1 and d2 and s1 > 6.0 and s2 > 6.0 and abs(d1 - d2) <= 0.1 * max(d1, d2):
         result['comb_delay_ms'] = float((d1 + d2) / 2)
-        result['flags'].append(f"comb filtering / phase cancellation (delay about {result['comb_delay_ms']:.2f} ms)")
+        result['flags'].append(N_("comb filtering / phase cancellation (delay about {ms:.2f} ms)").format(ms=result['comb_delay_ms']))
     return result
 
 
@@ -357,38 +361,38 @@ def analyze_mastering(path: str, audio: Optional[Tuple[np.ndarray, int]] = None)
     flags = []
     score = 100.0
     if runs > 0 or clip_ratio > 1e-4:
-        flags.append(f"clipping ({runs} clipped runs, {clip_ratio * 100:.3f}% samples)")
+        flags.append(N_("clipping ({runs} clipped runs, {percent:.3f}% samples)").format(runs=runs, percent=clip_ratio * 100))
         score -= min(35, 10 + runs / 10)
     if tp > -0.1:
-        flags.append(f"true peak over 0 dBTP ({tp:+.1f})")
+        flags.append(N_("true peak over 0 dBTP ({tp:+.1f})").format(tp=tp))
         score -= 10
     if np.isfinite(lufs):
         if lufs > -7:
-            flags.append(f"very loud master ({lufs:.1f} LUFS)")
+            flags.append(N_("very loud master ({lufs:.1f} LUFS)").format(lufs=lufs))
             score -= 10
         elif lufs < -20:
-            flags.append(f"very quiet master ({lufs:.1f} LUFS)")
+            flags.append(N_("very quiet master ({lufs:.1f} LUFS)").format(lufs=lufs))
             score -= 10
     if 0 < plr < 6:
-        flags.append(f"over-compressed (peak-to-loudness {plr:.1f} dB)")
+        flags.append(N_("over-compressed (peak-to-loudness {plr:.1f} dB)").format(plr=plr))
         score -= 20
     elif plr > 20:
-        flags.append(f"very dynamic / uneven (peak-to-loudness {plr:.1f} dB)")
+        flags.append(N_("very dynamic / uneven (peak-to-loudness {plr:.1f} dB)").format(plr=plr))
         score -= 5
     if lra > 15:
-        flags.append(f"large loudness range ({lra:.1f} LU)")
+        flags.append(N_("large loudness range ({lra:.1f} LU)").format(lra=lra))
         score -= 5
     if dc > 0.01:
-        flags.append(f"DC offset ({dc:.3f})")
+        flags.append(N_("DC offset ({dc:.3f})").format(dc=dc))
         score -= 10
     if tilt - ref_tilt > 12:
-        flags.append(f"very dark / muddy tone (+{tilt - ref_tilt:.0f} dB low vs high-mid)")
+        flags.append(N_("very dark / muddy tone (+{db:.0f} dB low vs high-mid)").format(db=tilt - ref_tilt))
         score -= 10
     elif tilt - ref_tilt < -12:
-        flags.append(f"very harsh / thin tone ({tilt - ref_tilt:.0f} dB low vs high-mid)")
+        flags.append(N_("very harsh / thin tone ({db:.0f} dB low vs high-mid)").format(db=tilt - ref_tilt))
         score -= 10
     if balance['sub'] > REFERENCE_BALANCE_DB['sub'] + 9:
-        flags.append("excess sub bass")
+        flags.append(N_("excess sub bass"))
         score -= 5
 
     phase = analyze_phase(x, fs)
@@ -422,19 +426,21 @@ def format_check(report: Dict) -> str:
     lufs = f"{report['lufs']:.1f}" if report['lufs'] is not None else "  -inf"
     phase = report.get('phase', {})
     if phase.get('stereo'):
-        stereo = (f"stereo corr {phase.get('correlation', 1.0):+.2f} (bass {phase.get('correlation_low', 1.0):+.2f}), "
-                  f"mono loss {phase.get('mono_loss_db', 0.0):+.1f} dB")
+        stereo = tr("stereo corr {corr:+.2f} (bass {bass:+.2f}), mono loss {loss:+.1f} dB",
+                    corr=phase.get('correlation', 1.0), bass=phase.get('correlation_low', 1.0), loss=phase.get('mono_loss_db', 0.0))
         if phase.get('bass_width_db') is not None:
-            stereo += (f" | bass width side/mid {phase['bass_width_db']:+.0f} dB: "
-                       + (f"mono below {phase['mono_below_hz']:.0f} Hz" if phase.get('mono_below_hz') else "NOT mono"))
+            stereo += tr(" | bass width side/mid {db:+.0f} dB: {mono}", db=phase['bass_width_db'],
+                         mono=(tr("mono below {hz:.0f} Hz", hz=phase['mono_below_hz']) if phase.get('mono_below_hz')
+                               else tr("NOT mono")))
     else:
-        stereo = "mono file"
-    line = (f"{report['filename']}\n"
-            f"    {lufs} LUFS | range {report['loudness_range']:.1f} LU | true peak {report['true_peak_db']:+.1f} dBTP | "
-            f"PLR {report['plr']:.1f} dB | tilt {report['tilt_db']:+.1f} dB | score {report['score']:.0f}/100\n"
-            f"    {stereo}")
+        stereo = tr("mono file")
+    line = (f"{report['filename']}\n    "
+            + tr("{lufs} LUFS | range {lra:.1f} LU | true peak {tp:+.1f} dBTP | PLR {plr:.1f} dB | tilt {tilt:+.1f} dB | "
+                 "score {score:.0f}/100", lufs=lufs, lra=report['loudness_range'], tp=report['true_peak_db'],
+                 plr=report['plr'], tilt=report['tilt_db'], score=report['score'])
+            + f"\n    {stereo}")
     if report['flags']:
-        line += "\n    ! " + "; ".join(report['flags'])
+        line += "\n    ! " + "; ".join(tr_text(flag) for flag in report['flags'])
     return line
 
 
@@ -634,14 +640,16 @@ def add_set_relative_flags(reports: List[Dict]) -> None:
     for r in valid:
         diff = r['tilt_db'] - tilt_median
         if diff > 6:
-            r['flags'].append(f"darker than the rest of the set (+{diff:.0f} dB low vs high-mid)")
+            r['flags'].append(N_("darker than the rest of the set (+{db:.0f} dB low vs high-mid)").format(db=diff))
             r['score'] = max(0.0, r['score'] - 8)
         elif diff < -6:
-            r['flags'].append(f"brighter / thinner than the rest of the set ({diff:.0f} dB low vs high-mid)")
+            r['flags'].append(N_("brighter / thinner than the rest of the set ({db:.0f} dB low vs high-mid)").format(db=diff))
             r['score'] = max(0.0, r['score'] - 8)
         ldiff = r['lufs'] - lufs_median
         if abs(ldiff) > 3:
-            r['flags'].append(f"{'louder' if ldiff > 0 else 'quieter'} than the rest of the set ({ldiff:+.1f} dB)")
+            template = (N_("louder than the rest of the set ({db:+.1f} dB)") if ldiff > 0
+                        else N_("quieter than the rest of the set ({db:+.1f} dB)"))
+            r['flags'].append(template.format(db=ldiff))
             r['score'] = max(0.0, r['score'] - 5)
 
 
@@ -654,7 +662,7 @@ def check_files(files: List[str], progress=None, relative: bool = True) -> List[
             reports.append(analyze_mastering_cached(path))
         except Exception as exc:  # unreadable file: keep going
             reports.append({'file_path': path, 'filename': os.path.basename(path), 'error': str(exc),
-                            'flags': [f"could not analyze: {exc}"], 'score': 0.0, 'lufs': None,
+                            'flags': [N_("could not analyze: {error}").format(error=exc)], 'score': 0.0, 'lufs': None,
                             'loudness_range': 0.0, 'true_peak_db': 0.0, 'plr': 0.0, 'tilt_db': 0.0})
     reports = [dict(r, flags=list(r.get('flags', []))) for r in reports]
     if relative:
@@ -671,20 +679,20 @@ def playlist_tone_target(reports: List[Dict]) -> Dict[str, float]:
 
 
 def format_check_summary(reports: List[Dict]) -> str:
-    lines = ["MASTERING CHECK", "-" * 60]
+    lines = [tr("MASTERING CHECK"), "-" * 60]
     for r in reports:
-        lines.append(format_check(r) if 'error' not in r else f"{r['filename']}\n    ! {r['flags'][0]}")
+        lines.append(format_check(r) if 'error' not in r else f"{r['filename']}\n    ! {tr_text(r['flags'][0])}")
     valid = [r for r in reports if r.get('lufs') is not None]
     if valid:
         lufs = [r['lufs'] for r in valid]
         lines.append("")
-        lines.append(f"Loudness spread across the set: {min(lufs):.1f} to {max(lufs):.1f} LUFS "
-                     f"({max(lufs) - min(lufs):.1f} dB), median {np.median(lufs):.1f} LUFS")
+        lines.append(tr("Loudness spread across the set: {low:.1f} to {high:.1f} LUFS ({spread:.1f} dB), median {median:.1f} LUFS",
+                        low=min(lufs), high=max(lufs), spread=max(lufs) - min(lufs), median=np.median(lufs)))
         flagged = [r for r in reports if r['flags']]
-        lines.append(f"Tracks with issues: {len(flagged)}/{len(reports)}")
+        lines.append(tr("Tracks with issues: {flagged}/{total}", flagged=len(flagged), total=len(reports)))
         if max(lufs) - min(lufs) > 4 or flagged:
-            lines.append("Suggestion: run the pre-master pass (mastering.py fix / GUI 'Pre-master Set') "
-                         "to level the set, then let Mixxx play the corrected folder.")
+            lines.append(tr("Suggestion: run the pre-master pass (mastering.py fix / GUI 'Pre-master Set') "
+                            "to level the set, then let Mixxx play the corrected folder."))
     return "\n".join(lines)
 
 
@@ -714,27 +722,29 @@ def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, 
 
 
 def format_premaster_summary(results: List[Dict], out_dir: str) -> str:
-    lines = ["PRE-MASTER PASS", "-" * 60, f"Output folder: {out_dir}"]
+    lines = [tr("PRE-MASTER PASS"), "-" * 60, tr("Output folder: {folder}", folder=out_dir)]
     for r in results:
         if 'error' in r:
-            lines.append(f"{os.path.basename(r['input'])}: FAILED ({r['error']})")
+            lines.append(tr("{name}: FAILED ({error})", name=os.path.basename(r['input']), error=r['error']))
             continue
         a = r['actions']
         tone = ""
         if 'low_shelf_db' in a:
-            tone = f", tone low {a['low_shelf_db']:+.1f} dB / high {a['high_shelf_db']:+.1f} dB"
+            tone = tr(", tone low {low:+.1f} dB / high {high:+.1f} dB", low=a['low_shelf_db'], high=a['high_shelf_db'])
         if 'polarity_flipped' in a:
-            tone += ", polarity fixed"
+            tone += tr(", polarity fixed")
         if 'mono_bass_below_hz' in a:
-            tone += f", bass mono below {a['mono_bass_below_hz']:.0f} Hz"
-        lines.append(f"{os.path.basename(r['output'])}: {r['before']['lufs']:.1f} -> {r['after']['lufs']:.1f} LUFS "
-                     f"(gain {a['gain_db']:+.1f} dB{tone}), true peak {r['after']['true_peak_db']:+.1f} dBTP, "
-                     f"score {r['before']['score']:.0f} -> {r['after']['score']:.0f}")
+            tone += tr(", bass mono below {hz:.0f} Hz", hz=a['mono_bass_below_hz'])
+        lines.append(tr("{name}: {before:.1f} -> {after:.1f} LUFS (gain {gain:+.1f} dB{tone}), true peak {tp:+.1f} dBTP, "
+                        "score {score_before:.0f} -> {score_after:.0f}",
+                        name=os.path.basename(r['output']), before=r['before']['lufs'], after=r['after']['lufs'],
+                        gain=a['gain_db'], tone=tone, tp=r['after']['true_peak_db'],
+                        score_before=r['before']['score'], score_after=r['after']['score']))
     ok = [r for r in results if 'error' not in r]
     if ok:
         lines.append("")
-        lines.append(f"{len(ok)} tracks written. Add this folder to the Mixxx library (Preferences > Library, rescan), "
-                     "then plan transitions on it.")
+        lines.append(tr("{count} tracks written. Add this folder to the Mixxx library (Preferences > Library, rescan), "
+                        "then plan transitions on it.", count=len(ok)))
     return "\n".join(lines)
 
 

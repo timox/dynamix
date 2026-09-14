@@ -32,6 +32,8 @@ import sqlite3
 import sys
 from typing import Dict, List, Optional
 
+from i18n import tr
+
 from transition_planner import TransitionPlanner, tracks_from_m3u
 
 CUE_TYPE_INTRO = 6
@@ -219,24 +221,25 @@ class MixxxExporter:
 
 
 def format_report(report: Dict) -> str:
+    """The export report, in the interface language (English for the command line)."""
     lines = []
     if report["dry_run"]:
-        lines.append("DRY RUN - nothing was written to Mixxx.")
-    lines.append(f"Mixxx database: {report['db_path']}")
+        lines.append(tr("DRY RUN - nothing was written to Mixxx."))
+    lines.append(tr("Mixxx database: {path}", path=report['db_path']))
     if report["backup_path"]:
-        lines.append(f"Backup: {report['backup_path']}")
-    lines.append(f"Tracks found in Mixxx library: {len(report['matched'])}")
+        lines.append(tr("Backup: {path}", path=report['backup_path']))
+    lines.append(tr("Tracks found in Mixxx library: {count}", count=len(report['matched'])))
     if report["missing"]:
-        lines.append(f"Tracks NOT in Mixxx library ({len(report['missing'])}), add the folder to the Mixxx "
-                     "library and rescan, then export again:")
+        lines.append(tr("Tracks NOT in Mixxx library ({count}), add the folder to the Mixxx library and rescan, then export again:",
+                        count=len(report['missing'])))
         for path in report["missing"]:
             lines.append(f"  - {path}")
     if not report["dry_run"]:
-        lines.append(f"Intro/outro cues written: {report['cues_written']}")
+        lines.append(tr("Intro/outro cues written: {count}", count=report['cues_written']))
         if report["playlist_id"] is not None:
-            lines.append(f"Mixxx playlist '{report['playlist_name']}' ready (id {report['playlist_id']}). "
-                         "In Mixxx: Library > Playlists > right-click it > Add to Auto DJ Queue, then enable Auto DJ "
-                         "with the 'Full Intro + Outro' transition mode.")
+            lines.append(tr("Mixxx playlist '{name}' ready (id {id}). In Mixxx: Library > Playlists > right-click it > "
+                            "Add to Auto DJ Queue, then enable Auto DJ with the 'Full Intro + Outro' transition mode.",
+                            name=report['playlist_name'], id=report['playlist_id']))
     return "\n".join(lines)
 
 

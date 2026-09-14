@@ -701,7 +701,7 @@ class SetBuilderMixin:
                     m = dict(p.get("mastering") or {"flags": [], "score": None})
                     kind, reasons = mix_recommendation(p.get("bands"), p.get("mastering"))
                     if kind == "mix":
-                        m = dict(m, flags=["MIX REVISION: " + "; ".join(reasons)])
+                        m = dict(m, flags=["MIX REVISION: " + "; ".join(reasons)], mix_reasons=list(reasons))
                     out[p.get("file_path")] = m
         return out
     
@@ -719,7 +719,10 @@ class SetBuilderMixin:
         if mastering and not flags:
             values.append("OK")
         elif flags:
-            text = "; ".join(flags)
+            if mastering.get("mix_reasons"):
+                text = tr("MIX REVISION: {reasons}", reasons="; ".join(i18n.tr_text(r) for r in mastering["mix_reasons"]))
+            else:
+                text = "; ".join(i18n.tr_text(f) for f in flags)
             values.append(text if len(text) <= 90 else text[:89] + "…")
         else:
             values.append("")
@@ -1177,7 +1180,7 @@ class SetBuilderMixin:
                 task.check()
                 for report, original, path in zip(reports, originals, files):
                     if path != original:
-                        report["filename"] = f"{report.get('filename', '')} [pre-mastered copy]"
+                        report["filename"] = tr("{name} [pre-mastered copy]", name=report.get('filename', ''))
                 summary = note + "\n\n" + format_check_summary(reports)
                 self.root.after(0, self.add_report, tr("Mastering Report"), summary, False)
                 flagged = sum(1 for r in reports if r.get("flags"))
@@ -1205,7 +1208,8 @@ class SetBuilderMixin:
                 reports = []
                 for i, (t, path) in enumerate(zip(tracks, files), 1):
                     task.progress(i - 1, len(tracks), t.get("filename", ""))
-                    label = os.path.basename(path) + (" [pre-mastered copy]" if path != t["file_path"] else "")
+                    label = (tr("{name} [pre-mastered copy]", name=os.path.basename(path)) if path != t["file_path"]
+                             else os.path.basename(path))
                     try:
                         report = analyze_bands_cached(path, bpm=float(t.get("bpm") or 0) or None)
                         reports.append(dict(report, key=t.get("key"), filename=label))  # the key names the resonances' notes
@@ -1215,8 +1219,8 @@ class SetBuilderMixin:
                 summary = note + "\n\n" + format_band_summary(reports)
                 needs_mix = [r["filename"] for r in reports if r.get("verdict") == "mix"]
                 if needs_mix:
-                    summary = (f"MIX REVISION RECOMMENDED for {len(needs_mix)}/{len(reports)} tracks: " + ", ".join(needs_mix)
-                               + "\n\n" + summary)
+                    summary = (tr("MIX REVISION RECOMMENDED for {count}/{total} tracks: {names}", count=len(needs_mix),
+                                  total=len(reports), names=", ".join(needs_mix)) + "\n\n" + summary)
                 self.root.after(0, self.add_report, tr("Band Analysis"), summary, False)
                 self.root.after(0, self.update_status, tr("Band analysis done: {count}/{total} tracks need a mix "
                                                          "revision (report in the Log tab)", count=len(needs_mix), total=len(reports)))
@@ -1381,7 +1385,8 @@ class SetBuilderMixin:
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
         note = f" ({self._copies_note(counts, translate=True)})" if counts["fx"] or counts["premaster"] else ""
-        self.add_report(tr("Playlist"), f"{len(tracks)} tracks written to {filename}\n{self.project.audio_used_text()}\n\n"
+        self.add_report(tr("Playlist"), tr("{count} tracks written to {file}", count=len(tracks), file=filename)
+                        + f"\n{self.project.audio_used_text(translate=tr)}\n\n"
                         + "\n".join(f"{i:2d}. {t.get('filename', '')}" for i, t in enumerate(tracks, 1)))
         self.update_status(tr("Playlist saved: {count} tracks{note} -> {file}", count=len(tracks), note=note, file=filename))
     
@@ -1415,7 +1420,7 @@ class SetBuilderMixin:
             return
         summary = format_report(report)
         if counts["fx"] or counts["premaster"]:
-            summary = f"Using {self._copies_note(counts)}.\n" + summary
+            summary = tr("Using {copies}.", copies=self._copies_note(counts, translate=True)) + "\n" + summary
         self.project.mark("mixxx", playlist=playlist_name, cues=report["cues_written"], db=os.path.basename(os.path.dirname(db_path)))
         self._save_project()
         self.add_report(tr("Mixxx Export"), summary)
@@ -1620,8 +1625,8 @@ class SetBuilderMixin:
         played = self.project.premaster_map()
         files = [played.get(p, p) for p in originals]
         copies = sum(1 for o, f in zip(originals, files) if f != o)
-        note = (f"Files analysed: the ones the set plays - {copies} pre-mastered copies, {len(files) - copies} originals "
-                "(the Track tab can show the other version)")
+        note = tr("Files analysed: the ones the set plays - {copies} pre-mastered copies, {originals} originals "
+                  "(the Track tab can show the other version)", copies=copies, originals=len(files) - copies)
         return files, note
 
 

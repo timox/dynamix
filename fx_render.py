@@ -18,6 +18,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 import transition_fx as tfx
+from i18n import N_
 from mastering import load_audio, output_path_for, true_peak_limiter, write_audio
 
 log = logging.getLogger("dynamix.fx")
@@ -80,10 +81,10 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             grid, warning = _beats_for(prof, grids, len(data) / sr)
         except Exception as exc:  # missing or unreadable file, beat analysis failure
             unusable.add(i)
-            problems.append(f"{name}: cannot be read ({exc})")
+            problems.append(N_("{name}: cannot be read ({error})").format(name=name, error=exc))
             return False
         if warning:
-            problems.append(f"{name}: {warning}")
+            problems.append(N_("{name}: {problem}").format(name=name, problem=warning))
         audio[i], rates[i], beats[i], cues[i], spans[i] = data, sr, grid, _cues(prof), []
         return True
 
@@ -118,7 +119,7 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             progress(counter[0], steps, f"{profiles[a].get('filename', '')} -> {profiles[b].get('filename', '')}")
         usable_a, usable_b = load(a), load(b)
         if not (usable_a and usable_b):
-            problems.append(f"transition {a + 1}: skipped (a track cannot be read)")
+            problems.append(N_("transition {n}: skipped (a track cannot be read)").format(n=a + 1))
             continue
         ctx = tfx.make_context(audio[a], rates[a], beats[a], cues[a]["outro_start"], cues[a]["outro_end"],
                                audio[b], rates[b], beats[b], cues[b]["intro_start"], entry.get("nudge_ms", 0.0))
@@ -127,7 +128,7 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
         try:
             tfx.apply_effects(ctx, _active(entry["effects"]))
         except Exception as exc:
-            problems.append(f"transition {a + 1}: {exc}")
+            problems.append(N_("transition {n}: {problem}").format(n=a + 1, problem=exc))
             continue
         a_start = int(round(ctx.a_offset * rates[a]))
         audio[a] = np.concatenate([audio[a][:a_start], ctx.a]).astype(np.float32)

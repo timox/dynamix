@@ -24,6 +24,7 @@ import numpy as np
 
 from audio_utils import AudioAnalyzer, energy_compatibility_score, key_compatibility_score
 from analysis_store import get_store
+from i18n import N_, tr, tr_text
 
 
 def compatibility_from_features(f1: Dict, f2: Dict) -> Dict:
@@ -236,7 +237,7 @@ class TransitionPlanner:
             from mastering import analyze_mastering_cached
             mastering = analyze_mastering_cached(path)
         except Exception as exc:  # keep planning even if the check fails
-            mastering = {'error': str(exc), 'flags': [f"mastering check failed: {exc}"], 'score': None}
+            mastering = {'error': str(exc), 'flags': [N_("mastering check failed: {error}").format(error=exc)], 'score': None}
         try:
             from band_analysis import analyze_bands_cached
             full = analyze_bands_cached(path, bpm=bpm if bpm and bpm > 0 else None)
@@ -300,18 +301,19 @@ class TransitionPlanner:
 
             notes = []
             if not (a.get('has_beat', True) and b.get('has_beat', True)):
-                notes.append("beatless track: free tempo, blend on the pad")
+                notes.append(N_("beatless track: free tempo, blend on the pad"))
             elif compat['bpm_difference'] > 5:
-                notes.append(f"sync tempo ({bpm_adjust:+.1f}%)")
+                notes.append(N_("sync tempo ({pct:+.1f}%)").format(pct=bpm_adjust))
             if compat['key_compatibility'] < 80:
-                notes.append("key clash: use EQ / short blend")
+                notes.append(N_("key clash: use EQ / short blend"))
             if compat['energy_compatibility'] < 70:
-                notes.append(f"energy jump ({a['energy_level']:.1f} -> {b['energy_level']:.1f})")
+                notes.append(N_("energy jump ({before:.1f} -> {after:.1f})").format(before=a['energy_level'], after=b['energy_level']))
             ma, mb = a.get('mastering') or {}, b.get('mastering') or {}
             if ma.get('lufs') is not None and mb.get('lufs') is not None and abs(ma['lufs'] - mb['lufs']) > 3:
-                notes.append(f"loudness jump ({ma['lufs']:.0f} -> {mb['lufs']:.0f} LUFS): pre-master or trim gain")
+                notes.append(N_("loudness jump ({before:.0f} -> {after:.0f} LUFS): pre-master or trim gain")
+                             .format(before=ma['lufs'], after=mb['lufs']))
             if not notes:
-                notes.append("smooth")
+                notes.append(N_("smooth"))
 
             self.transitions.append({
                 'index': i + 1,
@@ -342,57 +344,64 @@ class TransitionPlanner:
         return f"{int(seconds // 60)}:{seconds % 60:05.2f}"
 
     def track_summary(self, index: int, p: Dict) -> List[str]:
-        """One block per track: identity, energy, sections, mastering, what to watch."""
+        """One block per track: identity, energy, sections, mastering, what to watch (in the interface language)."""
         lines = [f"{index:2d}. {p['filename']}"]
-        beat = "" if p.get('has_beat', True) else " (no clear beat)"
-        lines.append(f"    {float(p.get('bpm') or 0):.1f} BPM{beat} | {p.get('key') or '-'} | "
-                     f"energy {float(p.get('energy_level') or 0):.1f}/10 | {self._fmt(p.get('duration') or 0)}")
-        lines.append(f"    intro {self._fmt(p['intro_start'])} -> {self._fmt(p['intro_end'])}"
-                     f"   outro {self._fmt(p['outro_start'])} -> {self._fmt(p['outro_end'])}"
-                     f"   blend ~{float(p.get('mix_duration') or 0):.0f}s")
+        beat = "" if p.get('has_beat', True) else " " + tr("(no clear beat)")
+        lines.append("    " + tr("{bpm:.1f} BPM{beat} | {key} | energy {energy:.1f}/10 | {duration}",
+                                  bpm=float(p.get('bpm') or 0), beat=beat, key=p.get('key') or '-',
+                                  energy=float(p.get('energy_level') or 0), duration=self._fmt(p.get('duration') or 0)))
+        lines.append("    " + tr("intro {intro_start} -> {intro_end}   outro {outro_start} -> {outro_end}   blend ~{blend:.0f}s",
+                                  intro_start=self._fmt(p['intro_start']), intro_end=self._fmt(p['intro_end']),
+                                  outro_start=self._fmt(p['outro_start']), outro_end=self._fmt(p['outro_end']),
+                                  blend=float(p.get('mix_duration') or 0)))
         m = p.get('mastering')
         measured = p.get('measured_file')
         if measured and measured != p['file_path']:
-            lines.append(f"    measured on the pre-mastered copy: {measured}")
+            lines.append("    " + tr("measured on the pre-mastered copy: {path}", path=measured))
         if m and m.get('lufs') is not None:
             phase = m.get('phase', {})
-            stereo = (f"stereo corr {phase.get('correlation', 1.0):+.2f}, bass {phase.get('correlation_low', 1.0):+.2f}, "
-                      f"mono loss {phase.get('mono_loss_db', 0.0):+.1f} dB") if phase.get('stereo') else "mono file"
-            lines.append(f"    master: {m['lufs']:.1f} LUFS | range {m['loudness_range']:.1f} LU | "
-                         f"true peak {m['true_peak_db']:+.1f} dBTP | PLR {m['plr']:.1f} dB | tilt {m['tilt_db']:+.1f} dB | "
-                         f"score {m['score']:.0f}/100")
+            stereo = tr("stereo corr {correlation:+.2f}, bass {bass:+.2f}, mono loss {loss:+.1f} dB",
+                        correlation=phase.get('correlation', 1.0), bass=phase.get('correlation_low', 1.0),
+                        loss=phase.get('mono_loss_db', 0.0)) if phase.get('stereo') else tr("mono file")
+            lines.append("    " + tr("master: {lufs:.1f} LUFS | range {lra:.1f} LU | true peak {peak:+.1f} dBTP | PLR {plr:.1f} dB | "
+                                      "tilt {tilt:+.1f} dB | score {score:.0f}/100",
+                                      lufs=m['lufs'], lra=m['loudness_range'], peak=m['true_peak_db'], plr=m['plr'],
+                                      tilt=m['tilt_db'], score=m['score']))
             lines.append(f"    {stereo}")
         b = p.get('bands') or {}
         if b.get('mud'):
             mud = b['mud']
-            lines.append(f"    low mids (200-500 Hz): {mud.get('excess_median_db', 0):+.0f} dB vs neighbours, "
-                         f"build-up {mud.get('buildup_share', 0) * 100:.0f}% of the time, pulse {mud.get('beat_modulation', 0):.2f}")
+            lines.append("    " + tr("low mids (200-500 Hz): {excess:+.0f} dB vs neighbours, build-up {share:.0f}% of the time, "
+                                      "pulse {pulse:.2f}", excess=mud.get('excess_median_db', 0),
+                                      share=mud.get('buildup_share', 0) * 100, pulse=mud.get('beat_modulation', 0)))
             if b.get('resonances'):
                 from band_analysis import describe_resonance, key_note
-                lines.append("    resonances: " + ", ".join(f"{describe_resonance(r['freq_hz'], p.get('key'))} +{r['prominence_db']:.0f} dB"
-                                                       for r in b['resonances'][:4]))
+                lines.append("    " + tr("resonances: {list}", list=", ".join(
+                    f"{tr_text(describe_resonance(r['freq_hz'], p.get('key')))} +{r['prominence_db']:.0f} dB" for r in b['resonances'][:4])))
                 reminder = key_note(b['resonances'][:4], p.get('key'))
                 if reminder:
-                    lines.append(f"    note: {reminder}")
+                    lines.append("    " + tr("note: {reminder}", reminder=tr_text(reminder)))
         for flag in (m or {}).get('flags') or []:
-            lines.append(f"    ! {flag}")
+            lines.append(f"    ! {tr_text(flag)}")
         for flag in b.get('flags') or []:
-            lines.append(f"    ! {flag}")
+            lines.append(f"    ! {tr_text(flag)}")
         for sug in b.get('eq_suggestions') or []:
-            lines.append(f"    EQ: {sug}")
+            lines.append("    " + tr("EQ: {suggestion}", suggestion=tr_text(sug)))
         from band_analysis import mix_recommendation, format_recommendation
         kind, reasons = mix_recommendation(b, m)
         lines.append("    -> " + format_recommendation(kind, reasons))
         return lines
 
     def to_text(self, title: str = "DynaMix Transition Sheet") -> str:
+        """The transition sheet in the interface language (the title is translated when it is a known template)."""
         if not self.profiles:
-            return "No tracks planned."
+            return tr("No tracks planned.")
+        title = tr_text(title)
         lines = [title, "=" * len(title), ""]
         total = sum(p['duration'] for p in self.profiles)
-        lines.append(f"{len(self.profiles)} tracks, {total / 60:.1f} minutes")
+        lines.append(tr("{count} tracks, {minutes:.1f} minutes", count=len(self.profiles), minutes=total / 60))
         lines.append("")
-        lines.append("TRACK BY TRACK")
+        lines.append(tr("TRACK BY TRACK"))
         lines.append("-" * 60)
         for i, p in enumerate(self.profiles, 1):
             lines.extend(self.track_summary(i, p))
@@ -400,29 +409,31 @@ class TransitionPlanner:
         needs_mix = [p['filename'] for p in self.profiles if mix_recommendation(p.get('bands'), p.get('mastering'))[0] == 'mix']
         if needs_mix:
             lines.append("")
-            lines.append(f"MIX REVISION RECOMMENDED for {len(needs_mix)} track(s): " + ", ".join(needs_mix))
-            lines.append("These problems (low-mid masking, bands that do not breathe, resonances, comb filtering) live in the mix; "
-                         "the pre-master pass levels the set but cannot fix them.")
+            lines.append(tr("MIX REVISION RECOMMENDED for {count} track(s): {names}", count=len(needs_mix), names=", ".join(needs_mix)))
+            lines.append(tr("These problems (low-mid masking, bands that do not breathe, resonances, comb filtering) live in the mix; "
+                            "the pre-master pass levels the set but cannot fix them."))
         masters = [p['mastering'] for p in self.profiles if p.get('mastering') and p['mastering'].get('lufs') is not None]
         if masters:
             lufs = [m['lufs'] for m in masters]
             flagged = sum(1 for m in masters if m['flags'])
             lines.append("")
-            lines.append(f"Set loudness: {min(lufs):.1f} to {max(lufs):.1f} LUFS ({max(lufs) - min(lufs):.1f} dB spread), "
-                         f"{flagged}/{len(masters)} tracks with mastering issues")
+            lines.append(tr("Set loudness: {low:.1f} to {high:.1f} LUFS ({spread:.1f} dB spread), "
+                            "{flagged}/{total} tracks with mastering issues",
+                            low=min(lufs), high=max(lufs), spread=max(lufs) - min(lufs), flagged=flagged, total=len(masters)))
             if max(lufs) - min(lufs) > 4 or flagged:
-                lines.append("Suggestion: run the pre-master pass (GUI 'Pre-master Set...' or "
-                             "'python mastering.py fix') and play the corrected folder in Mixxx.")
+                lines.append(tr("Suggestion: run the pre-master pass (GUI 'Pre-master Set...' or "
+                                "'python mastering.py fix') and play the corrected folder in Mixxx."))
         lines.append("")
-        lines.append("TRANSITIONS")
+        lines.append(tr("TRANSITIONS"))
         lines.append("-" * 60)
         for t in self.transitions:
             lines.append(f"{t['index']:2d}. {t['from_name']}  ->  {t['to_name']}")
-            lines.append(f"    score {t['score']:.0f}/100 | {t['bpm_from']:.1f} -> {t['bpm_to']:.1f} BPM "
-                         f"({t['bpm_adjust_pct']:+.1f}%) | {t['key_from'] or '-'} -> {t['key_to'] or '-'}")
-            lines.append(f"    start next track at {self._fmt(t['exit_time'])} of the current one, "
-                         f"cue it at {self._fmt(t['entry_time'])}, blend ~{t['crossfade_seconds']:.0f}s")
-            lines.append(f"    {'; '.join(t['notes'])}")
+            lines.append("    " + tr("score {score:.0f}/100 | {bpm_from:.1f} -> {bpm_to:.1f} BPM ({pct:+.1f}%) | {key_from} -> {key_to}",
+                                      score=t['score'], bpm_from=t['bpm_from'], bpm_to=t['bpm_to'], pct=t['bpm_adjust_pct'],
+                                      key_from=t['key_from'] or '-', key_to=t['key_to'] or '-'))
+            lines.append("    " + tr("start next track at {exit} of the current one, cue it at {entry}, blend ~{blend:.0f}s",
+                                      exit=self._fmt(t['exit_time']), entry=self._fmt(t['entry_time']), blend=t['crossfade_seconds']))
+            lines.append("    " + "; ".join(tr_text(note) for note in t['notes']))
         return "\n".join(lines) + "\n"
 
     def to_dict(self) -> Dict:

@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Sequence
 from matplotlib.figure import Figure
 import numpy as np
 
-from i18n import tr
+from i18n import tr, tr_text
 
 SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
@@ -249,7 +249,7 @@ def track_detail(profile: Dict, set_median_balance: Optional[Dict[str, float]] =
     _mastering_balance_axes(ax2, m, set_median_balance)
     flags = m.get("flags") or []
     if flags:
-        ax2.text(0.0, -0.30, "! " + "\n! ".join(flags[:5]), transform=ax2.transAxes, fontsize=8,
+        ax2.text(0.0, -0.30, "! " + "\n! ".join(tr_text(f) for f in flags[:5]), transform=ax2.transAxes, fontsize=8,
                  color=TEXT2, va="top", ha="left")
     return _finish(fig)
 
@@ -490,9 +490,10 @@ def band_dynamics(report: Dict) -> Figure:
     legend = tr("blue = note of {key}, red = other", key=report['key']) if report.get("key") else tr("red dots")
     ax3.set_title(tr("Resonances 100-800 Hz  —  {n} persistent peak(s) ({legend})", n=n_res, legend=legend), loc="left", fontsize=10)
     import textwrap
-    lines = [("! " + l) for l in (report.get("flags") or [])] + [f"EQ: {sug}" for sug in (report.get("eq_suggestions") or [])]
+    lines = ([("! " + tr_text(l)) for l in (report.get("flags") or [])]
+             + [tr("EQ: {suggestion}", suggestion=tr_text(sug)) for sug in (report.get("eq_suggestions") or [])])
     if report.get("verdict") == "mix":
-        lines.insert(0, "MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)")
+        lines.insert(0, tr("MIX REVISION RECOMMENDED (a pre-master pass cannot fix this)"))
     if lines:
         wrapped = "\n".join("\n  ".join(textwrap.wrap(l, 78)) for l in lines[:6])
         ax3.text(0.0, -0.30, wrapped, transform=ax3.transAxes, fontsize=8, color=TEXT2, va="top", ha="left")
@@ -615,6 +616,6 @@ def transition_detail(layout: Dict, a_env: Optional[Dict] = None, b_env: Optiona
     axes[-1].set_xticklabels(["J" if k == 0 else f"{k:+d}" for _, k in bars])
     axes[-1].set_xlabel(tr("Beats from the junction (1 beat = {period:.2f} s; thick lines = bars)", period=layout['period']))
     warnings = layout.get("warnings") or []
-    top.set_title(tr("Transition") + (f"   ⚠ {warnings[0]}" if warnings else ""), loc="left", fontsize=10,
+    top.set_title(tr("Transition") + (f"   ⚠ {tr_text(warnings[0])}" if warnings else ""), loc="left", fontsize=10,
                   color=STATUS_CRITICAL if warnings else TEXT, pad=14)
     return _finish(fig)
