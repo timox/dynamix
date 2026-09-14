@@ -1165,7 +1165,6 @@ class SetBuilderMixin:
                     self._render_premaster()
                     self._refresh_fx_tab()
                     self.add_report("Pre-master", summary, show=False)
-                    self.set_notebook.select(self.premaster_frame._notebook_tab)
                     self.update_status(f"Pre-master done: {done_count}/{len(results)} tracks written to {out_dir} "
                                        "(report in the Log tab)")
                 self.root.after(0, done)
@@ -1173,7 +1172,6 @@ class SetBuilderMixin:
                 self._report_error(f"Pre-master failed: {e}", e)
         
         self.update_status(f"Pre-mastering {len(files)} tracks into {out_dir} ...")
-        self.set_notebook.select(self.premaster_frame._notebook_tab)
         threading.Thread(target=work, daemon=True).start()
     
     def _with_rendered(self, tracks):
