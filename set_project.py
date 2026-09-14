@@ -475,9 +475,22 @@ class SetProject:
         entry.setdefault("b", b)
         return entry
 
+    @staticmethod
+    def _plan_cues(data: Optional[Dict]) -> Optional[List[Tuple]]:
+        """What a plan decides for the rendered audio: the tracks and their intro/outro positions."""
+        if not data:
+            return None
+        return [(t.get("file_path"), t.get("intro_start"), t.get("intro_end"), t.get("outro_start"), t.get("outro_end"))
+                for t in data.get("tracks") or []]
+
     def set_transitions(self, data: Dict) -> None:
-        """Store a new transition plan: the FX render and the later steps are no longer valid (recipes kept)."""
-        self.invalidate_from("transitions")
+        """
+        Store a transition plan. A different plan (tracks or cue positions) invalidates the FX render and the
+        later steps (recipes kept); the same plan again, as mixxx_export.py --project re-plans on every run,
+        keeps them.
+        """
+        if self._plan_cues(self.data.get("transitions")) != self._plan_cues(data):
+            self.invalidate_from("transitions")
         self.data["transitions"] = data
         self.mark("transitions", count=len(data.get("transitions") or []))
 

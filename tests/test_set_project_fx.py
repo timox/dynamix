@@ -71,6 +71,26 @@ class TestSetProjectFx(unittest.TestCase):
         self.assertEqual(self.p.data["premaster"], {"results": []})
         self.assertTrue(self.p.is_done("premaster"))
 
+    def test_identical_replan_keeps_the_fx_render(self):
+        import copy
+        plan = {"tracks": [{"file_path": x, "intro_start": 1.0, "intro_end": 3.0, "outro_start": 8.0, "outro_end": 10.0}
+                           for x in (self.a, self.b, self.c)],
+                "transitions": [{"score": 50}, {"score": 60}]}
+        self.p.set_transitions(plan)
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        self.p.set_fx_render([{"source": self.a, "output": "x"}])
+        for step in ("fx", "playlist", "mixxx"):
+            self.p.mark(step)
+        self.p.set_transitions(copy.deepcopy(plan))  # what mixxx_export.py --project does on every run
+        self.assertIsNotNone(self.p.data["fx"]["render"])
+        for step in ("fx", "playlist", "mixxx"):
+            self.assertTrue(self.p.is_done(step), step)
+        moved = copy.deepcopy(plan)
+        moved["tracks"][0]["outro_start"] = 8.5
+        self.p.set_transitions(moved)
+        self.assertIsNone(self.p.data["fx"]["render"])
+        self.assertFalse(self.p.is_done("fx"))
+
     def test_fx_change_resets_the_playlist_and_mixxx_steps(self):
         self.p.mark("playlist", count=3)
         self.p.mark("mixxx", cues=6)
