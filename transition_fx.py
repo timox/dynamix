@@ -415,9 +415,13 @@ def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
     q = filter_q(fx["kind"], fx.get("resonance", 0.707), fx.get("width_octaves", 1.0))
     if fx.get("side", "outgoing") == "outgoing":
         start_i = max(0, ctx.a_index(ctx.a_beat(-int(fx["beats"]))))
+        # up to one beat after A stops being audible (the filter state settles, the rest of A is never heard)
+        end_i = min(len(ctx.a), ctx.a_index(ctx.a_end) + int(round(ctx.a_period * ctx.a_sr)))
+        if end_i <= start_i:
+            return
         sweep = max(1, ctx.a_index(ctx.junction_a) - start_i)
-        ctx.a[start_i:] = sweep_filter(ctx.a[start_i:], ctx.a_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q, sweep,
-                                       fx.get("curve", "exponential"))
+        ctx.a[start_i:end_i] = sweep_filter(ctx.a[start_i:end_i], ctx.a_sr, fx["kind"], fx["start_hz"], fx["end_hz"], q,
+                                            sweep, fx.get("curve", "exponential"))
     else:
         junction_i = max(0, ctx.b_index(ctx.junction_b))
         sweep_end_i = ctx.b_index(ctx.b_beat(int(fx["beats"])))
@@ -473,6 +477,8 @@ def apply_effects(ctx: TransitionContext, effects: Sequence[Dict]) -> Transition
         problems = validate_effect(fx)
         if problems:
             raise ValueError("; ".join(problems))
+    if sum(1 for fx in enabled if fx["type"] == "freeze") > 1:
+        raise ValueError("only one freeze per transition")
     # a freeze redefines where A ends and where B enters: freezes first, then the other effects in stack order
     ordered = [fx for fx in enabled if fx["type"] == "freeze"] + [fx for fx in enabled if fx["type"] != "freeze"]
     for fx in ordered:
@@ -504,8 +510,9 @@ def mix_overflow(ctx: TransitionContext) -> TransitionContext:
 # ------------------------------------------------------------------ preview
 def preview_mix(ctx: TransitionContext, b_intro_end: float, length: str = "short") -> Tuple[np.ndarray, int]:
     """
-    The rendered transition as one stereo clip at A's rate: A fades out (cos) from the junction to a_end,
-    B (aligned on the junction) fades in (sin) from its junction to its intro end.
+    The rendered transition as one stereo clip at A's rate, faded like Mixxx "Full Intro + Outro": the
+    transition lasts L = min(A's junction -> a_end, B's junction -> intro end); A fades out (cos) and
+    B (aligned on the junction) fades in (sin) over L from the junction.
     """
     sr = ctx.a_sr
     period = ctx.a_period
@@ -522,7 +529,7 @@ def preview_mix(ctx: TransitionContext, b_intro_end: float, length: str = "short
     a_i0 = ctx.a_index(start_t)
     a_part = ctx.a[a_i0:a_i0 + n]
     times = start_t + np.arange(len(a_part)) / sr
-    fade_len = max(1e-3, ctx.a_end - ctx.junction_a)
+    fade_len = max(1e-3, min(ctx.a_end - ctx.junction_a, b_intro_end - ctx.junction_b))
     pos = np.clip((times - ctx.junction_a) / fade_len, 0.0, 1.0)
     a_gain = np.where(times < ctx.junction_a, 1.0, np.cos(pos * math.pi / 2)).astype(np.float32)
     a_gain[times >= ctx.a_end] = 0.0
@@ -534,8 +541,7 @@ def preview_mix(ctx: TransitionContext, b_intro_end: float, length: str = "short
         b = signal.resample_poly(b, sr // g, ctx.b_sr // g, axis=0).astype(np.float32)
     b_start_t = ctx.junction_a - (ctx.junction_b - ctx.b_offset)  # set time of B's region start
     b_times = b_start_t + np.arange(len(b)) / sr
-    b_fade = max(1e-3, b_intro_end - ctx.junction_b)
-    b_pos = np.clip((b_times - ctx.junction_a) / b_fade, 0.0, 1.0)
+    b_pos = np.clip((b_times - ctx.junction_a) / fade_len, 0.0, 1.0)
     b_gain = np.where(b_times < ctx.junction_a, 0.0, np.sin(b_pos * math.pi / 2)).astype(np.float32)
     i0 = int(round((b_start_t - start_t) * sr))
     src0 = max(0, -i0)

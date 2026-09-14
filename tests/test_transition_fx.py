@@ -87,6 +87,12 @@ class TestFilters(unittest.TestCase):
         self.assertLess(rms_db(after), rms_db(before) - 20)
         self.assertAlmostEqual(rms_db(before), rms_db(a[int(0.5 * SR):int(1.5 * SR)]), delta=0.5)
 
+    def test_outgoing_filter_stops_a_beat_after_a_end(self):
+        a = sine(100, 8)
+        ctx = ctx_for(a, np.zeros_like(a))  # A audible until 6.0 s, one beat = 0.5 s
+        tfx.apply_effects(ctx, [dict(tfx.new_effect("filter"), kind="highpass", start_hz=20, end_hz=2000, beats=4)])
+        np.testing.assert_array_equal(ctx.a[int(6.5 * SR):], a[int(6.5 * SR):])
+
     def test_incoming_lowpass_opens_and_returns_dry(self):
         b = sine(5000, 10)
         ctx = ctx_for(np.zeros_like(b), b, intro_start=2.0)
@@ -124,6 +130,16 @@ class TestFreeze(unittest.TestCase):
         np.testing.assert_allclose(body[int(2.0 * SR) + guard:int(3.0 * SR) - guard],
                                    a[int(3.0 * SR) + guard:int(4.0 * SR) - guard], atol=1e-6)
         self.assertLess(float(np.max(np.abs(np.diff(ctx.a[:, 0])))), 0.05)
+
+    def test_only_one_freeze_per_transition(self):
+        a = sine(440, 8)
+        ctx = ctx_for(a, np.zeros((int(10 * SR), 2), dtype=np.float32))
+        freeze = tfx.new_effect("freeze")
+        with self.assertRaisesRegex(ValueError, "only one freeze per transition"):
+            tfx.apply_effects(ctx, [freeze, dict(freeze, capture_offset_beats=-4)])
+        np.testing.assert_array_equal(ctx.a, a)   # nothing applied
+        tfx.apply_effects(ctx, [freeze, dict(freeze, enabled=False)])   # a disabled second freeze is fine
+        self.assertAlmostEqual(ctx.a_end, 6.0, places=3)
 
     def test_fade_and_tail(self):
         a = sine(440, 8)
@@ -185,6 +201,19 @@ class TestEchoAndSample(unittest.TestCase):
         self.assertEqual(sr, SR)
         self.assertAlmostEqual(len(clip) / SR, (ctx.a_end + 4.0) - 0.0, delta=0.01)
         self.assertLessEqual(float(np.max(np.abs(clip))), 10 ** (-1 / 20) + 1e-3)
+
+    def test_preview_fades_b_over_the_transition_length(self):
+        # Mixxx "Full Intro + Outro": the transition lasts min(outro, intro); B is at full level after it
+        a = np.zeros((int(8 * SR), 2), dtype=np.float32)
+        b = sine(440, 40)
+        ctx = ctx_for(a, b)   # junction: A 4.0 s, B 2.0 s
+        tfx.apply_effects(ctx, [dict(tfx.new_effect("freeze"), steps=[{"beats": 2, "repeats": 1}])])   # 1 s
+        clip, sr = tfx.preview_mix(ctx, b_intro_end=ctx.junction_b + 20.0, length="short")
+        start_t = max(ctx.a_beat(-8), ctx.a_offset)
+
+        def window(t0, t1):
+            return clip[int((ctx.junction_a + t0 - start_t) * sr):int((ctx.junction_a + t1 - start_t) * sr)]
+        self.assertAlmostEqual(rms_db(window(1.2, 1.7)), rms_db(window(3.0, 3.5)), delta=1.0)
 
 
 class TestStacking(unittest.TestCase):
