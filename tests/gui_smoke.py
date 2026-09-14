@@ -209,6 +209,11 @@ def scenario():
         check("riser 120BPM.wav" in win.sample_current_label.cget("text"), "the current sample is shown")
         check(win.effects()[1].get("sample_bpm") == 120.0, "picking a sample reads its BPM from the file name")
         check("120 → 120 BPM" in win.sample_current_label.cget("text"), "the sample's tempo fit is shown")
+        check("repeats" in win._form_vars, "the sample effect has a Repeats field")
+        win._form_vars["repeats"].set("3")
+        check(win.effects()[1].get("repeats") == 3 and "×3" in win.fx_tree.item("F1", "values")[1],
+              "Repeats is stored and shown in the FX stack")
+        win._form_vars["repeats"].set("1")
         win.fx_tree.selection_set("F0")
         check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
         win.update_effect({"steps": [{"beats": 2, "repeats": 2}]}, rebuild_settings=True)

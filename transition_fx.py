@@ -28,6 +28,7 @@ BLOCK = 256
 EDGE_FADE_S = 0.005
 MAX_FREEZE_BEATS = 64
 MAX_SAMPLE_SECONDS = 30.0
+MAX_REPEATED_SAMPLE_SECONDS = 64.0
 MAX_ECHO_TAIL_BEATS = 16
 DEFAULT_BPM = 120.0
 MIN_GRID_BEATS = 8
@@ -99,7 +100,7 @@ _RANGES = {
     "echo": {"start_offset_beats": (-16, 0), "delay_beats": (0.25, 1), "feedback": (0, 0.85), "mix": (0, 1),
              "damping_hz": (1000, 20000)},
     "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000),
-               "sample_bpm": (40, 250)},
+               "sample_bpm": (40, 250), "repeats": (1, 16)},
 }
 _CHOICES = {
     "filter": {"side": ("outgoing", "incoming"), "kind": ("highpass", "lowpass", "bandpass"),
@@ -116,7 +117,7 @@ DEFAULTS = {
     "echo": {"enabled": True, "start_offset_beats": -4, "delay_beats": 0.5, "feedback": 0.5, "mix": 0.5,
              "damping_hz": 6000.0},
     "sample": {"enabled": True, "file": "", "anchor": "end_at_junction", "offset_beats": 0.0, "gain_db": -3.0,
-               "fade_in_ms": 5, "fade_out_ms": 5, "tempo": "varispeed", "sample_bpm": None},
+               "fade_in_ms": 5, "fade_out_ms": 5, "tempo": "varispeed", "sample_bpm": None, "repeats": 1},
 }
 
 
@@ -329,7 +330,8 @@ def fit_tempo(data: np.ndarray, sr: int, ratio: float, mode: str) -> np.ndarray:
         return np.stack([c[:n] for c in channels], axis=1).astype(np.float32)
     from fractions import Fraction
     step = Fraction(1.0 / float(ratio)).limit_denominator(1000)
-    return signal.resample_poly(data, step.numerator, step.denominator, axis=0).astype(np.float32)
+    # edge padding: zero padding would dip the first and last samples (an audible gap between repeats)
+    return signal.resample_poly(data, step.numerator, step.denominator, axis=0, padtype="edge").astype(np.float32)
 
 
 # ------------------------------------------------------------------ transition context
@@ -508,6 +510,14 @@ def _apply_sample(ctx: TransitionContext, fx: Dict) -> None:
     if problem:
         ctx.warnings.append(f"{os.path.basename(fx['file'])}: {problem}")
     data = fit_tempo(data, ctx.a_sr, ratio, fx.get("tempo", "varispeed"))
+    repeats = int(fx.get("repeats", 1))
+    if repeats > 1:  # back to back, the fades below apply to the whole run
+        fit = max(1, int(MAX_REPEATED_SAMPLE_SECONDS * ctx.a_sr // max(1, len(data))))
+        if fit < repeats:
+            ctx.warnings.append(f"{os.path.basename(fx['file'])}: {repeats} repeats would last more than "
+                                f"{MAX_REPEATED_SAMPLE_SECONDS:.0f} s, reduced to {fit}")
+            repeats = fit
+        data = np.tile(data, (repeats, 1))
     fade_in = float(fx.get("fade_in_ms", 5)) / 1000.0
     fade_out = float(fx.get("fade_out_ms", 5)) / 1000.0
     data = _fade(data, ctx.a_sr, fade_in, fade_out) * _db(float(fx.get("gain_db", -3.0)))

@@ -193,6 +193,7 @@ class TransitionContext:
 
 - **Lecture** : fichier lu avec soundfile, mono dupliqué en stéréo, rééchantillonné à `a_sr` si besoin. La durée maximale est de 30 s, au-delà le fichier est refusé avec un message.
 - **Tempo** (ajout du 2026-09-14) : réglages `tempo` (`varispeed` par défaut, `stretch`, `off`) et `sample_bpm` (40..250, sinon lu dans le nom du fichier, par exemple « 143BPM »). Le rapport tempo local de A autour de la jonction ÷ BPM du sample est appliqué par rééchantillonnage (la hauteur suit) ou par `librosa.effects.time_stretch` (hauteur conservée). Sans BPM connu, le sample est joué tel quel ; un rapport hors 0,5..2 est signalé et le sample est joué tel quel.
+- **Répétitions** (ajout du 2026-09-14) : réglage `repeats` (1..16, défaut 1). Le sample calé au tempo est répété bout à bout ; les fondus s'appliquent au début et à la fin de l'ensemble, l'ancre porte sur l'ensemble (avec `end_at_junction`, la dernière répétition finit sur la jonction). Au-delà de 64 s au total, le nombre de répétitions est réduit avec un avertissement.
 - **Placement** : il se fait dans le temps de A, puis la règle de débordement s'applique.
 
 ### Validation et erreurs

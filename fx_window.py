@@ -53,6 +53,7 @@ FIELDS = {
                ("gain_db", "Gain (dB)", "float", (-24, 6)),
                ("fade_in_ms", "Fade in (ms)", "int", (0, 2000)),
                ("fade_out_ms", "Fade out (ms)", "int", (0, 2000)),
+               ("repeats", "Repeats", "int", (1, 16)),
                ("tempo", "Tempo", "choice", ("varispeed", "stretch", "off")),
                ("sample_bpm", "Sample BPM", "float", (40, 250))],
 }
@@ -101,7 +102,9 @@ def effect_summary(fx: dict) -> str:
         return f"Echo {float(fx.get('delay_beats', 0)):g} beat, feedback {float(fx.get('feedback', 0)):.2f}"
     if t == "sample":
         name = os.path.basename(fx.get("file") or "") or "(choose a sample)"
-        return f"Sample {name} ({fx.get('anchor')}, tempo {fx.get('tempo', 'varispeed')})"
+        repeats = int(fx.get("repeats", 1))
+        return (f"Sample {name}{f' ×{repeats}' if repeats > 1 else ''} "
+                f"({fx.get('anchor')}, tempo {fx.get('tempo', 'varispeed')})")
     return str(t)
 
 

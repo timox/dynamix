@@ -50,7 +50,8 @@ python gui.py
   opening the incoming one), **Echo** (tempo-synced) and **Sample** (from the
   FX samples folder — click to use, double-click to hear; its BPM is read from
   the file name and the sample is fitted to the track's tempo by *varispeed*
-  or *stretch*, or played as it is with *off* —, anchored to end at, start at
+  or *stretch*, or played as it is with *off*; **Repeats** plays a short
+  sample several times back to back, up to 64 s —, anchored to end at, start at
   or centre on the junction; it
   may run over into the next track). **▶ Preview (loop)** plays the transition
   in a loop and re-renders it when a setting changes; **Nudge (ms)** shifts the

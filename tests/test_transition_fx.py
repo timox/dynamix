@@ -319,6 +319,30 @@ class TestSampleTempo(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_sample_repeats(self):
+        tmp = tempfile.mkdtemp(prefix="dynamix_fx_")
+        try:
+            loop = os.path.join(tmp, "loop 240BPM.wav")   # 2 s once fitted to 120 BPM
+            sf.write(loop, np.full(SR, 0.5, dtype="float32"), SR)
+            base = dict(tfx.new_effect("sample"), file=loop, anchor="end_at_junction", gain_db=0.0,
+                        fade_in_ms=0, fade_out_ms=0)
+            self.assertEqual(base["repeats"], 1)
+            ctx = ctx_for(np.zeros((int(8 * SR), 2), dtype=np.float32), np.zeros((int(10 * SR), 2), dtype=np.float32))
+            tfx.apply_effects(ctx, [dict(base, repeats=2)])
+            active = np.nonzero(np.abs(ctx.a[:, 0]) > 0.25)[0]
+            self.assertAlmostEqual(active[0] / SR, 0.0, delta=0.02)      # the last repeat ends on the junction
+            self.assertAlmostEqual((active[-1] + 1) / SR, 4.0, delta=0.02)
+            self.assertEqual(len(active), active[-1] - active[0] + 1)    # no gap between the repeats
+            self.assertTrue(any("repeats" in p for p in tfx.validate_effect(dict(base, repeats=17))))
+
+            long_loop = os.path.join(tmp, "long.wav")                    # no BPM: 5 s as it is, 16 x 5 > 64 s
+            sf.write(long_loop, np.full(5 * SR, 0.5, dtype="float32"), SR)
+            ctx = ctx_for(np.zeros((int(8 * SR), 2), dtype=np.float32), np.zeros((int(10 * SR), 2), dtype=np.float32))
+            tfx.apply_effects(ctx, [dict(base, file=long_loop, repeats=16)])
+            self.assertTrue(any("reduced to 12" in w for w in ctx.warnings))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
