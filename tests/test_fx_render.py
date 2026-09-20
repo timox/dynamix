@@ -163,5 +163,64 @@ class TestRenderSet(unittest.TestCase):
         self.assertAlmostEqual(beats[1], 0.5)
 
 
+class TestFilterWithoutReturn(unittest.TestCase):
+    """A filter that is never turned back must reach the end of B, not stop where the working region does."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="dynamix_fxnr_")
+        os.environ["DYNAMIX_HOME"] = os.path.join(self.tmp, "home")
+        analysis_store.reset_store()
+        self.sr = 8000
+        self.lib = os.path.join(self.tmp, "Mixes")
+        os.makedirs(self.lib)
+        self.paths = []
+        for k, seconds in enumerate((20.0, 150.0)):          # B is longer than the 120 s working region
+            t = np.arange(int(seconds * self.sr)) / self.sr
+            path = os.path.join(self.lib, f"n{k}.wav")
+            sf.write(path, (0.3 * np.sin(2 * np.pi * 80 * t)).astype("float32"), self.sr)
+            self.paths.append(path)
+        self.grids = {p: {"beats": [i * 0.5 for i in range(320)], "bpm": 120.0, "has_beat": True, "duration": 150.0}
+                      for p in self.paths}
+        self.profiles = [{"file_path": p, "filename": os.path.basename(p), "duration": d, "bpm": 120.0,
+                          "intro_start": 1.0, "intro_end": 3.0, "outro_start": d - 4.0, "outro_end": d - 2.0}
+                         for p, d in zip(self.paths, (20.0, 150.0))]
+
+    def tearDown(self):
+        os.environ.pop("DYNAMIX_HOME", None)
+        analysis_store.reset_store()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_region_covers_the_whole_track_only_when_needed(self):
+        from fx_render import _b_region_seconds
+        held = dict(tfx.new_effect("filter"), side="incoming", release_beats=tfx.NO_RELEASE)
+        self.assertEqual(_b_region_seconds([held], 150.0), 150.0)
+        self.assertEqual(_b_region_seconds([dict(held, side="across")], 150.0), 150.0)
+        self.assertEqual(_b_region_seconds([dict(held, side="outgoing")], 150.0), tfx.B_REGION_S)
+        self.assertEqual(_b_region_seconds([dict(held, release_beats=1)], 150.0), tfx.B_REGION_S)
+        self.assertEqual(_b_region_seconds([tfx.new_effect("echo")], 150.0), tfx.B_REGION_S)
+        self.assertEqual(_b_region_seconds([], 150.0), tfx.B_REGION_S)
+
+    def test_b_stays_filtered_to_the_end_of_the_copy(self):
+        from fx_render import render_set
+        from mastering import load_audio
+        fx = {(self.paths[0], self.paths[1]): {"nudge_ms": 0, "effects": [
+            dict(tfx.new_effect("filter"), side="incoming", kind="highpass", start_hz=20, end_hz=2000, beats=4,
+                 release_beats=tfx.NO_RELEASE)]}}
+        out_dir = os.path.join(self.tmp, "fx")
+        results, problems = render_set(self.profiles, lambda a, b: fx.get((a, b)), {}, out_dir, grids=self.grids)
+        self.assertEqual(problems, [])
+        copy = next(r["output"] for r in results if r["source"] == self.paths[1])
+        audio, sr = load_audio(copy)
+        audio = tfx.to_stereo(audio)
+
+        def level(t):
+            seg = audio[int(t * sr):int((t + 1.0) * sr)]
+            return 20 * np.log10(np.sqrt(np.mean(np.square(seg))) + 1e-12)
+
+        self.assertLess(level(10.0), level(0.5) - 20)            # inside the old working region: filtered
+        self.assertLess(level(140.0), level(0.5) - 20)           # far beyond it: still filtered, no step back
+        self.assertLess(abs(level(118.0) - level(122.0)), 3.0)   # and nothing jumps where the region used to end
+
+
 if __name__ == "__main__":
     unittest.main()

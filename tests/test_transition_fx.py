@@ -79,6 +79,8 @@ class TestGridAndValidation(unittest.TestCase):
         self.assertTrue(any("longer than 64" in p for p in tfx.validate_effect(long_freeze)))
         self.assertTrue(any("file not found" in p for p in tfx.validate_effect(tfx.new_effect("sample"))))
         self.assertEqual(tfx.validate_effect({"type": "reverb"}), ["Unknown FX type: 'reverb'"])
+        self.assertEqual(tfx.validate_effect(dict(tfx.new_effect("filter"), release_beats="none")), [])
+        self.assertTrue(any("release_beats" in p for p in tfx.validate_effect(dict(tfx.new_effect("filter"), release_beats="never"))))
         with self.assertRaises(ValueError):
             tfx.apply_effects(ctx_for(sine(100, 8), sine(100, 8)), [bad])
 
@@ -120,6 +122,29 @@ class TestFilters(unittest.TestCase):
         dry = ctx.b[ctx.b_index(6.5):ctx.b_index(7.5)]
         self.assertLess(rms_db(still), rms_db(dry) - 3)
         self.assertAlmostEqual(rms_db(dry), rms_db(b[int(6.5 * SR):int(7.5 * SR)]), delta=0.5)
+
+    def test_incoming_filter_can_stay_filtered(self):
+        """release_beats='none': B never comes back to the dry track (what outgoing already does)."""
+        b = sine(5000, 10)
+        ctx = ctx_for(np.zeros_like(b), b, intro_start=2.0)
+        fx = dict(tfx.new_effect("filter"), side="incoming", kind="lowpass", start_hz=200, end_hz=200, beats=4,
+                  release_beats="none")
+        tfx.apply_effects(ctx, [fx])
+        for t in (4.2, 6.5, 9.0):                                  # sweep ends at 4.0 s: still closed long after
+            still = ctx.b[ctx.b_index(t):ctx.b_index(t + 0.3)]
+            self.assertLess(rms_db(still), rms_db(b[int(t * SR):int((t + 0.3) * SR)]) - 20, msg=f"at {t} s")
+
+    def test_across_filter_can_stay_filtered(self):
+        """release_beats='none' on across: A and B both stay filtered to the end of the transition."""
+        a, b = sine(100, 12), sine(100, 12)
+        ctx = ctx_for(a, b, outro_start=4.0, outro_end=8.0, intro_start=2.0)
+        fx = dict(tfx.new_effect("filter"), side="across", kind="highpass", start_hz=20, end_hz=2000, beats=4,
+                  start_offset_beats=-2, release_beats="none")     # sweep 3.0 -> 5.0 s, no return
+        tfx.apply_effects(ctx, [fx])
+        for t in (5.2, 6.0, 7.5):
+            self.assertLess(rms_db(ctx.a[ctx.a_index(t):ctx.a_index(t + 0.2)]), rms_db(a[:SR]) - 20, msg=f"A at {t} s")
+            self.assertLess(rms_db(ctx.b[ctx.b_index(t - 2.0):ctx.b_index(t - 1.8)]), rms_db(b[:SR]) - 20,
+                            msg=f"B at {t} s")
 
     def test_across_filter_is_the_same_on_both_tracks_at_the_same_moment(self):
         a, b = sine(100, 12), sine(100, 12)
@@ -393,6 +418,22 @@ class TestSampleTempo(unittest.TestCase):
             self.assertTrue(any("reduced to 12" in w for w in ctx.warnings))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestEffectScope(unittest.TestCase):
+    """Which track of the junction an effect of the stack writes to (shown in the FX list)."""
+
+    def test_scope_of_every_type(self):
+        self.assertEqual(tfx.effect_scope(tfx.new_effect("freeze")), "A")
+        self.assertEqual(tfx.effect_scope(tfx.new_effect("echo")), "A")
+        self.assertEqual(tfx.effect_scope(tfx.new_effect("sample")), "layer")
+        for side, scope in (("outgoing", "A"), ("incoming", "B"), ("across", "A+B")):
+            self.assertEqual(tfx.effect_scope(dict(tfx.new_effect("filter"), side=side)), scope)
+        for side, scope in (("outgoing", "A"), ("incoming", "B")):
+            self.assertEqual(tfx.effect_scope(dict(tfx.new_effect("scratch"), side=side)), scope)
+
+    def test_unknown_type_has_no_scope(self):
+        self.assertEqual(tfx.effect_scope({"type": "reverb"}), "")
 
 
 if __name__ == "__main__":

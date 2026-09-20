@@ -220,6 +220,15 @@ class MixxxExporter:
         return playlist_id
 
 
+COPY_DIRNAMES = ("premaster", "fx")
+
+
+def copy_folders(paths: List[str]) -> List[str]:
+    """The DynaMix copy folders (premaster/, fx/) among these paths, each named once."""
+    return sorted({os.path.dirname(p) for p in paths
+                   if os.path.basename(os.path.dirname(p)).lower() in COPY_DIRNAMES})
+
+
 def format_report(report: Dict) -> str:
     """The export report, in the interface language (English for the command line)."""
     lines = []
@@ -234,6 +243,12 @@ def format_report(report: Dict) -> str:
                         count=len(report['missing'])))
         for path in report["missing"]:
             lines.append(f"  - {path}")
+        folders = copy_folders(report["missing"])
+        if folders:
+            lines.append(tr("Those are the pre-mastered / FX copies DynaMix wrote: Mixxx only plays what is in its "
+                            "library, so add the project folder in Mixxx (Preferences > Library > Add), rescan, "
+                            "then export again. These folders are missing:"))
+            lines += [f"  {folder}" for folder in folders]
     if not report["dry_run"]:
         lines.append(tr("Intro/outro cues written: {count}", count=report['cues_written']))
         if report["playlist_id"] is not None:
@@ -366,6 +381,10 @@ def main():
 
     profiles = list(planner.profiles)
     if project is not None and not args.originals:
+        pending = project.fx_pending()
+        if pending:
+            print(f"Warning: {pending} transitions have FX that are not rendered and will be ignored. "
+                  f"Apply them in the GUI (FX tab, 'Apply all FX') first.")
         profiles, counts = project.rendered_profiles(profiles)
         if counts["fx"] or counts["premaster"]:
             print(f"Using {counts['fx']} FX copies and {counts['premaster']} pre-mastered copies "

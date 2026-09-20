@@ -226,8 +226,9 @@ def scenario():
         check("120 → 120 BPM" in win.sample_current_label.cget("text"), "the sample's tempo fit is shown")
         check("repeats" in win._form_vars, "the sample effect has a Repeats field")
         win._form_vars["repeats"].set("3")
-        check(win.effects()[1].get("repeats") == 3 and "×3" in win.fx_tree.item("F1", "values")[1],
+        check(win.effects()[1].get("repeats") == 3 and "×3" in win.fx_tree.item("F1", "values")[2],
               "Repeats is stored and shown in the FX stack")
+        check(win.fx_tree.item("F1", "values")[1] == "layer", "the FX stack says a sample is a layer")
         win._form_vars["repeats"].set("1")
         win.fx_tree.selection_set("F0")
         check(pump(lambda: win.fx_index == 0, 2.0), "an effect can be selected")
@@ -290,8 +291,10 @@ def scenario():
         win._form_vars["sequence"].set("d81b0 u42b1")
         check(win.effects()[-1]["sequence"] == "d81b0 u42b1" and "catch-up ×" in win.scratch_info.cget("text"),
               f"the scratch settings show the catch-up, got {win.scratch_info.cget('text')!r}")
-        check("Scratch d81b0 u42b1" in win.fx_tree.item(f"F{len(win.effects()) - 1}", "values")[1],
+        last = f"F{len(win.effects()) - 1}"
+        check("Scratch d81b0 u42b1" in win.fx_tree.item(last, "values")[2],
               "the FX stack summarises the scratch")
+        check(win.fx_tree.item(last, "values")[1] == "A", "the FX stack says which track an effect writes to")
         field, _ = win._text_fields["sequence"]
         check(field.winfo_class() == "Text" and field.get("1.0", "end-1c") == "d81b0 u42b1",
               "the sequence field is a multi-line text showing the applied sequence")
@@ -331,6 +334,13 @@ def scenario():
         check(win.effects()[-1]["side"] == "across" and win.effects()[-1]["kind"] == "bandpass"
               and "width" in " ".join(t.get_text() for t in win._filter_figure.axes[0].texts),
               "a filter can sweep across the junction and its response follows the settings")
+        check(win.fx_tree.item(f"F{len(win.effects()) - 1}", "values")[1] == "A+B",
+              "an across filter is shown as writing to both tracks")
+        win._form_vars["release_beats"].set("no return (stays filtered)")
+        check(win.effects()[-1]["release_beats"] == "none",
+              f"'no return' is stored, got {win.effects()[-1]['release_beats']!r}")
+        win._form_vars["release_beats"].set("2")
+        check(win.effects()[-1]["release_beats"] == 2, "a return in beats is stored back")
         win.remove_effect()
         check(app.set_notebook.select() == str(app.fx_tab), "Transition FX opens the FX tab")
         win.start_preview()

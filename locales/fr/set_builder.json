@@ -283,5 +283,9 @@
   "originals {n}": "originaux {n}",
   "Audio used: {parts} (of {total} tracks)": "Audio utilisé : {parts} (sur {total} morceaux)",
   " - pre-mastered copies not used": " - copies pre-master non utilisées",
-  " - no pre-master yet": " - pas encore de pre-master"
+  " - no pre-master yet": " - pas encore de pre-master",
+  "{count} transition(s) have FX that are not rendered: this playlist will ignore them.\n\nGo back to the FX tab and click 'Apply all FX' first.\n\nWrite it anyway?": "{count} transition(s) ont des FX qui ne sont pas rendus : cette playlist les ignorera.\n\nRetourne dans l'onglet FX et clique d'abord sur « Appliquer tous les FX ».\n\nL'écrire quand même ?",
+  "{count} file(s) are not on disk and a player will skip them:": "{count} fichier(s) ne sont pas sur le disque et un lecteur les sautera :",
+  "Playlist saved: {count} tracks{note}, but {missing} file(s) are not on disk (see the Log) -> {file}": "Playlist enregistrée : {count} morceaux{note}, mais {missing} fichier(s) ne sont pas sur le disque (voir le Journal) -> {file}",
+  " - FX not rendered on {n} transition(s): click 'Apply all FX'": " - FX non rendus sur {n} transition(s) : clique sur « Appliquer tous les FX »"
 }

@@ -38,6 +38,18 @@ def _beats_for(profile: Dict, grids: Optional[Dict[str, Dict]], duration: float)
                             profile.get("filename") or os.path.basename(path))
 
 
+def _b_region_seconds(effects: Sequence[Dict], b_duration: float) -> float:
+    """
+    How much of B the effects work on. A filter on B that is never turned back must reach the end of the
+    track: stopping at the usual region would leave a step back to the dry track where it ends.
+    """
+    for fx in effects:
+        if (fx.get("type") == "filter" and fx.get("side") in ("incoming", "across")
+                and tfx.release_beats(fx) is None):
+            return float(b_duration)
+    return tfx.B_REGION_S
+
+
 def _cues(profile: Dict) -> Dict[str, float]:
     duration = float(profile.get("duration") or 0.0)
     return {"intro_start": float(profile.get("intro_start", 0.0)), "intro_end": float(profile.get("intro_end", 0.0)),
@@ -121,12 +133,14 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
         if not (usable_a and usable_b):
             problems.append(N_("transition {n}: skipped (a track cannot be read)").format(n=a + 1))
             continue
+        effects = _active(entry["effects"])
         ctx = tfx.make_context(audio[a], rates[a], beats[a], cues[a]["outro_start"], cues[a]["outro_end"],
-                               audio[b], rates[b], beats[b], cues[b]["intro_start"], entry.get("nudge_ms", 0.0))
+                               audio[b], rates[b], beats[b], cues[b]["intro_start"], entry.get("nudge_ms", 0.0),
+                               b_region_s=_b_region_seconds(effects, len(audio[b]) / rates[b]))
         b_start = int(round(ctx.b_offset * rates[b]))
         b_len = len(ctx.b)
         try:
-            tfx.apply_effects(ctx, _active(entry["effects"]))
+            tfx.apply_effects(ctx, effects)
         except Exception as exc:
             problems.append(N_("transition {n}: {problem}").format(n=a + 1, problem=exc))
             continue

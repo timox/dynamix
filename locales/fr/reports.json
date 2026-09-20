@@ -35,5 +35,6 @@
   "no time left to catch up: the sequence ends {seconds:+.2f} s away from the track": "plus de temps pour rattraper : la séquence finit à {seconds:+.2f} s du morceau",
   "scratch: its beats are outside the audio of the transition": "scratch : ses temps sont hors de l'audio de la transition",
   "command '{command}': expected 5 characters like d81b0 (d or u, factor 0-F, seconds 1-F, b, 0 or 1)": "commande « {command} » : 5 caractères attendus comme d81b0 (d ou u, facteur 0-F, secondes 1-F, b, 0 ou 1)",
-  "command '{command}': the duration must be 1 to F seconds": "commande « {command} » : la durée doit aller de 1 à F secondes"
+  "command '{command}': the duration must be 1 to F seconds": "commande « {command} » : la durée doit aller de 1 à F secondes",
+  "Those are the pre-mastered / FX copies DynaMix wrote: Mixxx only plays what is in its library, so add the project folder in Mixxx (Preferences > Library > Add), rescan, then export again. These folders are missing:": "Ce sont les copies pre-master / FX écrites par DynaMix : Mixxx ne joue que ce qui est dans sa bibliothèque, donc ajoute le dossier du projet dans Mixxx (Préférences > Bibliothèque > Ajouter), relance un scan, puis réexporte. Ces dossiers manquent :"
 }

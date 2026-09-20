@@ -1361,6 +1361,15 @@ class SetBuilderMixin:
         elif self.fx_panel is not None and self.fx_panel._previewing:
             self.fx_panel.stop_preview()
     
+    def _confirm_pending_fx(self, title):
+        """Warn before writing a playlist that would ignore FX set but never rendered; False to stop."""
+        pending = self.project.fx_pending() if self.project is not None else 0
+        if not pending:
+            return True
+        return messagebox.askyesno(title, tr(
+            "{count} transition(s) have FX that are not rendered: this playlist will ignore them.\n\n"
+            "Go back to the FX tab and click 'Apply all FX' first.\n\nWrite it anyway?", count=pending))
+
     def create_playlist_from_directory(self):
         """Write the set list (or the library order) as an M3U into exports/."""
         if not self._require_project():
@@ -1370,6 +1379,8 @@ class SetBuilderMixin:
         if not tracks:
             messagebox.showwarning(tr("Warning"), tr("Nothing to write: analyze the tracks and build a set list first"))
             return
+        if not self._confirm_pending_fx(tr("Create Playlist")):
+            return
         tracks, counts = self._with_rendered(tracks)
         filename = filedialog.asksaveasfilename(
             title=tr("Save Playlist"), initialdir=self.project.exports_dir, initialfile=f"{self.project.name}.m3u",
@@ -1378,17 +1389,28 @@ class SetBuilderMixin:
         if not filename:
             return
         try:
-            ExportTools.export_to_m3u(tracks, filename)
+            missing = ExportTools.export_to_m3u(tracks, filename)
         except Exception as e:
             self._report_error(tr("Playlist creation failed: {error}", error=e), e)
             return
         self.project.mark("playlist", file=os.path.basename(filename), count=len(tracks))
         self._save_project()
         note = f" ({self._copies_note(counts, translate=True)})" if counts["fx"] or counts["premaster"] else ""
+        missing_text = ""
+        if missing:
+            missing_text = "\n" + tr("{count} file(s) are not on disk and a player will skip them:", count=len(missing)) \
+                           + "\n" + "\n".join(f"    {p}" for p in missing)
+            log.warning("Playlist: %d entries are not on disk: %s", len(missing), ", ".join(missing))
         self.add_report(tr("Playlist"), tr("{count} tracks written to {file}", count=len(tracks), file=filename)
-                        + f"\n{self.project.audio_used_text(translate=tr)}\n\n"
+                        + f"\n{self.project.audio_used_text(translate=tr)}{missing_text}\n\n"
                         + "\n".join(f"{i:2d}. {t.get('filename', '')}" for i, t in enumerate(tracks, 1)))
-        self.update_status(tr("Playlist saved: {count} tracks{note} -> {file}", count=len(tracks), note=note, file=filename))
+        if missing:
+            self.update_status(tr("Playlist saved: {count} tracks{note}, but {missing} file(s) are not on disk "
+                                  "(see the Log) -> {file}", count=len(tracks), note=note, missing=len(missing),
+                                  file=filename))
+        else:
+            self.update_status(tr("Playlist saved: {count} tracks{note} -> {file}", count=len(tracks), note=note,
+                                  file=filename))
     
     def export_to_mixxx(self):
         if not self._require_project():
@@ -1396,6 +1418,8 @@ class SetBuilderMixin:
         planner = self.transition_planner
         if planner is None or not planner.profiles:
             messagebox.showwarning(tr("Warning"), tr("Plan the transitions first (step 3)"))
+            return
+        if not self._confirm_pending_fx(tr("Export to Mixxx")):
             return
         db_path = self.config.mixxx_db_path()
         if not db_path:

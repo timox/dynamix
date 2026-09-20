@@ -51,7 +51,7 @@ FIELDS = {
                ("beats", "Length (beats)", "choice", (2, 4, 8, 16)),
                ("curve", "Curve", "choice", ("exponential", "linear")),
                ("start_offset_beats", "Start (beats)", "int", (-16, 8)),
-               ("release_beats", "Return to dry (beats)", "choice", (0, 0.5, 1, 2, 4, 8))],
+               ("release_beats", "Return to dry (beats)", "choice", (tfx.NO_RELEASE, 0, 0.5, 1, 2, 4, 8))],
     "echo": [("start_offset_beats", "Start (beats)", "int", (-16, 0)),
              ("delay_beats", "Delay (beats)", "choice", (0.25, 0.5, 0.75, 1)),
              ("feedback", "Feedback", "float", (0, 0.85)),
@@ -72,6 +72,22 @@ FIELDS["scratch"] = [("sequence", "Sequence", "text", None),
                      ("side", "Side", "choice", ("outgoing", "incoming")),
                      ("ramp", "Ramp", "choice", ("exponential", "linear")),
                      ("gain_db", "Gain (dB)", "float", (-24, 6))]
+# choices shown with a word instead of their stored value
+CHOICE_LABELS = {"release_beats": {tfx.NO_RELEASE: "no return (stays filtered)"}}
+# scopes of transition_fx.effect_scope that are a word rather than a track name (A, B and A+B read the same anywhere)
+SCOPE_LABELS = {"layer": "layer"}
+
+
+def choice_label(key, value):
+    """What a choice field shows for a stored value (translated where the value is a word, e.g. 'no return')."""
+    if value is None:
+        return ""
+    label = CHOICE_LABELS.get(key, {}).get(value)
+    if label is not None:
+        return tr(label)
+    return f"{value:g}" if isinstance(value, float) else str(value)
+
+
 LOOP_FILTER_KEYS_OFF = ("side", "beats", "start_offset_beats", "release_beats")  # a loop filter sweeps over the freeze
 LOOP_FILTER_FIELDS = [f for f in FIELDS["filter"] if f[0] not in LOOP_FILTER_KEYS_OFF]
 LOOP_ECHO_FIELDS = [f for f in FIELDS["echo"] if f[0] != "start_offset_beats"]
@@ -295,13 +311,19 @@ class TransitionFxPanel(ttk.Frame):
         mid = ttk.Frame(panes)
         panes.add(mid, weight=1)
         ttk.Label(mid, text=tr("FX stack (top to bottom)"), foreground=MUTED).pack(anchor="w")
-        self.fx_tree = ttk.Treeview(mid, columns=("On", "Effect"), show="headings", height=12, selectmode="browse")
+        self.fx_tree = ttk.Treeview(mid, columns=("On", "Scope", "Effect"), show="headings", height=12, selectmode="browse")
         self.fx_tree.heading("On", text=tr("On"))
+        self.fx_tree.heading("Scope", text=tr("On track"))
         self.fx_tree.heading("Effect", text=tr("Effect"))
         self.fx_tree.column("On", width=35, anchor="center", stretch=False)
+        self.fx_tree.column("Scope", width=55, anchor="center", stretch=False)
         self.fx_tree.column("Effect", width=300, anchor="w")
         self.fx_tree.pack(fill=tk.BOTH, expand=True)
         self.fx_tree.bind("<<TreeviewSelect>>", lambda e: self.on_fx_selected())
+        ttk.Label(mid, text=tr("The effects are applied from top to bottom, each one on what the ones above it left "
+                               "(an echo under a filter echoes the filtered sound). 'On track' is the side of the "
+                               "junction an effect writes to; a layer is mixed over the result."),
+                  foreground=MUTED, wraplength=320).pack(anchor="w", pady=(4, 0))
         buttons = ttk.Frame(mid)
         buttons.pack(fill=tk.X, pady=4)
         add = ttk.Menubutton(buttons, text=tr("Add ▾"))
@@ -532,7 +554,11 @@ class TransitionFxPanel(ttk.Frame):
         if self.pair_index is None:
             return
         for i, fx in enumerate(self.effects()):
-            self.fx_tree.insert("", tk.END, iid=f"F{i}", values=("✓" if fx.get("enabled", True) else "", effect_summary(fx)))
+            scope = tfx.effect_scope(fx)
+            self.fx_tree.insert("", tk.END, iid=f"F{i}",
+                                values=("✓" if fx.get("enabled", True) else "",
+                                        tr(SCOPE_LABELS[scope]) if scope in SCOPE_LABELS else scope,
+                                        effect_summary(fx)))
         if self.fx_index is not None and f"F{self.fx_index}" in self.fx_tree.get_children():
             self.fx_tree.selection_set(f"F{self.fx_index}")
 
@@ -623,7 +649,8 @@ class TransitionFxPanel(ttk.Frame):
         ttk.Label(box, text=tr("Side: outgoing filters the end of A up to the junction, incoming the start of B from the "
                                "junction, across one sweep over both tracks from Start (beats from the junction). "
                                "Return to dry: how long B (and A with across) takes to sound normal again after the "
-                               "sweep. Below, what the filter lets through at the start and at the end of the sweep: bass "
+                               "sweep; 'no return' keeps the filter on the rest of the track, as outgoing already does "
+                               "on A. Below, what the filter lets through at the start and at the end of the sweep: bass "
                                "on the left, treble on the right; the resonance is the bump at the cutoff, the band width "
                                "(band-pass only) is the width of the bell."),
                   foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", padx=4, pady=2)
@@ -895,12 +922,16 @@ class TransitionFxPanel(ttk.Frame):
         for row, (key, label, kind, spec) in enumerate(fields):
             ttk.Label(parent, text=tr(label)).grid(row=row, column=0, sticky="w", pady=2)
             value = values.get(key)
-            var = tk.StringVar(value="" if value is None else (f"{value:g}" if isinstance(value, float) else str(value)))
             if kind == "choice":
-                widget = ttk.Combobox(parent, textvariable=var, values=[str(c) for c in spec], width=18, state="readonly")
+                var = tk.StringVar(value=choice_label(key, value))
+                widget = ttk.Combobox(parent, textvariable=var, values=[choice_label(key, c) for c in spec],
+                                      width=24, state="readonly")
             elif kind == "text":
+                var = tk.StringVar(value="" if value is None else str(value))
                 widget = self._text_field(parent, key, var)
             else:
+                var = tk.StringVar(value="" if value is None else
+                                   (f"{value:g}" if isinstance(value, float) else str(value)))
                 lo, hi = spec
                 step = 1 if kind == "int" else (0.05 if hi <= 1 else (0.1 if hi <= 20 else (1 if hi <= 300 else 10)))
                 widget = ttk.Spinbox(parent, from_=lo, to=hi, increment=step, textvariable=var, width=10)
@@ -916,7 +947,7 @@ class TransitionFxPanel(ttk.Frame):
         if kind == "text":
             value = text  # stored as typed: an unreadable sequence is reported, never lost
         elif kind == "choice":
-            value = next((c for c in spec if str(c) == text), None)
+            value = next((c for c in spec if choice_label(key, c) == text), None)
             if value is None:
                 return
         else:

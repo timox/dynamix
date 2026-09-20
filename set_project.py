@@ -428,6 +428,17 @@ class SetProject:
         self.invalidate_from("premaster")
         return True
 
+    def fx_pending(self) -> int:
+        """
+        Transitions of the set list whose active FX are not in the rendered copies: 'Apply all FX' was never
+        run, or a later change dropped the render. The playlist and the Mixxx export ignore those FX.
+        """
+        pairs = self.active_fx_pairs()
+        if not pairs:
+            return 0
+        rendered = self.fx_map()
+        return sum(1 for a, b in pairs if a not in rendered or b not in rendered)
+
     def audio_sources(self) -> Dict:
         """What the set plays: counts of FX copies, pre-mastered copies and originals for the set list."""
         tracks = self.set_list_tracks() or self.tracks
@@ -435,7 +446,8 @@ class SetProject:
         return {"total": len(tracks), "fx": counts["fx"], "premaster": counts["premaster"],
                 "original": len(tracks) - counts["fx"] - counts["premaster"],
                 "premaster_ready": bool(self._premaster_outputs()),
-                "use_premaster": bool(self.options.get("use_premaster", True))}
+                "use_premaster": bool(self.options.get("use_premaster", True)),
+                "fx_pending": self.fx_pending()}
 
     def audio_used_text(self, translate=None) -> str:
         """One line saying which audio the FX, the playlist and the Mixxx export use (translate: i18n.tr for the GUI)."""
@@ -450,6 +462,8 @@ class SetProject:
             text += t(" - pre-mastered copies not used")
         elif not s["premaster_ready"]:
             text += t(" - no pre-master yet")
+        if s["fx_pending"]:
+            text += t(" - FX not rendered on {n} transition(s): click 'Apply all FX'", n=s["fx_pending"])
         return text
 
     # ------------------------------------------------------------- transition FX

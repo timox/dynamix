@@ -98,6 +98,32 @@ class TestSetProjectFx(unittest.TestCase):
         self.assertFalse(self.p.is_done("playlist"))
         self.assertFalse(self.p.is_done("mixxx"))
 
+    def test_fx_pending_counts_active_fx_without_a_copy(self):
+        """The playlist and the Mixxx export silently ignore FX that were never rendered: they must be counted."""
+        self.assertEqual(self.p.fx_pending(), 0)
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        self.p.set_fx_effects(self.b, self.c, [self.freeze])
+        self.assertEqual(self.p.fx_pending(), 2)                 # set in the FX tab, never rendered
+        os.makedirs(self.p.fx_dir, exist_ok=True)
+        a_copy, b_copy = os.path.join(self.p.fx_dir, "a.wav"), os.path.join(self.p.fx_dir, "b.wav")
+        for path in (a_copy, b_copy):
+            open(path, "wb").close()
+        self.p.set_fx_render([{"source": self.a, "output": a_copy}, {"source": self.b, "output": b_copy}])
+        self.assertEqual(self.p.fx_pending(), 1)                 # a -> b rendered, b -> c still missing C's copy
+        c_copy = os.path.join(self.p.fx_dir, "c.wav")
+        open(c_copy, "wb").close()
+        self.p.set_fx_render([{"source": x, "output": y} for x, y in ((self.a, a_copy), (self.b, b_copy), (self.c, c_copy))])
+        self.assertEqual(self.p.fx_pending(), 0)
+        os.remove(c_copy)                                        # a copy deleted behind our back
+        self.assertEqual(self.p.fx_pending(), 1)
+
+    def test_audio_used_text_names_the_unrendered_fx(self):
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        text = self.p.audio_used_text()
+        self.assertIn("originals 3", text)
+        self.assertIn("1 transition", text)
+        self.assertIn("not rendered", text)
+
     def test_fx_map_and_rendered_profiles(self):
         os.makedirs(self.p.fx_dir)
         os.makedirs(self.p.premaster_dir, exist_ok=True)

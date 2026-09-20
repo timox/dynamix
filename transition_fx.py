@@ -105,6 +105,15 @@ def usable_beats(grid: Dict, fallback_bpm: float, duration: float, name: str = "
 
 
 # ------------------------------------------------------------------ validation
+NO_RELEASE = "none"  # 'Return to dry' of a filter: never turned back, it holds until the track stops
+
+
+def release_beats(fx: Dict) -> Optional[float]:
+    """The 'Return to dry' setting of a filter in beats, or None when the filter is never turned back."""
+    value = fx.get("release_beats", 1)
+    return None if value == NO_RELEASE else float(value)
+
+
 _RANGES = {
     "freeze": {"capture_offset_beats": (-16, 0), "fade_db": (-60, 0), "tail_beats": (0, 8), "gain_db": (-24, 6)},
     "filter": {"start_hz": (20, 20000), "end_hz": (20, 20000), "width_octaves": (0.3, 4), "resonance": (0.7, 12),
@@ -117,7 +126,8 @@ _RANGES = {
 }
 _CHOICES = {
     "filter": {"side": ("outgoing", "incoming", "across"), "kind": ("highpass", "lowpass", "bandpass"),
-               "curve": ("exponential", "linear"), "beats": (2, 4, 8, 16), "release_beats": (0, 0.5, 1, 2, 4, 8)},
+               "curve": ("exponential", "linear"), "beats": (2, 4, 8, 16),
+               "release_beats": (NO_RELEASE, 0, 0.5, 1, 2, 4, 8)},
     "echo": {"delay_beats": (0.25, 0.5, 0.75, 1)},
     "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction"),
                "tempo": ("varispeed", "stretch", "off")},
@@ -416,9 +426,14 @@ class TransitionContext:
         return beat_time(self.b_beats, j, offset_beats) + (self.junction_b - float(self.b_beats[j]))
 
 
+A_REGION_S = 45.0   # how much of A before the junction the effects can work on
+B_REGION_S = 120.0  # and of B after it; a filter that is never turned back needs the whole track instead
+
+
 def make_context(a_audio: np.ndarray, a_sr: int, a_beats: Sequence[float], a_outro_start: float, a_outro_end: float,
                  b_audio: np.ndarray, b_sr: int, b_beats: Sequence[float], b_intro_start: float,
-                 nudge_ms: float = 0.0, a_region_s: float = 45.0, b_region_s: float = 120.0) -> TransitionContext:
+                 nudge_ms: float = 0.0, a_region_s: float = A_REGION_S,
+                 b_region_s: float = B_REGION_S) -> TransitionContext:
     """Snap the junction to the beat grids and cut the working regions out of the two tracks."""
     nudge = float(nudge_ms) / 1000.0
     junction_a = float(a_beats[nearest_beat_index(a_beats, a_outro_start)]) + nudge
@@ -537,31 +552,36 @@ def _filter_span(audio: np.ndarray, sr: int, fx: Dict, first: int, sweep_start: 
     audio[first:last] = wet * mix[:, None] + audio[first:last] * (1.0 - mix[:, None])
 
 
+def _release_samples(fx: Dict, period: float, sr: int) -> Optional[int]:
+    """The 'Return to dry' length in samples at `sr`, or None when the filter is never turned back."""
+    beats = release_beats(fx)
+    return None if beats is None else int(round(beats * period * sr))
+
+
 def _apply_filter(ctx: TransitionContext, fx: Dict) -> None:
     side = fx.get("side", "outgoing")
     a_beat_n = int(round(ctx.a_period * ctx.a_sr))
     # A: up to one beat after it stops being audible (the filter state settles, the rest of A is never heard)
     a_stop = ctx.a_index(ctx.a_end) + a_beat_n
-    release_s = float(fx.get("release_beats", 1)) * ctx.a_period
     if side == "outgoing":
         start_i = ctx.a_index(ctx.a_beat(-int(fx["beats"])))
         _filter_span(ctx.a, ctx.a_sr, fx, start_i, start_i, ctx.a_index(ctx.junction_a), a_stop)
     elif side == "incoming":
         junction_i = ctx.b_index(ctx.junction_b)
-        b_release = float(fx.get("release_beats", 1)) * median_period(ctx.b_beats)
         _filter_span(ctx.b, ctx.b_sr, fx, 0, junction_i, ctx.b_index(ctx.b_beat(int(fx["beats"]))), len(ctx.b),
-                     int(round(b_release * ctx.b_sr)))
+                     _release_samples(fx, median_period(ctx.b_beats), ctx.b_sr))
     else:
         # across the junction: one sweep in set time, applied to A and to B at the same moments, so that the two
         # copies mixed by Mixxx sound like the mix going through one filter
         offset = int(fx.get("start_offset_beats", -4))
         sweep_start_t, sweep_end_t = ctx.a_beat(offset), ctx.a_beat(offset + int(fx["beats"]))
         a_start = ctx.a_index(sweep_start_t)
+        # the release is counted in set time too (A's beat), so that both copies come back together
         _filter_span(ctx.a, ctx.a_sr, fx, a_start, a_start, ctx.a_index(sweep_end_t), a_stop,
-                     int(round(release_s * ctx.a_sr)))
+                     _release_samples(fx, ctx.a_period, ctx.a_sr))
         to_b = ctx.junction_b - ctx.junction_a
         _filter_span(ctx.b, ctx.b_sr, fx, 0, ctx.b_index(sweep_start_t + to_b), ctx.b_index(sweep_end_t + to_b),
-                     len(ctx.b), int(round(release_s * ctx.b_sr)))
+                     len(ctx.b), _release_samples(fx, ctx.a_period, ctx.b_sr))
 
 
 def _apply_echo(ctx: TransitionContext, fx: Dict) -> None:
@@ -795,6 +815,17 @@ def _apply_scratch(ctx: TransitionContext, fx: Dict) -> None:
 
 _APPLY = {"freeze": _apply_freeze, "filter": _apply_filter, "echo": _apply_echo, "sample": _apply_sample,
           "scratch": _apply_scratch}
+# what an effect writes to; 'layer' is mixed over whatever the effects before it left
+_SCOPE = {"freeze": "A", "echo": "A", "sample": "layer"}
+_SIDE_SCOPE = {"outgoing": "A", "incoming": "B", "across": "A+B"}
+
+
+def effect_scope(fx: Dict) -> str:
+    """Which track of the junction an effect of the stack writes to: 'A', 'B', 'A+B', 'layer' ('' when unknown)."""
+    fx_type = fx.get("type")
+    if fx_type in ("filter", "scratch"):
+        return _SIDE_SCOPE.get(fx.get("side", "outgoing"), "")
+    return _SCOPE.get(fx_type, "")
 
 
 def apply_effects(ctx: TransitionContext, effects: Sequence[Dict]) -> TransitionContext:
@@ -927,24 +958,25 @@ def _layout_freeze(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dic
 def _layout_filter(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dict:
     beats = int(fx["beats"])
     side = fx.get("side", "outgoing")
-    release = float(fx.get("release_beats", 1))
+    release = release_beats(fx)  # None: never turned back, drawn as a hold to the end of the transition
     if side == "outgoing":
         start, sweep_end = ctx.a_beat(-beats), ctx.junction_a
         blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""},
                   {"start": sweep_end, "end": ctx.a_end, "kind": "hold", "label": "held"}]
-    elif side == "incoming":
-        shift = ctx.junction_a - ctx.junction_b
-        start, sweep_end = ctx.junction_b + shift, ctx.b_beat(beats) + shift
-        blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""}]
-        if release > 0:
-            blocks.append({"start": sweep_end, "end": sweep_end + release * median_period(ctx.b_beats), "kind": "release",
-                           "label": "dry"})
     else:
-        offset = int(fx.get("start_offset_beats", -4))
-        start, sweep_end = ctx.a_beat(offset), ctx.a_beat(offset + beats)
+        if side == "incoming":
+            shift = ctx.junction_a - ctx.junction_b
+            start, sweep_end = ctx.junction_b + shift, ctx.b_beat(beats) + shift
+            period = median_period(ctx.b_beats)
+        else:
+            offset = int(fx.get("start_offset_beats", -4))
+            start, sweep_end = ctx.a_beat(offset), ctx.a_beat(offset + beats)
+            period = ctx.a_period
         blocks = [{"start": start, "end": sweep_end, "kind": "sweep", "label": ""}]
-        if release > 0:
-            blocks.append({"start": sweep_end, "end": sweep_end + release * ctx.a_period, "kind": "release", "label": "dry"})
+        if release is None:
+            blocks.append({"start": sweep_end, "end": max(sweep_end, ctx.a_end), "kind": "hold", "label": "held"})
+        elif release > 0:
+            blocks.append({"start": sweep_end, "end": sweep_end + release * period, "kind": "release", "label": "dry"})
     lo, hi = float(fx["start_hz"]), float(fx["end_hz"])
     blocks[0]["label"] = f"{lo:.0f} → {hi:.0f} Hz"
     pos = np.linspace(0.0, 1.0, 24)
