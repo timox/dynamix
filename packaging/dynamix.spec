@@ -22,7 +22,7 @@ a = Analysis(  # noqa: F821
     [os.path.join(ROOT, "gui.py")],
     pathex=[ROOT],
     datas=[(os.path.join(ROOT, "locales"), "locales")],  # translations (i18n.package_dir)
-    hiddenimports=["selftest"],
+    hiddenimports=["selftest", "version"],  # both imported inside functions, not at module level
     excludes=EXCLUDES,
     noarchive=False,
 )

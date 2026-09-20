@@ -35,7 +35,8 @@ def _clicks(seconds: float, bpm: float = 120.0, freq: float = 220.0):
 def run(report_path=None) -> int:
     tmp = tempfile.mkdtemp(prefix="dynamix_selftest_")
     os.environ["DYNAMIX_HOME"] = os.path.join(tmp, "home")  # the user's cache and settings are never used
-    lines = [f"DynaMix self-test - Python {platform.python_version()} - "
+    from version import VERSION
+    lines = [f"DynaMix {VERSION} self-test - Python {platform.python_version()} - "
              f"{'frozen build' if getattr(sys, 'frozen', False) else 'sources'} - {platform.platform()}"]
     failures = []
     files = {}

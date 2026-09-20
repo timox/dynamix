@@ -19,6 +19,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from typing import Dict, List, Optional, Sequence
 
 # key, label, name in the installed programs, executable name (glob), folders under the install roots, default args
@@ -137,6 +139,59 @@ def detect_ffmpeg(roots: Optional[Sequence[str]] = None) -> str:
     for root in (install_roots() if roots is None else roots):
         candidates.extend(glob.glob(os.path.join(root, "ffmpeg*", "bin", "ffmpeg.exe")))
     return _newest(candidates)
+
+
+# The build ffmpeg.org points to for Windows. FFmpeg is GPL and DynaMix is MIT: it is never shipped with
+# DynaMix, only downloaded when the user asks for it in the Configuration tab.
+FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+FFMPEG_PROGRAMS = ("ffmpeg.exe", "ffprobe.exe")
+
+
+def _urlopen(url: str, timeout: float = 30.0):
+    """Opened through this function so a test can read a local file instead of the network."""
+    from urllib.request import Request, urlopen
+    return urlopen(Request(url, headers={"User-Agent": "DynaMix"}), timeout=timeout)
+
+
+def download_ffmpeg(dest_dir: str, url: str = FFMPEG_URL, progress=None) -> str:
+    """
+    Download the static Windows build of FFmpeg and keep only its programs in dest_dir (emptied first).
+
+    progress(bytes_read, total_bytes) is called while downloading; total is 0 when the server does not
+    say. Returns the path of ffmpeg.exe. Raises ValueError when the archive holds no ffmpeg.exe.
+    """
+    archive = None
+    try:
+        with _urlopen(url) as response:
+            total = int(getattr(response, "headers", {}).get("Content-Length", 0) or 0)
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                archive = tmp.name
+                read = 0
+                while True:
+                    chunk = response.read(256 * 1024)
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+                    read += len(chunk)
+                    if progress:
+                        progress(read, total)
+        with zipfile.ZipFile(archive) as z:
+            wanted = {}
+            for name in z.namelist():
+                base = name.rsplit("/", 1)[-1].lower()
+                if base in FFMPEG_PROGRAMS:
+                    wanted[base] = name
+            if "ffmpeg.exe" not in wanted:
+                raise ValueError(f"no ffmpeg.exe in the archive downloaded from {url}")
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            os.makedirs(dest_dir, exist_ok=True)
+            for base, name in wanted.items():
+                with z.open(name) as src, open(os.path.join(dest_dir, base), "wb") as out:
+                    shutil.copyfileobj(src, out)
+    finally:
+        if archive and os.path.exists(archive):
+            os.remove(archive)
+    return os.path.join(dest_dir, "ffmpeg.exe")
 
 
 def apply_ffmpeg_path(path: str) -> bool:

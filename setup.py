@@ -6,7 +6,8 @@ Started as a fork of makalin/dynamix; developed independently since.
 """
 
 from setuptools import setup, find_packages
-import os
+
+from version import VERSION
 
 # Read the README file
 def read_readme():
@@ -18,19 +19,9 @@ def read_requirements():
     with open("requirements.txt", "r", encoding="utf-8") as fh:
         return [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
-# Get version
-def get_version():
-    version_file = os.path.join("dynamix", "__init__.py")
-    if os.path.exists(version_file):
-        with open(version_file, "r") as f:
-            for line in f:
-                if line.startswith("__version__"):
-                    return line.split("=")[1].strip().strip('"').strip("'")
-    return "0.1.0"
-
 setup(
     name="dynamix",
-    version=get_version(),
+    version=VERSION,
     author="timox (fork of makalin/dynamix by Mehmet T. Akalin)",
     description="Playlists with better transitions for the Mixxx Auto DJ: set proposals, transition planning, pre-master, transition FX",
     long_description=read_readme(),
@@ -61,7 +52,10 @@ setup(
     keywords="audio analysis dj mixing music transition bpm key detection",
     packages=find_packages(),
     py_modules=[
+        "version",
+        "i18n",
         "audio_utils",
+        "audio_tools",
         "export_tools",
         "playlist_manager",
         "transition_planner",

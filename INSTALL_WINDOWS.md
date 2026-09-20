@@ -87,14 +87,25 @@ les MP3 : le paquet `soundfile` embarque `libsndfile` 1.1+, qui décode
 nativement **MP3, WAV, FLAC et OGG**. `check_install.py` le confirme sur la
 ligne « MP3 decoding via soundfile ».
 
-FFmpeg reste nécessaire uniquement pour les fichiers **M4A/AAC**. Pour
-l'installer :
+FFmpeg reste nécessaire uniquement pour les fichiers **M4A/AAC**. Le plus
+simple : onglet **Configuration**, ligne « FFmpeg (facultatif) », bouton
+**Télécharger**. DynaMix récupère FFmpeg auprès de ses auteurs dans
+`%LOCALAPPDATA%\DynaMix\ffmpeg` et renseigne le chemin tout seul. Le
+téléchargement pèse plusieurs dizaines de Mo et s'interrompt depuis l'onglet
+Tâches.
+
+FFmpeg n'est **pas** livré avec DynaMix : c'est un logiciel libre sous licence
+GPL, alors que DynaMix est sous licence MIT. Il est donc téléchargé à votre
+demande, jamais inclus.
+
+Vous pouvez aussi l'installer vous-même :
 
 ```powershell
 winget install Gyan.FFmpeg
 ```
 
-ou via Chocolatey (`choco install ffmpeg`), puis rouvrez le terminal.
+ou via Chocolatey (`choco install ffmpeg`), puis rouvrez le terminal et
+cliquez sur **Détecter**.
 
 ## 5. Utiliser DynaMix
 
@@ -296,13 +307,30 @@ packaging\build_windows.bat
 ```
 
 Le script fabrique `dist\DynaMix` : un Python « gelé » avec uniquement les
-bibliothèques utilisées par DynaMix (PyInstaller), puis lance son autotest.
-Compressez le dossier `dist\DynaMix` en zip (environ 120 Mo) : la personne le
-décompresse et double-clique sur **`DynaMix.exe`**.
+bibliothèques utilisées par DynaMix (PyInstaller), lance son autotest, puis
+produit deux fichiers à donner :
+
+- **`dist\DynaMix-<version>-setup.exe`** — l'installateur. Il installe
+  **pour l'utilisateur courant seulement**, dans
+  `%LOCALAPPDATA%\Programs\DynaMix` : il ne demande donc jamais les droits
+  administrateur, crée les raccourcis du menu Démarrer (et du bureau si on le
+  coche) et se désinstalle depuis Paramètres > Applications.
+- **`dist\DynaMix-<version>-windows-x64.zip`** — le même build en zip
+  (environ 120 Mo), pour qui préfère ne rien installer : décompresser et
+  double-cliquer sur `DynaMix.exe`.
+
+Fabriquer l'installateur demande Inno Setup :
+
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+Sans lui, le script saute cette étape et livre quand même le dossier et le zip.
+Le numéro de version vient de `version.py`, seul endroit où il est écrit.
 
 - L'exécutable n'est pas signé : Windows affiche « Windows a protégé votre
   ordinateur » ; cliquez sur **Informations complémentaires → Exécuter quand
-  même**.
+  même**. C'est vrai aussi pour l'installateur.
 - La première analyse est plus lente (numba compile une fois, puis garde le
   résultat dans `%LOCALAPPDATA%\DynaMix\numba_cache`).
 - Pour vérifier une copie sur une autre machine :

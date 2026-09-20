@@ -246,7 +246,6 @@
   "FX samples folder:": "Dossier des samples FX :",
   "Risers, impacts, sweeps... used by Transition FX (30 s max per sample).": "Risers, impacts, sweeps... utilisés par les FX de transition (30 s max par sample).",
   "FFmpeg (optional):": "FFmpeg (facultatif) :",
-  "Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH.": "Nécessaire seulement pour les fichiers M4A/AAC (MP3, WAV, FLAC et OGG n'ont besoin de rien). Vide = celui du PATH.",
   "Audio editors (right-click a track: Open in...)": "Éditeurs audio (clic droit sur un morceau : Ouvrir dans...)",
   "Arguments: {file} is the audio file; empty = start the editor and show the file in Explorer (Ableton Live and Mixbus do not open an audio file given on their command line).": "Arguments : {file} est le fichier audio ; vide = lancer l'éditeur et afficher le fichier dans l'Explorateur (Ableton Live et Mixbus n'ouvrent pas un fichier audio passé en ligne de commande).",
   "Arguments:": "Arguments :",
@@ -287,5 +286,14 @@
   "{count} transition(s) have FX that are not rendered: this playlist will ignore them.\n\nGo back to the FX tab and click 'Apply all FX' first.\n\nWrite it anyway?": "{count} transition(s) ont des FX qui ne sont pas rendus : cette playlist les ignorera.\n\nRetourne dans l'onglet FX et clique d'abord sur « Appliquer tous les FX ».\n\nL'écrire quand même ?",
   "{count} file(s) are not on disk and a player will skip them:": "{count} fichier(s) ne sont pas sur le disque et un lecteur les sautera :",
   "Playlist saved: {count} tracks{note}, but {missing} file(s) are not on disk (see the Log) -> {file}": "Playlist enregistrée : {count} morceaux{note}, mais {missing} fichier(s) ne sont pas sur le disque (voir le Journal) -> {file}",
-  " - FX not rendered on {n} transition(s): click 'Apply all FX'": " - FX non rendus sur {n} transition(s) : clique sur « Appliquer tous les FX »"
+  " - FX not rendered on {n} transition(s): click 'Apply all FX'": " - FX non rendus sur {n} transition(s) : clique sur « Appliquer tous les FX »",
+  "Download": "Télécharger",
+  "Download FFmpeg": "Télécharger FFmpeg",
+  "Downloading FFmpeg ...": "Téléchargement de FFmpeg ...",
+  "{done:.0f} of {total:.0f} MB": "{done:.0f} sur {total:.0f} Mo",
+  "{done:.0f} MB": "{done:.0f} Mo",
+  "FFmpeg ready: {path}": "FFmpeg prêt : {path}",
+  "FFmpeg downloaded: M4A/AAC files can now be read": "FFmpeg téléchargé : les fichiers M4A/AAC peuvent maintenant être lus",
+  "FFmpeg will be downloaded from:\n{url}\n\ninto:\n{folder}\n\nFFmpeg is free software published under the GPL by its own authors; DynaMix only fetches it for you. The archive weighs several tens of MB.\n\nContinue?": "FFmpeg va être téléchargé depuis :\n{url}\n\nvers :\n{folder}\n\nFFmpeg est un logiciel libre publié sous licence GPL par ses propres auteurs ; DynaMix ne fait que le récupérer pour vous. L'archive pèse plusieurs dizaines de Mo.\n\nContinuer ?",
+  "Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH. 'Download' fetches FFmpeg from its own authors into the DynaMix folder: it is free software under the GPL and is not part of DynaMix.": "Utile seulement pour les fichiers M4A/AAC (MP3, WAV, FLAC et OGG n'ont besoin de rien). Vide = celui du PATH. « Télécharger » récupère FFmpeg auprès de ses auteurs dans le dossier DynaMix : c'est un logiciel libre sous licence GPL, il ne fait pas partie de DynaMix."
 }

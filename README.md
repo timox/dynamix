@@ -219,20 +219,31 @@ python tests/gui_smoke.py                # drives the GUI end to end (opens a wi
 python gui.py --self-test                # checks this installation: Tk, charts, audio, analysis, limiter, FX
 ```
 
-## Sharing DynaMix (Windows build)
+## Sharing DynaMix (Windows build and installer)
 
 `packaging\build_windows.bat` builds a version of DynaMix that runs without Python: PyInstaller
 freezes the interpreter and only the libraries DynaMix uses into `dist\DynaMix`
-(`packaging\dynamix.spec` lists what is left out), then the script runs the build's self-test.
-Zip `dist\DynaMix` (about 120 MB, 285 MB unzipped) and share it: `DynaMix.exe` starts the
-application.
+(`packaging\dynamix.spec` lists what is left out), then the script runs the build's self-test and
+writes two things people can be given:
+
+- `dist\DynaMix-<version>-setup.exe` — the installer (`packaging\dynamix.iss`, Inno Setup). It
+  installs **for the current user only**, into `%LOCALAPPDATA%\Programs\DynaMix`, so it never asks
+  for administrator rights, adds Start Menu and (optionally) desktop shortcuts, and uninstalls from
+  Settings > Apps. Building it needs Inno Setup (`winget install JRSoftware.InnoSetup`); without it
+  the script skips this step and still writes the folder and the zip.
+- `dist\DynaMix-<version>-windows-x64.zip` — the same build as a zip, for people who would rather
+  not install anything: unzip it and run `DynaMix.exe`.
+
+The version comes from `version.py`, the only place it is written.
 
 - The executable is not signed: Windows SmartScreen shows "Windows protected your PC", then
   **More info → Run anyway**.
 - The first analysis is slower: numba compiles its code once and keeps it in
   `%LOCALAPPDATA%\DynaMix\numba_cache`.
 - `DynaMix.exe --self-test report.txt` checks a copy on another machine without touching its data.
-- FFmpeg is not included (only needed for M4A / AAC files).
+- FFmpeg is not included: it is GPL and DynaMix is MIT. The Configuration tab has a **Download**
+  button next to the FFmpeg path, which fetches it from its own authors into the DynaMix folder
+  when the user asks for it. It is only needed for M4A / AAC files.
 
 ## License
 

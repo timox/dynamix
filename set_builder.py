@@ -1717,8 +1717,11 @@ class ConfigTabMixin:
         ttk.Entry(grid, textvariable=self.cfg_ffmpeg_var, width=70).grid(row=9, column=1, sticky="we", padx=4)
         ttk.Button(grid, text=tr("Browse"), command=lambda: self._cfg_pick_exe(self.cfg_ffmpeg_var, "ffmpeg.exe")).grid(row=9, column=2)
         ttk.Button(grid, text=tr("Detect"), command=self._cfg_detect_ffmpeg).grid(row=9, column=3, padx=2)
-        ttk.Label(grid, text=tr("Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH."),
-                  foreground=MUTED).grid(row=10, column=1, sticky="w", padx=4)
+        ttk.Button(grid, text=tr("Download"), command=self._cfg_download_ffmpeg).grid(row=9, column=4, padx=2)
+        ttk.Label(grid, text=tr("Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on "
+                                "the PATH. 'Download' fetches FFmpeg from its own authors into the DynaMix folder: it is "
+                                "free software under the GPL and is not part of DynaMix."),
+                  foreground=MUTED, wraplength=900, justify=tk.LEFT).grid(row=10, column=1, columnspan=4, sticky="w", padx=4)
         grid.columnconfigure(1, weight=1)
 
         editors = ttk.LabelFrame(frame, text=tr("Audio editors (right-click a track: Open in...)"))
@@ -1844,6 +1847,36 @@ class ConfigTabMixin:
         if found:
             self.cfg_ffmpeg_var.set(found)
         self.cfg_status.config(text=tr("FFmpeg found: {path}", path=found) if found else tr("FFmpeg not found (only needed for M4A/AAC files)"))
+
+    def _cfg_download_ffmpeg(self):
+        """Fetch FFmpeg into the DynaMix folder and use it (GPL: downloaded on request, never shipped)."""
+        dest = os.path.join(dynamix_home(), "ffmpeg")
+        if not messagebox.askyesno(tr("Download FFmpeg"), tr(
+                "FFmpeg will be downloaded from:\n{url}\n\ninto:\n{folder}\n\n"
+                "FFmpeg is free software published under the GPL by its own authors; DynaMix only fetches it for "
+                "you. The archive weighs several tens of MB.\n\nContinue?",
+                url=audio_tools.FFMPEG_URL, folder=dest)):
+            return
+        self.cfg_status.config(text=tr("Downloading FFmpeg ..."))
+
+        def work(task):
+            def report(read, total):
+                mb = tr("{done:.0f} of {total:.0f} MB", done=read / 1e6, total=total / 1e6) if total \
+                    else tr("{done:.0f} MB", done=read / 1e6)
+                task.progress(read, total or read, mb)  # raises when the task is stopped from the Tasks tab
+
+            path = audio_tools.download_ffmpeg(dest, progress=report)
+
+            def done():
+                self.cfg_ffmpeg_var.set(path)
+                self.config.set("ffmpeg_path", path)
+                self.config.save()          # saved straight away: a download must not be lost on a closed window
+                audio_tools.apply_ffmpeg_path(path)
+                self.cfg_status.config(text=tr("FFmpeg ready: {path}", path=path))
+                self.update_status(tr("FFmpeg downloaded: M4A/AAC files can now be read"))
+            self.root.after(0, done)
+
+        self._start_task(tr("Download FFmpeg"), work)
 
     def _cfg_detect_editors(self):
         """Fill the empty editor paths with the installed editors ('Save configuration' keeps them)."""

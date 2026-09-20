@@ -97,5 +97,61 @@ class TestOpening(unittest.TestCase):
             audio_tools.open_in_editor(self.exe, "{file}", os.path.join(self.root, "none.wav"))
 
 
+class TestFfmpegDownload(unittest.TestCase):
+    """FFmpeg is downloaded on request (GPL: never shipped with DynaMix), then kept in the DynaMix home."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="dynamix_ff_")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _archive(self, names=("ffmpeg-8.0-essentials_build/bin/ffmpeg.exe",
+                              "ffmpeg-8.0-essentials_build/bin/ffprobe.exe",
+                              "ffmpeg-8.0-essentials_build/doc/ffmpeg.html")):
+        """A zip shaped like the official Windows build."""
+        import zipfile
+        path = os.path.join(self.root, "ffmpeg.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            for name in names:
+                z.writestr(name, b"MZ" + name.encode())
+        return path
+
+    def _download(self, archive, dest, progress=None):
+        """Run download_ffmpeg with the network replaced by a local file."""
+        def fake_open(url, timeout=0):
+            return open(archive, "rb")
+        with patch.object(audio_tools, "_urlopen", fake_open):
+            return audio_tools.download_ffmpeg(dest, progress=progress)
+
+    def test_only_the_programs_are_kept_and_the_path_is_returned(self):
+        dest = os.path.join(self.root, "home", "ffmpeg")
+        exe = self._download(self._archive(), dest)
+        self.assertEqual(exe, os.path.join(dest, "ffmpeg.exe"))
+        self.assertEqual(sorted(os.listdir(dest)), ["ffmpeg.exe", "ffprobe.exe"])   # the docs are dropped
+        with open(exe, "rb") as f:
+            self.assertTrue(f.read().startswith(b"MZ"))
+
+    def test_progress_is_reported(self):
+        seen = []
+        self._download(self._archive(), os.path.join(self.root, "ffmpeg"), progress=lambda done, total: seen.append(done))
+        self.assertTrue(seen)
+        self.assertEqual(seen[-1], max(seen))
+
+    def test_an_archive_without_ffmpeg_is_refused(self):
+        archive = self._archive(names=("build/doc/ffmpeg.html",))
+        with self.assertRaises(ValueError) as caught:
+            self._download(archive, os.path.join(self.root, "ffmpeg"))
+        self.assertIn("ffmpeg.exe", str(caught.exception))
+
+    def test_a_second_download_replaces_the_first(self):
+        dest = os.path.join(self.root, "ffmpeg")
+        self._download(self._archive(), dest)
+        stale = os.path.join(dest, "old.exe")
+        open(stale, "wb").close()
+        self._download(self._archive(), dest)
+        self.assertFalse(os.path.exists(stale))
+
+
 if __name__ == "__main__":
     unittest.main()

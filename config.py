@@ -92,6 +92,8 @@ class Config:
 def environment_report() -> List[Tuple[str, bool, str]]:
     """[(label, ok, detail)] describing what DynaMix can rely on here (texts in the interface language: display only)."""
     rows: List[Tuple[str, bool, str]] = []
+    from version import VERSION
+    rows.append(("DynaMix", True, VERSION))
     rows.append(("Python", sys.version_info >= (3, 8), f"{sys.version.split()[0]} ({sys.executable})"))
     try:
         import tkinter
