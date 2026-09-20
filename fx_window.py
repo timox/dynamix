@@ -464,26 +464,44 @@ class TransitionFxPanel(ttk.Frame):
         self._saved()
 
     # ------------------------------------------------------------------ where A ends
-    def _a_grid(self):
-        """A's beat grid for the selected transition (loaded with the waveforms, else through the cache)."""
+    def _a_grid(self, load=True):
+        """
+        A's beat grid for the selected transition.
+
+        `load=False` never decodes the track: selecting a transition runs on the GUI thread, before
+        load_waveforms has read the grid in the background, and analysing a track there freezes the
+        window for seconds (step 1 does not fill the 'beats' kind of the cache).
+        """
         wave = self._waves.get(self._wave_key())
         if wave is not None:
             return wave["beats"][0]
+        if not load:
+            return None
         return transition_beats(self.profiles[self.pair_index], self.profiles[self.pair_index + 1])[0]
+
+    def _a_junction(self, grid, pa):
+        """(time of the junction beat, beat period) of A, from its grid or, while that loads, from its tempo."""
+        outro_start = float(pa.get("outro_start", 0.0))
+        if not grid:
+            return outro_start, 60.0 / (float(pa.get("bpm") or 0) or tfx.DEFAULT_BPM)
+        junction = tfx.nearest_beat_index(grid, outro_start)
+        return tfx.beat_time(grid, junction, 0), tfx.median_period(grid) or 0.5
 
     def _a_end_beats(self):
         """(marker, what the plan alone gives) as whole beats after the junction, for the selected transition."""
         pa = self.profiles[self.pair_index]
-        beats = self._a_grid()
-        junction = tfx.nearest_beat_index(beats, float(pa.get("outro_start", 0.0)))
-        base, period = tfx.beat_time(beats, junction, 0), tfx.median_period(beats) or 0.5
+        base, period = self._a_junction(self._a_grid(load=False), pa)
         planned = int(round((float(pa.get("outro_end", 0.0)) - base) / period))
         marker = self.entry().get("a_end_s")
         current = planned if marker is None else int(round((float(marker) - base) / period))
         return max(0, current), max(0, planned)
 
     def _a_end_seconds(self, beats):
-        """The exact time in A of the beat `beats` after the junction (the grid, not a regular tempo)."""
+        """
+        The exact time in A of the beat `beats` after the junction: the real grid, not a regular tempo,
+        so the marker lands where the effects count their beats. Only called when the field is edited,
+        long after the grid was read for the waveforms.
+        """
         pa = self.profiles[self.pair_index]
         grid = self._a_grid()
         return tfx.beat_time(grid, tfx.nearest_beat_index(grid, float(pa.get("outro_start", 0.0))), beats)
@@ -1499,6 +1517,8 @@ class TransitionFxPanel(ttk.Frame):
                 self._waves_loading.discard(key)
                 self._waves[key] = {"a_env": envs[0], "b_env": envs[1], "beats": beats}
                 if self.winfo_exists():
+                    if key == self._wave_key():
+                        self.refresh_a_end()  # shown from the tempo until now: say it on the real grid
                     self.schedule_chart()
             self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()

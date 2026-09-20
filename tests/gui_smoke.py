@@ -204,8 +204,21 @@ def scenario():
         pump(seconds=0.3)
         check(win is not None, "the Transition FX window opens once transitions are planned")
         check(pump(lambda: len(win.samples) == 1, 5.0), "the FX samples folder is scanned")
+        # selecting a transition must not decode a track on the GUI thread: the beat grid is read in the
+        # background by load_waveforms, and step 1 does not fill the cache it comes from
+        import fx_window as fx_window_mod
+        real_beats, blocked = fx_window_mod.transition_beats, []
+
+        def guarded(*a, **k):
+            import threading as _t
+            if _t.current_thread() is _t.main_thread():
+                blocked.append(a)
+            return real_beats(*a, **k)
+        fx_window_mod.transition_beats = guarded
         win.trans_tree.selection_set("T0")
         check(pump(lambda: win.pair_index == 0, 2.0), "a transition can be selected")
+        check(not blocked, f"selecting a transition reads no beat grid on the GUI thread ({len(blocked)} calls)")
+        fx_window_mod.transition_beats = real_beats
         check(pump(lambda: win._chart_canvas is not None, 20.0), "the transition chart is drawn with the waveforms")
 
         # 'A ends': the field starts on what the plan gives, moves the marker, and goes back to the plan
