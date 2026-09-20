@@ -207,6 +207,23 @@ def scenario():
         win.trans_tree.selection_set("T0")
         check(pump(lambda: win.pair_index == 0, 2.0), "a transition can be selected")
         check(pump(lambda: win._chart_canvas is not None, 20.0), "the transition chart is drawn with the waveforms")
+
+        # 'A ends': the field starts on what the plan gives, moves the marker, and goes back to the plan
+        planned = win._a_end_beats()[1]
+        check(win.a_end_var.get() == str(planned) and f"{planned}" in win.a_end_label.cget("text"),
+              f"the A-ends field starts on the planned beat, got {win.a_end_var.get()!r}")
+        a, b = win.pair()
+        win.a_end_var.set(str(max(0, planned - 4)))
+        marker = app.project.a_end_of(a, b)
+        check(marker is not None, "moving the A-ends field stores a marker")
+        check(pump(lambda: win.last_layout is not None
+                   and abs(win.last_layout["a_end"] - marker) < 0.05, 10.0),
+              "the chart follows the A-ends marker")
+        check(win._a_end_beats()[0] == max(0, planned - 4), "the field reads the marker back in beats")
+        win.reset_a_end()
+        check(app.project.a_end_of(a, b) is None and win.a_end_var.get() == str(planned),
+              "'Planned' puts the transition back on what the plan gives")
+
         from tkinter import ttk as tkttk
         # the list gives up the room when the pane is short, so the buttons and the hint below it are packed
         # to the bottom first: packed to the top they fall out of the pane on a small window

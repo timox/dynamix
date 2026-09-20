@@ -124,6 +124,46 @@ class TestSetProjectFx(unittest.TestCase):
         self.assertIn("1 transition", text)
         self.assertIn("not rendered", text)
 
+    def test_a_end_marker_is_stored_and_invalidates_the_render(self):
+        """Moving where A ends changes the audio and the Mixxx cue: the FX copies must be made again."""
+        self.assertIsNone(self.p.fx_for_pair(self.a, self.b))
+        self.p.set_fx_effects(self.a, self.b, [self.freeze])
+        self.p.set_fx_render([{"source": self.a, "output": "x"}])
+        self.p.mark("fx", count=1)
+        self.assertTrue(self.p.set_fx_a_end(self.a, self.b, 12.5))
+        self.assertEqual(self.p.fx_for_pair(self.a, self.b)["a_end_s"], 12.5)
+        self.assertIsNone(self.p.data["fx"]["render"])
+        self.assertFalse(self.p.is_done("fx"))
+        self.assertFalse(self.p.set_fx_a_end(self.a, self.b, 12.5))    # the same value changes nothing
+        self.assertTrue(self.p.set_fx_a_end(self.a, self.b, None))     # back to what the plan says
+        self.assertIsNone(self.p.fx_for_pair(self.a, self.b)["a_end_s"])
+
+    def test_rendered_profiles_apply_the_marker_without_any_fx_copy(self):
+        """The Mixxx cue and the M3U must follow the marker even on a transition that is only a marker."""
+        self.p.set_fx_a_end(self.a, self.b, 9.0)
+        profiles = [{"file_path": x, "intro_start": 0.0, "intro_end": 1.0, "outro_start": 5.0, "outro_end": 20.0,
+                     "duration": 30.0} for x in (self.a, self.b, self.c)]
+        out, counts = self.p.rendered_profiles(profiles)
+        self.assertEqual(counts, {"fx": 0, "premaster": 0})
+        self.assertEqual(out[0]["outro_end"], 9.0)      # A of the marked transition
+        self.assertEqual(out[0]["outro_start"], 5.0)    # the junction does not move
+        self.assertEqual(out[1]["outro_end"], 20.0)     # B keeps what the plan says
+        self.assertEqual(out[2]["outro_end"], 20.0)
+
+    def test_clearing_a_marker_that_was_never_set_changes_nothing(self):
+        """'Planned' on an untouched transition must not create an entry nor throw the FX render away."""
+        self.p.set_fx_effects(self.b, self.c, [self.freeze])
+        self.p.set_fx_render([{"source": self.b, "output": "x"}])
+        self.assertFalse(self.p.set_fx_a_end(self.a, self.b, None))
+        self.assertIsNone(self.p.fx_for_pair(self.a, self.b))
+        self.assertIsNotNone(self.p.data["fx"]["render"])
+
+    def test_a_marker_alone_is_not_an_active_fx_pair(self):
+        """A marker without effects must not make 'Apply all FX' think there is something to render."""
+        self.p.set_fx_a_end(self.a, self.b, 9.0)
+        self.assertEqual(self.p.active_fx_pairs(), [])
+        self.assertEqual(self.p.fx_pending(), 0)
+
     def test_fx_map_and_rendered_profiles(self):
         os.makedirs(self.p.fx_dir)
         os.makedirs(self.p.premaster_dir, exist_ok=True)

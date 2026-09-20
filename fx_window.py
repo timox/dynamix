@@ -35,6 +35,7 @@ PLAN_CHANGED = "The transitions or the set list changed: plan the transitions ag
 NO_SAMPLE_FILE = "Choose a file for the Sample effect: click a sample in the list"
 
 FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample", "scratch": "Scratch"}
+MAX_A_END_BEATS = 64  # how far after the junction the 'A ends' marker can be moved
 
 # (key, label, kind, choices or (min, max))
 FIELDS = {
@@ -300,6 +301,16 @@ class TransitionFxPanel(ttk.Frame):
         self.nudge_var = tk.StringVar(value="0")
         ttk.Spinbox(nudge_row, from_=-50, to=50, increment=1, textvariable=self.nudge_var, width=6).pack(side=tk.LEFT, padx=4)
         self.nudge_var.trace_add("write", lambda *a: self.on_nudge())
+        # where A stops being heard: the plan ties it to the track's own outro, which often makes the
+        # transition longer than wanted and forces the effects to stretch over it
+        ttk.Label(nudge_row, text=tr("A ends (beats):")).pack(side=tk.LEFT, padx=(14, 0))
+        self.a_end_var = tk.StringVar(value="")
+        ttk.Spinbox(nudge_row, from_=0, to=MAX_A_END_BEATS, increment=1, textvariable=self.a_end_var,
+                    width=6).pack(side=tk.LEFT, padx=4)
+        self.a_end_var.trace_add("write", lambda *a: self.on_a_end())
+        self.a_end_label = ttk.Label(nudge_row, text="", foreground=MUTED)
+        self.a_end_label.pack(side=tk.LEFT)
+        ttk.Button(nudge_row, text=tr("Planned"), command=self.reset_a_end).pack(side=tk.LEFT, padx=6)
         # orphan FX (the two tracks no longer follow each other): one line, shown only when there are some
         self.orphan_row = ttk.Frame(left)
         self.orphan_label = ttk.Label(self.orphan_row, text="", foreground=MUTED)
@@ -422,6 +433,7 @@ class TransitionFxPanel(ttk.Frame):
         self._setting_nudge = True
         self.nudge_var.set(str(int(round(float(self.entry().get("nudge_ms", 0))))))
         self._setting_nudge = False
+        self.refresh_a_end()
         self.refresh_fx()
         self.show_settings()
         self.load_waveforms()
@@ -450,6 +462,64 @@ class TransitionFxPanel(ttk.Frame):
         a, b = self.pair()
         self.project.set_fx_nudge(a, b, value)
         self._saved()
+
+    # ------------------------------------------------------------------ where A ends
+    def _a_grid(self):
+        """A's beat grid for the selected transition (loaded with the waveforms, else through the cache)."""
+        wave = self._waves.get(self._wave_key())
+        if wave is not None:
+            return wave["beats"][0]
+        return transition_beats(self.profiles[self.pair_index], self.profiles[self.pair_index + 1])[0]
+
+    def _a_end_beats(self):
+        """(marker, what the plan alone gives) as whole beats after the junction, for the selected transition."""
+        pa = self.profiles[self.pair_index]
+        beats = self._a_grid()
+        junction = tfx.nearest_beat_index(beats, float(pa.get("outro_start", 0.0)))
+        base, period = tfx.beat_time(beats, junction, 0), tfx.median_period(beats) or 0.5
+        planned = int(round((float(pa.get("outro_end", 0.0)) - base) / period))
+        marker = self.entry().get("a_end_s")
+        current = planned if marker is None else int(round((float(marker) - base) / period))
+        return max(0, current), max(0, planned)
+
+    def _a_end_seconds(self, beats):
+        """The exact time in A of the beat `beats` after the junction (the grid, not a regular tempo)."""
+        pa = self.profiles[self.pair_index]
+        grid = self._a_grid()
+        return tfx.beat_time(grid, tfx.nearest_beat_index(grid, float(pa.get("outro_start", 0.0))), beats)
+
+    def refresh_a_end(self):
+        """Put the marker of the selected transition in its field, with what the plan would give beside it."""
+        if self.pair_index is None or not self.winfo_exists():
+            return
+        current, planned = self._a_end_beats()
+        self._setting_a_end = True
+        self.a_end_var.set(str(current))
+        self._setting_a_end = False
+        self.a_end_label.config(text=tr("(planned: {beats})", beats=planned))
+
+    def on_a_end(self):
+        if getattr(self, "_setting_a_end", False) or self.pair_index is None:
+            return
+        try:
+            beats = int(round(float(self.a_end_var.get())))
+        except ValueError:
+            return
+        beats = max(0, min(MAX_A_END_BEATS, beats))
+        _, planned = self._a_end_beats()
+        a, b = self.pair()
+        # back on the planned beat: drop the marker instead, so the transition follows the plan again
+        seconds = None if beats == planned else self._a_end_seconds(beats)
+        if self.project.set_fx_a_end(a, b, seconds):
+            self._saved()
+
+    def reset_a_end(self):
+        if self.pair_index is None:
+            return
+        a, b = self.pair()
+        if self.project.set_fx_a_end(a, b, None):
+            self._saved()
+        self.refresh_a_end()
 
     # ------------------------------------------------------------------ orphan FX
     def _refresh_orphans(self):

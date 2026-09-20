@@ -245,7 +245,18 @@ et **Sample** (un sample du dossier de samples FX, calé au tempo du morceau
 d'après le BPM écrit dans son nom, répétable). Le graphique en haut de
 l'onglet montre A et B avec leurs fondus et chaque effet sur un axe en temps ;
 **▶ Preview (loop)** fait écouter la transition en boucle. **Apply all FX**
-écrit des copies dans `fx\` ; la playlist et l'export Mixxx les utilisent. Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
+écrit des copies dans `fx\` ; la playlist et l'export Mixxx les utilisent.
+
+**Fin de A (temps)** déplace le moment où le morceau sortant cesse de s'entendre.
+Par défaut, DynaMix le déduit de l'outro détectée et de la longueur du morceau,
+ce qui allonge souvent la transition et oblige les effets à s'étirer pour la
+couvrir. Le champ compte en temps après la jonction ; le bouton **Prévu** à côté
+remet la valeur du plan. C'est le repère d'outro sur lequel Mixxx fait son fondu :
+le raccourcir raccourcit vraiment le fondu de l'Auto DJ, et l'intro exigée du
+morceau entrant suit automatiquement. Le marqueur est gardé hors du plan, donc
+replanifier les transitions ne le perd pas.
+
+Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
 Mixxx et la playlist utilisent automatiquement les copies corrigées. En ligne de commande :
 
 ```bat

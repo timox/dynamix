@@ -477,10 +477,31 @@ class SetProject:
 
     def fx_transition(self, a: str, b: str) -> Dict:
         """The FX entry of a -> b, created empty when missing."""
-        entry = self.data["fx"]["transitions"].setdefault(self.fx_key(a, b), {"a": a, "b": b, "nudge_ms": 0.0, "effects": []})
+        entry = self.data["fx"]["transitions"].setdefault(
+            self.fx_key(a, b), {"a": a, "b": b, "nudge_ms": 0.0, "a_end_s": None, "effects": []})
         entry.setdefault("a", a)
         entry.setdefault("b", b)
+        entry.setdefault("a_end_s", None)  # entries saved before the 'A ends' marker existed
         return entry
+
+    def a_end_of(self, a: str, b: str) -> Optional[float]:
+        """Where A stops being heard on this transition, in seconds of A; None = wherever the plan put it."""
+        entry = self.fx_for_pair(a, b)
+        return None if entry is None else entry.get("a_end_s")
+
+    def set_fx_a_end(self, a: str, b: str, seconds: Optional[float]) -> bool:
+        """
+        Move where A stops being heard on this transition (None puts it back to the plan's outro end).
+
+        It changes the rendered audio and the outro cue Mixxx fades on, so the FX copies and the
+        exports are invalidated exactly as an FX change is. True when the value changed.
+        """
+        value = None if seconds is None else float(seconds)
+        if self.a_end_of(a, b) == value:
+            return False  # also the case of clearing a marker that was never set: no entry is created
+        self.fx_transition(a, b)["a_end_s"] = value
+        self._fx_changed()
+        return True
 
     @staticmethod
     def _plan_cues(data: Optional[Dict]) -> Optional[List[Tuple]]:
@@ -558,6 +579,9 @@ class SetProject:
         else the pre-mastered copy, else the original. Returns (profiles, {'fx': n, 'premaster': n}).
         """
         fx, premaster = self.fx_map(), self.premaster_map()
+        # where A ends, for every track that leaves a transition by a moved marker (an FX copy already has it baked in)
+        markers = {entry["a"]: entry["a_end_s"] for entry in self.data["fx"]["transitions"].values()
+                   if entry.get("a") and entry.get("a_end_s") is not None}
         out, counts = [], {"fx": 0, "premaster": 0}
         for p in profiles:
             src = p.get("file_path")
@@ -573,6 +597,8 @@ class SetProject:
                 counts["premaster"] += 1
             else:
                 q = dict(p)
+            if src not in fx and src in markers:
+                q["outro_end"] = markers[src]
             out.append(q)
         return out, counts
 

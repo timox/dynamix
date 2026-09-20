@@ -153,6 +153,14 @@ result on a beat axis. **▶ Preview (loop)** re-renders the transition when a s
 **Nudge (ms)** shifts the junction by ear. **Apply all FX** renders copies into `fx/` with the
 new cue positions. Settings are kept per track pair, so reordering the set keeps them.
 
+**A ends (beats)** moves where the outgoing track stops being heard. The plan derives it from the
+track's own outro section and its length (`outro_end = outro_start + mix_duration`), which often
+makes the transition longer than wanted and forces every effect to stretch over it. The field
+counts beats after the junction and the button beside it puts the transition back on the planned
+value. It is the outro cue Mixxx fades on, so it really shortens the Auto DJ crossfade, and the
+incoming track's intro requirement follows it. The marker is kept per transition, outside the
+plan, so re-planning does not lose it.
+
 ## Mastering check, pre-master pass and band analysis
 
 `mastering.py` measures every track like a mastering engineer: loudness (LUFS, ITU BS.1770),

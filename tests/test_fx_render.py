@@ -222,5 +222,66 @@ class TestFilterWithoutReturn(unittest.TestCase):
         self.assertLess(abs(level(118.0) - level(122.0)), 3.0)   # and nothing jumps where the region used to end
 
 
+class TestAEndMarker(unittest.TestCase):
+    """'A ends' can be moved per transition: the plan's outro end is only the default."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="dynamix_aend_")
+        os.environ["DYNAMIX_HOME"] = os.path.join(self.tmp, "home")
+        analysis_store.reset_store()
+        self.lib = os.path.join(self.tmp, "Mixes")
+        os.makedirs(self.lib)
+        self.paths = []
+        for k in range(2):
+            t = np.arange(20 * SR) / SR
+            path = os.path.join(self.lib, f"m{k}.wav")
+            sf.write(path, (0.3 * np.sin(2 * np.pi * (220 + 110 * k) * t)).astype("float32"), SR)
+            self.paths.append(path)
+        self.grid = {"beats": [i * 0.5 for i in range(45)], "bpm": 120.0, "has_beat": True, "duration": 20.0}
+        self.grids = {p: self.grid for p in self.paths}
+        # A: junction at 8.0 s, the plan lets it run to 16.0 s (16 beats after the junction)
+        self.profiles = [{"file_path": p, "filename": os.path.basename(p), "duration": 20.0, "bpm": 120.0,
+                          "intro_start": 1.0, "intro_end": 3.0, "outro_start": 8.0, "outro_end": 16.0}
+                         for p in self.paths]
+
+    def tearDown(self):
+        os.environ.pop("DYNAMIX_HOME", None)
+        analysis_store.reset_store()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_without_a_marker_the_plan_decides(self):
+        from fx_render import _cues
+        self.assertEqual(_cues(self.profiles[0])["outro_end"], 16.0)
+        self.assertEqual(_cues(self.profiles[0], {"effects": []})["outro_end"], 16.0)
+        self.assertEqual(_cues(self.profiles[0], {"a_end_s": None})["outro_end"], 16.0)
+
+    def test_a_marker_replaces_the_plans_outro_end(self):
+        from fx_render import _cues
+        self.assertEqual(_cues(self.profiles[0], {"a_end_s": 12.0})["outro_end"], 12.0)
+        self.assertEqual(_cues(self.profiles[0], {"a_end_s": 12.0})["outro_start"], 8.0)  # the junction does not move
+
+    def test_the_rendered_copy_and_the_drawing_follow_the_marker(self):
+        from fx_render import render_set, transition_layout_for
+        entry = {"nudge_ms": 0, "a_end_s": 12.0,
+                 "effects": [dict(tfx.new_effect("filter"), side="outgoing", kind="highpass",
+                                  start_hz=20, end_hz=2000, beats=4)]}
+        layout = transition_layout_for(self.profiles[0], self.profiles[1], entry, beats=(self.grid["beats"],) * 2)
+        self.assertAlmostEqual(layout["a_end"], 12.0, places=3)      # 8 beats after the junction, not 16
+        results, problems = render_set(self.profiles, lambda a, b: entry if a == self.paths[0] else None,
+                                       {}, os.path.join(self.tmp, "fx"), grids=self.grids)
+        self.assertEqual(problems, [])
+        a_result = next(r for r in results if r["source"] == self.paths[0])
+        self.assertAlmostEqual(a_result["outro_end"], 12.0, places=3)
+        # B must be given an intro long enough to cover the shorter transition, not the planned one
+        b_result = next(r for r in results if r["source"] == self.paths[1])
+        self.assertAlmostEqual(b_result["intro_end"], 3.0 + 0.0, delta=4.1)
+
+    def test_a_marker_before_the_junction_falls_back_to_the_junction(self):
+        from fx_render import transition_layout_for
+        entry = {"nudge_ms": 0, "a_end_s": 2.0, "effects": []}    # a re-plan moved the outro past the marker
+        layout = transition_layout_for(self.profiles[0], self.profiles[1], entry, beats=(self.grid["beats"],) * 2)
+        self.assertAlmostEqual(layout["a_end"], layout["junction"], places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

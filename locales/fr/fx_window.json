@@ -139,5 +139,8 @@
   "On track": "Sur la piste",
   "layer": "couche",
   "no return (stays filtered)": "aucun (reste filtré)",
-  "Applied from top to bottom, each effect on what the ones above it left (an echo under a filter echoes the filtered sound). 'On track': the side of the junction it writes to, 'layer' mixes over the result.": "Appliqués de haut en bas, chaque effet sur ce que les précédents ont laissé (un echo sous un filtre fait l'écho du son filtré). « Sur la piste » : le côté de la jonction sur lequel il écrit, « couche » se mélange par-dessus le résultat."
+  "Applied from top to bottom, each effect on what the ones above it left (an echo under a filter echoes the filtered sound). 'On track': the side of the junction it writes to, 'layer' mixes over the result.": "Appliqués de haut en bas, chaque effet sur ce que les précédents ont laissé (un echo sous un filtre fait l'écho du son filtré). « Sur la piste » : le côté de la jonction sur lequel il écrit, « couche » se mélange par-dessus le résultat.",
+  "A ends (beats):": "Fin de A (temps) :",
+  "(planned: {beats})": "(prévu : {beats})",
+  "Planned": "Prévu"
 }

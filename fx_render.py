@@ -50,10 +50,19 @@ def _b_region_seconds(effects: Sequence[Dict], b_duration: float) -> float:
     return tfx.B_REGION_S
 
 
-def _cues(profile: Dict) -> Dict[str, float]:
+def _cues(profile: Dict, entry: Optional[Dict] = None) -> Dict[str, float]:
+    """
+    The four cue positions of a track. `entry` is the FX entry of the transition this track leaves by:
+    its 'a_end_s' moves where A stops being heard, so the transition no longer has to last as long as
+    the plan made it (make_context still holds the marker at the junction if it lands before it).
+    """
     duration = float(profile.get("duration") or 0.0)
+    outro_end = float(profile.get("outro_end", duration))
+    marker = (entry or {}).get("a_end_s")
+    if marker is not None:
+        outro_end = float(marker)
     return {"intro_start": float(profile.get("intro_start", 0.0)), "intro_end": float(profile.get("intro_end", 0.0)),
-            "outro_start": float(profile.get("outro_start", duration)), "outro_end": float(profile.get("outro_end", duration))}
+            "outro_start": float(profile.get("outro_start", duration)), "outro_end": outro_end}
 
 
 def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optional[Dict]], bases: Dict[str, str],
@@ -134,6 +143,8 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             problems.append(N_("transition {n}: skipped (a track cannot be read)").format(n=a + 1))
             continue
         effects = _active(entry["effects"])
+        # load() caches the cues per track, before the pair is known: A's own transition sets where it ends
+        cues[a]["outro_end"] = _cues(profiles[a], entry)["outro_end"]
         ctx = tfx.make_context(audio[a], rates[a], beats[a], cues[a]["outro_start"], cues[a]["outro_end"],
                                audio[b], rates[b], beats[b], cues[b]["intro_start"], entry.get("nudge_ms", 0.0),
                                b_region_s=_b_region_seconds(effects, len(audio[b]) / rates[b]))
@@ -213,7 +224,7 @@ def render_preview(profile_a: Dict, profile_b: Dict, entry: Dict, bases: Dict[st
     a_audio, b_audio = tfx.to_stereo(a_audio), tfx.to_stereo(b_audio)
     a_beats, wa = _beats_for(profile_a, grids, len(a_audio) / a_sr)
     b_beats, wb = _beats_for(profile_b, grids, len(b_audio) / b_sr)
-    ca, cb = _cues(profile_a), _cues(profile_b)
+    ca, cb = _cues(profile_a, entry), _cues(profile_b)
     ctx = tfx.make_context(a_audio, a_sr, a_beats, ca["outro_start"], ca["outro_end"], b_audio, b_sr, b_beats,
                            cb["intro_start"], entry.get("nudge_ms", 0.0))
     tfx.apply_effects(ctx, _active(entry.get("effects")))
@@ -233,7 +244,7 @@ def transition_layout_for(profile_a: Dict, profile_b: Dict, entry: Dict, length:
                           beats: Optional[Tuple[List[float], List[float]]] = None, sample_seconds=None) -> Dict:
     """tfx.transition_layout for two planned tracks and their FX entry (the drawing of the transition)."""
     a_beats, b_beats = beats or transition_beats(profile_a, profile_b)
-    ca, cb = _cues(profile_a), _cues(profile_b)
+    ca, cb = _cues(profile_a, entry), _cues(profile_b)
     return tfx.transition_layout(a_beats, b_beats, ca["outro_start"], ca["outro_end"], cb["intro_start"],
                                  _active((entry or {}).get("effects")), (entry or {}).get("nudge_ms", 0.0),
                                  sample_seconds, length)
