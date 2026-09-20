@@ -210,7 +210,6 @@
   "Mixxx Export": "Export Mixxx",
   "Mixxx export: {cues} cues written, {missing} tracks missing": "Export Mixxx : {cues} cues écrits, {missing} morceaux manquants",
   "Update transition sheet": "Mettre à jour la feuille de transitions",
-  "Cannot save transitions.json: {error}": "Impossible d'enregistrer transitions.json : {error}",
   "Transition Sheet": "Feuille de transitions",
   "Transition sheet updated with the measurements of the files the set plays (Log tab)": "Feuille de transitions mise à jour avec les mesures des fichiers joués par le set (onglet Log)",
   "Transitions planned: {count} (data: {path}) - transition sheet in the Log tab": "Transitions planifiées : {count} (données : {path}) - feuille de transitions dans l'onglet Log",
@@ -295,5 +294,6 @@
   "FFmpeg ready: {path}": "FFmpeg prêt : {path}",
   "FFmpeg downloaded: M4A/AAC files can now be read": "FFmpeg téléchargé : les fichiers M4A/AAC peuvent maintenant être lus",
   "FFmpeg will be downloaded from:\n{url}\n\ninto:\n{folder}\n\nFFmpeg is free software published under the GPL by its own authors; DynaMix only fetches it for you. The archive weighs several tens of MB.\n\nContinue?": "FFmpeg va être téléchargé depuis :\n{url}\n\nvers :\n{folder}\n\nFFmpeg est un logiciel libre publié sous licence GPL par ses propres auteurs ; DynaMix ne fait que le récupérer pour vous. L'archive pèse plusieurs dizaines de Mo.\n\nContinuer ?",
-  "Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH. 'Download' fetches FFmpeg from its own authors into the DynaMix folder: it is free software under the GPL and is not part of DynaMix.": "Utile seulement pour les fichiers M4A/AAC (MP3, WAV, FLAC et OGG n'ont besoin de rien). Vide = celui du PATH. « Télécharger » récupère FFmpeg auprès de ses auteurs dans le dossier DynaMix : c'est un logiciel libre sous licence GPL, il ne fait pas partie de DynaMix."
+  "Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH. 'Download' fetches FFmpeg from its own authors into the DynaMix folder: it is free software under the GPL and is not part of DynaMix.": "Utile seulement pour les fichiers M4A/AAC (MP3, WAV, FLAC et OGG n'ont besoin de rien). Vide = celui du PATH. « Télécharger » récupère FFmpeg auprès de ses auteurs dans le dossier DynaMix : c'est un logiciel libre sous licence GPL, il ne fait pas partie de DynaMix.",
+  "Cannot save the transition sheet: {error}": "Impossible d'enregistrer la feuille de transitions : {error}"
 }

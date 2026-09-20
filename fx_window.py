@@ -511,15 +511,23 @@ class TransitionFxPanel(ttk.Frame):
         # back on the planned beat: drop the marker instead, so the transition follows the plan again
         seconds = None if beats == planned else self._a_end_seconds(beats)
         if self.project.set_fx_a_end(a, b, seconds):
-            self._saved()
+            self._a_end_saved()
 
     def reset_a_end(self):
         if self.pair_index is None:
             return
         a, b = self.pair()
         if self.project.set_fx_a_end(a, b, None):
-            self._saved()
+            self._a_end_saved()
         self.refresh_a_end()
+
+    def _a_end_saved(self):
+        """A moved marker changes the blend lengths: the sheet and the set map must say so too."""
+        self._saved()
+        if hasattr(self.app, "_write_sheet_files"):
+            self.app._write_sheet_files()
+        if hasattr(self.app, "_render_overview"):
+            self.app._render_overview()
 
     # ------------------------------------------------------------------ orphan FX
     def _refresh_orphans(self):

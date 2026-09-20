@@ -159,7 +159,8 @@ makes the transition longer than wanted and forces every effect to stretch over 
 counts beats after the junction and the button beside it puts the transition back on the planned
 value. It is the outro cue Mixxx fades on, so it really shortens the Auto DJ crossfade, and the
 incoming track's intro requirement follows it. The marker is kept per transition, outside the
-plan, so re-planning does not lose it.
+plan, so re-planning does not lose it; the transition sheet, the set map and `exports/transitions.txt`
+and `.json` are rewritten from it, so what they describe is what the set will really play.
 
 ## Mastering check, pre-master pass and band analysis
 

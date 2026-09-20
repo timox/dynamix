@@ -158,6 +158,17 @@ class TestSetProjectFx(unittest.TestCase):
         self.assertIsNone(self.p.fx_for_pair(self.a, self.b))
         self.assertIsNotNone(self.p.data["fx"]["render"])
 
+    def test_with_a_end_markers_copies_and_leaves_the_plan_alone(self):
+        """The sheet reads the markers through copies: writing them into the plan would defeat keeping them apart."""
+        self.p.set_fx_a_end(self.a, self.b, 9.0)
+        plan = [{"file_path": x, "outro_start": 5.0, "outro_end": 20.0} for x in (self.a, self.b)]
+        out = self.p.with_a_end_markers(plan)
+        self.assertEqual([p["outro_end"] for p in out], [9.0, 20.0])
+        self.assertEqual([p["outro_end"] for p in plan], [20.0, 20.0])
+        self.assertIsNot(out[0], plan[0])
+        self.assertIsNot(out[1], plan[1])                        # copied even when untouched
+        self.assertEqual(self.p.a_end_markers(), {self.a: 9.0})
+
     def test_a_marker_alone_is_not_an_active_fx_pair(self):
         """A marker without effects must not make 'Apply all FX' think there is something to render."""
         self.p.set_fx_a_end(self.a, self.b, 9.0)

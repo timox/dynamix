@@ -329,13 +329,16 @@ def main():
     # a project's measurements are taken on the files the set plays (its pre-mastered copies unless --originals)
     measure = project.premaster_map() if project is not None and not args.originals else None
     planner.plan(progress_callback=lambda i, n, name: print(f"Planning {i}/{n}: {name}"), measure=measure)
+    # the sheet and the charts describe the set as it will play: the 'A ends' markers of the FX tab are
+    # applied to a copy, never to the plan the project stores
+    sheet = planner.for_cues(project.with_a_end_markers(planner.profiles)) if project is not None else planner
     print()
-    print(planner.to_text())
+    print(sheet.to_text())
     if args.sheet:
-        planner.save_text(args.sheet)
+        sheet.save_text(args.sheet)
         print(f"Transition sheet saved to {args.sheet}")
     if args.json:
-        planner.save_json(args.json)
+        sheet.save_json(args.json)
         print(f"Transition data saved to {args.json}")
     if project is not None:
         project.set_transitions(planner.to_dict())
@@ -344,7 +347,7 @@ def main():
     if project is not None and args.save_charts is None and args.sheet is None:
         # a project always keeps its sheet and charts in exports/
         args.sheet = os.path.join(project.exports_dir, "transitions.txt")
-        planner.save_text(args.sheet)
+        sheet.save_text(args.sheet)
         args.save_charts = os.path.join(project.exports_dir, "charts")
     if args.save_charts:
         import matplotlib
@@ -358,12 +361,12 @@ def main():
             curve = ((project.step_state("setlist").get("details") or {}).get("curve")
                      or project.options.get("energy_curve", "build"))
             targets = set_proposer.curve_targets(tracks, {"build_up": "build"}.get(curve, curve), args.mix_bars)
-        charts.save(charts.set_overview(planner.profiles, targets), os.path.join(args.save_charts, "set_overview.png"))
-        charts.save(charts.set_timeline(planner.profiles, planner.transitions), os.path.join(args.save_charts, "set_map.png"))
+        charts.save(charts.set_overview(sheet.profiles, targets), os.path.join(args.save_charts, "set_overview.png"))
+        charts.save(charts.set_timeline(sheet.profiles, sheet.transitions), os.path.join(args.save_charts, "set_map.png"))
         from mastering import playlist_tone_target
-        reports = [p["mastering"] for p in planner.profiles if p.get("mastering") and p["mastering"].get("lufs") is not None]
+        reports = [p["mastering"] for p in sheet.profiles if p.get("mastering") and p["mastering"].get("lufs") is not None]
         median = playlist_tone_target(reports) if reports else None
-        for i, prof in enumerate(planner.profiles, 1):
+        for i, prof in enumerate(sheet.profiles, 1):
             charts.save(charts.track_detail(prof, median), os.path.join(args.save_charts, f"track_{i:02d}.png"))
         print(f"Charts written to {args.save_charts}")
 

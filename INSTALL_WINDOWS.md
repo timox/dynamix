@@ -254,7 +254,9 @@ couvrir. Le champ compte en temps après la jonction ; le bouton **Prévu** à c
 remet la valeur du plan. C'est le repère d'outro sur lequel Mixxx fait son fondu :
 le raccourcir raccourcit vraiment le fondu de l'Auto DJ, et l'intro exigée du
 morceau entrant suit automatiquement. Le marqueur est gardé hors du plan, donc
-replanifier les transitions ne le perd pas.
+replanifier les transitions ne le perd pas. La feuille de transitions, la carte
+du set et les fichiers `exports\transitions.txt` et `.json` sont réécrits à
+chaque déplacement : ce qu'ils décrivent est ce que le set jouera vraiment.
 
 Ajoutez le dossier `premaster\` du projet dans la bibliothèque Mixxx : l'export
 Mixxx et la playlist utilisent automatiquement les copies corrigées. En ligne de commande :

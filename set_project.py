@@ -484,6 +484,17 @@ class SetProject:
         entry.setdefault("a_end_s", None)  # entries saved before the 'A ends' marker existed
         return entry
 
+    def a_end_markers(self) -> Dict[str, float]:
+        """file path of A -> where A stops being heard, for every transition whose marker was moved."""
+        return {entry["a"]: float(entry["a_end_s"]) for entry in self.data["fx"]["transitions"].values()
+                if entry.get("a") and entry.get("a_end_s") is not None}
+
+    def with_a_end_markers(self, profiles: List[Dict]) -> List[Dict]:
+        """Copies of these profiles whose outro end is the one the set will really use (for the sheet and the charts)."""
+        markers = self.a_end_markers()
+        return [dict(p, outro_end=markers[p["file_path"]]) if p.get("file_path") in markers else dict(p)
+                for p in profiles]
+
     def a_end_of(self, a: str, b: str) -> Optional[float]:
         """Where A stops being heard on this transition, in seconds of A; None = wherever the plan put it."""
         entry = self.fx_for_pair(a, b)
@@ -579,9 +590,7 @@ class SetProject:
         else the pre-mastered copy, else the original. Returns (profiles, {'fx': n, 'premaster': n}).
         """
         fx, premaster = self.fx_map(), self.premaster_map()
-        # where A ends, for every track that leaves a transition by a moved marker (an FX copy already has it baked in)
-        markers = {entry["a"]: entry["a_end_s"] for entry in self.data["fx"]["transitions"].values()
-                   if entry.get("a") and entry.get("a_end_s") is not None}
+        markers = self.a_end_markers()  # an FX copy already has its moved 'A ends' baked into its own cues
         out, counts = [], {"fx": 0, "premaster": 0}
         for p in profiles:
             src = p.get("file_path")

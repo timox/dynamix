@@ -16,6 +16,7 @@ tempo adjustment, exit and entry times), which can be printed, saved as text
 or pushed to Mixxx (see mixxx_export.py) so that Auto DJ follows them.
 """
 
+import copy
 import json
 import os
 from typing import Callable, Dict, List, Optional, Tuple
@@ -350,10 +351,12 @@ class TransitionPlanner:
         lines.append("    " + tr("{bpm:.1f} BPM{beat} | {key} | energy {energy:.1f}/10 | {duration}",
                                   bpm=float(p.get('bpm') or 0), beat=beat, key=p.get('key') or '-',
                                   energy=float(p.get('energy_level') or 0), duration=self._fmt(p.get('duration') or 0)))
+        # the blend is the outro section itself, not the mix length the track was planned for: the end of a
+        # short track, or an 'A ends' marker moved in the FX tab, makes the real blend shorter than planned
         lines.append("    " + tr("intro {intro_start} -> {intro_end}   outro {outro_start} -> {outro_end}   blend ~{blend:.0f}s",
                                   intro_start=self._fmt(p['intro_start']), intro_end=self._fmt(p['intro_end']),
                                   outro_start=self._fmt(p['outro_start']), outro_end=self._fmt(p['outro_end']),
-                                  blend=float(p.get('mix_duration') or 0)))
+                                  blend=max(0.0, float(p['outro_end']) - float(p['outro_start']))))
         m = p.get('mastering')
         measured = p.get('measured_file')
         if measured and measured != p['file_path']:
@@ -435,6 +438,20 @@ class TransitionPlanner:
                                       exit=self._fmt(t['exit_time']), entry=self._fmt(t['entry_time']), blend=t['crossfade_seconds']))
             lines.append("    " + "; ".join(tr_text(note) for note in t['notes']))
         return "\n".join(lines) + "\n"
+
+    def for_cues(self, profiles: List[Dict]) -> "TransitionPlanner":
+        """
+        The same plan read with other cue positions, its transitions rebuilt (scores, notes, blend lengths).
+
+        Used for the transition sheet, which must describe the set as it will really play: the 'A ends'
+        markers of the FX tab move an outro end without changing the plan itself. Neither this planner
+        nor the profiles handed in are modified.
+        """
+        other = copy.copy(self)
+        other.profiles = [dict(p) for p in profiles]
+        other.transitions = []
+        other._build_transitions()
+        return other
 
     def to_dict(self) -> Dict:
         return {'tracks': self.profiles, 'transitions': self.transitions}

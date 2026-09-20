@@ -1480,14 +1480,36 @@ class SetBuilderMixin:
             self.root.after(0, done)
         return self._start_task(tr("Update transition sheet"), work)
 
-    def _transition_report(self, updated=False):
-        """The transition sheet as a report in the Log tab, and its data as exports/transitions.json."""
+    def _sheet_planner(self):
+        """The plan as the set will really play it: the 'A ends' markers applied, the plan itself untouched."""
         planner = self.transition_planner
+        if self.project is None or not planner.profiles:
+            return planner
+        return planner.for_cues(self.project.with_a_end_markers(planner.profiles))
+
+    def _write_sheet_files(self):
+        """
+        Keep exports/transitions.txt and .json on the set as it will really play; returns the json path.
+
+        Overwritten in place, unlike the dated snapshots of exports/reports: moving an 'A ends' marker
+        must update them without adding a report every time the field is typed in.
+        """
+        if self.project is None or self.transition_planner is None or not self.transition_planner.profiles:
+            return None
+        planner = self._sheet_planner()
+        title = f"DynaMix Transition Sheet - {self.project.name}"
         path = None
         try:
             path = planner.save_json(os.path.join(self.project.exports_dir, "transitions.json"))
+            planner.save_text(os.path.join(self.project.exports_dir, "transitions.txt"), title)
         except Exception as e:
-            self._report_error(tr("Cannot save transitions.json: {error}", error=e), e)
+            self._report_error(tr("Cannot save the transition sheet: {error}", error=e), e)
+        return path
+
+    def _transition_report(self, updated=False):
+        """The transition sheet as a report in the Log tab, and its data in exports/."""
+        planner = self._sheet_planner()
+        path = self._write_sheet_files()
         self.add_report(tr("Transition Sheet"), planner.to_text(f"DynaMix Transition Sheet - {self.project.name}"), show=False)
         if updated:
             self.update_status(tr("Transition sheet updated with the measurements of the files the set plays (Log tab)"))
@@ -1533,7 +1555,8 @@ class SetBuilderMixin:
         self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:
-            self._show_figure(self.overview_frame, charts.set_timeline(planner.profiles, planner.transitions,
+            sheet = self._sheet_planner()  # the set map draws the same blends as the sheet: markers applied
+            self._show_figure(self.overview_frame, charts.set_timeline(sheet.profiles, sheet.transitions,
                                                                        fx_labels=self._fx_labels()), replace=False)
     
     def _render_premaster(self):

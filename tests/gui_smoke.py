@@ -220,6 +220,14 @@ def scenario():
                    and abs(win.last_layout["a_end"] - marker) < 0.05, 10.0),
               "the chart follows the A-ends marker")
         check(win._a_end_beats()[0] == max(0, planned - 4), "the field reads the marker back in beats")
+        sheet_path = os.path.join(app.project.exports_dir, "transitions.txt")
+        check(os.path.isfile(sheet_path), "moving the marker writes the transition sheet")
+        with open(sheet_path, encoding="utf-8") as f:
+            sheet = f.read()
+        fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"                      # noqa: E731 - planner._fmt
+        outro_start = win.profiles[0]["outro_start"]
+        check(f"outro {fmt(outro_start)} -> {fmt(marker)}" in sheet,
+              f"the sheet follows the marker (wanted outro {fmt(outro_start)} -> {fmt(marker)})")
         win.reset_a_end()
         check(app.project.a_end_of(a, b) is None and win.a_end_var.get() == str(planned),
               "'Planned' puts the transition back on what the plan gives")
