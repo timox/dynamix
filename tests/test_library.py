@@ -119,6 +119,63 @@ class TestScanMany(unittest.TestCase):
         from library import scan_many
         self.assertEqual(scan_many([], use_cache=False), ([], []))
 
+    def test_same_named_folders_are_told_apart(self):
+        """Sample packs are usually sorted into 'loops' and 'oneshots': the bare folder name is not enough."""
+        from library import scan_many
+        sr = 8000
+        deep = []
+        for pack in ("Vengeance", "Splice"):
+            folder = os.path.join(self.tmp, "Packs", pack, "loops")
+            os.makedirs(folder)
+            sf.write(os.path.join(folder, "riser.wav"), np.zeros(sr, dtype="float32"), sr)
+            deep.append(folder)
+        entries, _ = scan_many(deep + [self.a], use_cache=False)
+        labels = {(e["filename"], e["root_name"]) for e in entries}
+        self.assertIn(("riser.wav", os.path.join("Vengeance", "loops")), labels)
+        self.assertIn(("riser.wav", os.path.join("Splice", "loops")), labels)
+        self.assertIn(("riser.wav", "Vengeance"), labels)          # that one is already unique: kept short
+        self.assertIn(("zap.wav", "Vengeance"), labels)
+
+
+class TestRootLabels(unittest.TestCase):
+    """The shortest tail of each path that tells them all apart."""
+
+    def labels(self, paths):
+        from library import root_labels
+        return [root_labels([os.path.normpath(p) for p in paths])[os.path.normpath(p)] for p in paths]
+
+    def test_unique_names_stay_short(self):
+        self.assertEqual(self.labels([r"D:\Samples\Perso", r"D:\Samples\Splice"]), ["Perso", "Splice"])
+
+    def test_a_clash_grows_by_one_folder_at_a_time(self):
+        self.assertEqual(self.labels([r"D:\Packs\Vengeance\loops", r"D:\Packs\Splice\loops"]),
+                         [os.path.join("Vengeance", "loops"), os.path.join("Splice", "loops")])
+
+    def test_only_the_clashing_ones_grow(self):
+        got = self.labels([r"D:\Packs\Vengeance\loops", r"D:\Packs\Splice\loops", r"D:\Packs\Perso"])
+        self.assertEqual(got, [os.path.join("Vengeance", "loops"), os.path.join("Splice", "loops"), "Perso"])
+
+    def test_a_clash_that_needs_the_drive(self):
+        self.assertEqual(self.labels([r"D:\loops", r"E:\loops"]),
+                         [os.path.normpath(r"D:\loops"), os.path.normpath(r"E:\loops")])
+
+    def test_siblings_of_a_lengthened_folder_follow_it(self):
+        """'oneshots' alone would not say which pack it belongs to while its sibling 'loops' does."""
+        got = self.labels([r"D:\Packs\Vengeance\loops", r"D:\Packs\Vengeance\oneshots",
+                           r"D:\Packs\Splice\loops", r"D:\Perso"])
+        self.assertEqual(got, [os.path.join("Vengeance", "loops"), os.path.join("Vengeance", "oneshots"),
+                               os.path.join("Splice", "loops"), "Perso"])
+
+    def test_a_lone_folder_is_not_lengthened_by_a_stranger(self):
+        """Only the folders under the same parent follow; an unrelated clash elsewhere changes nothing."""
+        got = self.labels([r"D:\Packs\Vengeance\loops", r"D:\Packs\Splice\loops", r"D:\Other\oneshots"])
+        self.assertEqual(got, [os.path.join("Vengeance", "loops"), os.path.join("Splice", "loops"), "oneshots"])
+
+    def test_one_folder_and_none(self):
+        self.assertEqual(self.labels([r"D:\Packs\loops"]), ["loops"])
+        from library import root_labels
+        self.assertEqual(root_labels([]), {})
+
 
 if __name__ == "__main__":
     unittest.main()

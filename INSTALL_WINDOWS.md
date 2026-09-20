@@ -247,7 +247,13 @@ d'après le BPM écrit dans son nom, répétable).
 Vous pouvez déclarer **plusieurs dossiers de samples** dans l'onglet
 Configuration (**Ajouter…** / **Retirer**) : ils sont lus comme une seule
 liste, et chaque ligne indique de quel dossier vient le sample, de sorte que
-deux fichiers de même nom restent distinguables. Le champ **Filtre** cherche
+deux fichiers de même nom restent distinguables. L'étiquette est le nom du
+dossier, allongé d'un parent à la fois tant que deux dossiers se ressemblent —
+`Vengeance\loops` et `Splice\loops` plutôt que deux fois « loops » — et reste
+courte pour un dossier isolé. Quand un dossier doit être allongé, ses frères du
+même parent le sont aussi, pour qu'un pack s'affiche d'un seul bloc
+(`Vengeance\loops` et `Vengeance\oneshots`, jamais un « oneshots » orphelin qui
+ne dirait pas de quel pack il vient). Le champ **Filtre** cherche
 aussi bien dans le nom du fichier que dans le nom du dossier — taper le nom
 d'un dossier n'affiche que ses samples. Le bouton **Relire** relit les dossiers
 sans quitter l'onglet. Un dossier devenu introuvable est simplement signalé

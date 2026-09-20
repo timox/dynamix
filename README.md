@@ -56,8 +56,9 @@ python gui.py
 
 1. **Configuration** tab: set the projects folder, your **music library folder** (one folder with
    every track you mixed), one or more **FX samples folders** (read as one list; the FX tab names
-   the folder each sample comes from, so two files with the same name stay apart) and the Mixxx
-   database (auto-detected). The
+   the folder each sample comes from, lengthened by a parent at a time until the folders can be
+   told apart, so packs sorted into `loops` and `oneshots` stay readable) and the Mixxx database
+   (auto-detected). The
    interface is available in **English and French** (Language: Auto follows Windows); French texts
    can be corrected in `<DynaMix home>/locales/fr.json`.
 2. **Set Builder** tab: **New project...**, then follow the workflow panel:

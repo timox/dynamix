@@ -71,6 +71,33 @@ def scan(folder: str, progress: Optional[Callable[[int, int, str], None]] = None
     return entries
 
 
+def root_labels(roots: List[str]) -> Dict[str, str]:
+    """
+    A short name for each folder: its own name, lengthened by one parent at a time until they all differ.
+
+    Sample packs are usually sorted into folders called "loops" or "oneshots", so the bare folder name
+    tells nothing apart; a folder whose name is already unique keeps its short label.
+    """
+    parts = {root: [p for p in os.path.normpath(root).split(os.sep) if p] or [root] for root in roots}
+    depths: Dict[str, int] = {}
+    for root in roots:
+        depth = 1
+        for depth in range(1, len(parts[root]) + 1):
+            label = os.sep.join(parts[root][-depth:]).lower()
+            if not any(other != root and os.sep.join(parts[other][-depth:]).lower() == label for other in roots):
+                break
+        depths[root] = depth
+    # a folder that had to grow drags its siblings with it: shown alone, "oneshots" would not say which
+    # pack it belongs to while the "loops" next to it does
+    for root in roots:
+        parent = parts[root][:-1]
+        siblings = [other for other in roots if parts[other][:-1] == parent]
+        deepest = max(depths[other] for other in siblings)
+        for other in siblings:
+            depths[other] = min(deepest, len(parts[other]))
+    return {root: os.sep.join(parts[root][-depths[root]:]) for root in roots}
+
+
 def scan_many(folders: List[str], progress: Optional[Callable[[int, int, str], None]] = None,
               use_cache: bool = True) -> tuple:
     """
@@ -82,6 +109,7 @@ def scan_many(folders: List[str], progress: Optional[Callable[[int, int, str], N
     """
     entries: List[Dict] = []
     missing: List[str] = []
+    roots: List[str] = []
     seen_roots, seen_files = set(), set()
     for folder in folders:
         folder = (folder or "").strip()
@@ -94,12 +122,15 @@ def scan_many(folders: List[str], progress: Optional[Callable[[int, int, str], N
         if not os.path.isdir(root):
             missing.append(folder)
             continue
+        roots.append(root)
+    labels = root_labels(roots)
+    for root in roots:
         for entry in scan(root, use_cache=use_cache):
             key = os.path.normcase(entry["file_path"])
             if key in seen_files:  # reachable from two roots (one nested in the other)
                 continue
             seen_files.add(key)
-            entries.append(dict(entry, root=root, root_name=os.path.basename(root) or root))
+            entries.append(dict(entry, root=root, root_name=labels[root]))
     entries.sort(key=lambda e: (e["filename"].lower(), e["root_name"].lower()))
     if progress:
         progress(len(entries), len(entries), "")
