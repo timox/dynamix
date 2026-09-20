@@ -311,21 +311,18 @@ class TransitionFxPanel(ttk.Frame):
         mid = ttk.Frame(panes)
         panes.add(mid, weight=1)
         ttk.Label(mid, text=tr("FX stack (top to bottom)"), foreground=MUTED).pack(anchor="w")
-        self.fx_tree = ttk.Treeview(mid, columns=("On", "Scope", "Effect"), show="headings", height=12, selectmode="browse")
+        # 8 rows asked for, not 12: the list grows with the pane, and a short one leaves room for the buttons below
+        self.fx_tree = ttk.Treeview(mid, columns=("On", "Scope", "Effect"), show="headings", height=8, selectmode="browse")
         self.fx_tree.heading("On", text=tr("On"))
         self.fx_tree.heading("Scope", text=tr("On track"))
         self.fx_tree.heading("Effect", text=tr("Effect"))
         self.fx_tree.column("On", width=35, anchor="center", stretch=False)
         self.fx_tree.column("Scope", width=55, anchor="center", stretch=False)
         self.fx_tree.column("Effect", width=300, anchor="w")
-        self.fx_tree.pack(fill=tk.BOTH, expand=True)
         self.fx_tree.bind("<<TreeviewSelect>>", lambda e: self.on_fx_selected())
-        ttk.Label(mid, text=tr("The effects are applied from top to bottom, each one on what the ones above it left "
-                               "(an echo under a filter echoes the filtered sound). 'On track' is the side of the "
-                               "junction an effect writes to; a layer is mixed over the result."),
-                  foreground=MUTED, wraplength=320).pack(anchor="w", pady=(4, 0))
+        # buttons and hint are packed to the bottom first: the list gives up the room, never the buttons
         buttons = ttk.Frame(mid)
-        buttons.pack(fill=tk.X, pady=4)
+        buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=4)
         add = ttk.Menubutton(buttons, text=tr("Add ▾"))
         menu = tk.Menu(add, tearoff=False)
         for fx_type in tfx.FX_TYPES:
@@ -336,6 +333,14 @@ class TransitionFxPanel(ttk.Frame):
                               ("▼", lambda: self.move_effect(1)), (tr("Duplicate"), self.duplicate_effect),
                               (tr("On/Off"), self.toggle_effect)):
             ttk.Button(buttons, text=text, command=command).pack(side=tk.LEFT, padx=2)
+        hint = ttk.Label(mid, text=tr("Applied from top to bottom, each effect on what the ones above it left (an echo "
+                                      "under a filter echoes the filtered sound). 'On track': the side of the junction "
+                                      "it writes to, 'layer' mixes over the result."),
+                         foreground=MUTED, justify=tk.LEFT, wraplength=320)
+        hint.pack(side=tk.BOTTOM, anchor="w", fill=tk.X, pady=(4, 0))
+        # wrap on the pane's own width (the sash can be moved); binding on the pane, not the label, avoids a loop
+        mid.bind("<Configure>", lambda e: hint.config(wraplength=max(160, e.width - 8)))
+        self.fx_tree.pack(fill=tk.BOTH, expand=True)
 
         right = ttk.LabelFrame(panes, text=tr("Settings"))
         panes.add(right, weight=2)

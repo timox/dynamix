@@ -207,6 +207,15 @@ def scenario():
         win.trans_tree.selection_set("T0")
         check(pump(lambda: win.pair_index == 0, 2.0), "a transition can be selected")
         check(pump(lambda: win._chart_canvas is not None, 20.0), "the transition chart is drawn with the waveforms")
+        from tkinter import ttk as tkttk
+        # the list gives up the room when the pane is short, so the buttons and the hint below it are packed
+        # to the bottom first: packed to the top they fall out of the pane on a small window
+        stack = win.fx_tree.master
+        row = [c for c in stack.winfo_children() if isinstance(c, tkttk.Frame)][0]
+        check(row.winfo_ismapped() and row.pack_info()["side"] == "bottom",
+              "the FX stack buttons are packed to the bottom of their pane")
+        check(win.fx_tree.pack_info()["expand"] and int(win.fx_tree.cget("height")) <= 8,
+              "the FX stack list is short and grows with the pane")
         win.add_effect("freeze")
         win.add_effect("sample")
         check(pump(lambda: hasattr(win, "sample_list") and win.sample_list.size() == 1, 5.0), "the sample list is shown")
