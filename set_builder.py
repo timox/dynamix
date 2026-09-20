@@ -1729,12 +1729,18 @@ class ConfigTabMixin:
         ttk.Button(grid, text=tr("Browse"), command=lambda: self._cfg_pick_dir(self.cfg_library_var)).grid(row=5, column=2)
         ttk.Label(grid, text=tr("Every track you mixed, in one folder (subfolders included). Scanned in place, never copied."),
                   foreground=MUTED).grid(row=6, column=1, sticky="w", padx=4)
-        ttk.Label(grid, text=tr("FX samples folder:")).grid(row=7, column=0, sticky="w", pady=3)
-        self.cfg_fx_samples_var = tk.StringVar(value=cfg.get("fx_samples_folder") or "")
-        ttk.Entry(grid, textvariable=self.cfg_fx_samples_var, width=70).grid(row=7, column=1, sticky="we", padx=4)
-        ttk.Button(grid, text=tr("Browse"), command=lambda: self._cfg_pick_dir(self.cfg_fx_samples_var)).grid(row=7, column=2)
-        ttk.Label(grid, text=tr("Risers, impacts, sweeps... used by Transition FX (30 s max per sample)."),
-                  foreground=MUTED).grid(row=8, column=1, sticky="w", padx=4)
+        ttk.Label(grid, text=tr("FX samples folders:")).grid(row=7, column=0, sticky="nw", pady=3)
+        self.cfg_fx_samples_list = tk.Listbox(grid, height=4, exportselection=False)
+        self.cfg_fx_samples_list.grid(row=7, column=1, sticky="we", padx=4)
+        for folder in cfg.fx_sample_folders():
+            self.cfg_fx_samples_list.insert(tk.END, folder)
+        fx_buttons = ttk.Frame(grid)
+        fx_buttons.grid(row=7, column=2, columnspan=3, sticky="nw")
+        ttk.Button(fx_buttons, text=tr("Add…"), command=self._cfg_add_fx_samples).pack(fill=tk.X)
+        ttk.Button(fx_buttons, text=tr("Remove"), command=self._cfg_remove_fx_samples).pack(fill=tk.X, pady=2)
+        ttk.Label(grid, text=tr("Risers, impacts, sweeps... used by Transition FX (30 s max per sample). Several "
+                                "folders are read as one list; the FX tab names the folder each sample comes from."),
+                  foreground=MUTED, wraplength=640, justify=tk.LEFT).grid(row=8, column=1, sticky="w", padx=4)
         ttk.Label(grid, text=tr("FFmpeg (optional):")).grid(row=9, column=0, sticky="w", pady=3)
         self.cfg_ffmpeg_var = tk.StringVar(value=cfg.get("ffmpeg_path") or "")
         ttk.Entry(grid, textvariable=self.cfg_ffmpeg_var, width=70).grid(row=9, column=1, sticky="we", padx=4)
@@ -1852,6 +1858,24 @@ class ConfigTabMixin:
         d = filedialog.askdirectory(title=tr("Choose folder"), initialdir=var.get() or None)
         if d:
             var.set(d)
+
+    def _cfg_fx_sample_folders(self):
+        return list(self.cfg_fx_samples_list.get(0, tk.END))
+
+    def _cfg_add_fx_samples(self):
+        folders = self._cfg_fx_sample_folders()
+        d = filedialog.askdirectory(title=tr("Choose an FX samples folder"), initialdir=folders[-1] if folders else None)
+        if not d:
+            return
+        if any(os.path.normcase(os.path.abspath(f)) == os.path.normcase(os.path.abspath(d)) for f in folders):
+            self.cfg_status.config(text=tr("This folder is already in the list: {folder}", folder=d))
+            return
+        self.cfg_fx_samples_list.insert(tk.END, d)
+
+    def _cfg_remove_fx_samples(self):
+        sel = self.cfg_fx_samples_list.curselection()
+        if sel:
+            self.cfg_fx_samples_list.delete(sel[0])
     
     def _cfg_pick_file(self, var):
         f = filedialog.askopenfilename(title=tr("Select mixxxdb.sqlite"), filetypes=[(tr("Mixxx database"), "mixxxdb.sqlite"), ("SQLite", "*.sqlite"),
@@ -1931,7 +1955,10 @@ class ConfigTabMixin:
         cfg.set("projects_root", self.cfg_projects_var.get().strip() or cfg.get("projects_root"))
         cfg.set("mixxx_db", self.cfg_mixxx_var.get().strip())
         cfg.set("library_folder", self.cfg_library_var.get().strip())
-        cfg.set("fx_samples_folder", self.cfg_fx_samples_var.get().strip())
+        fx_folders = self._cfg_fx_sample_folders()
+        fx_changed = fx_folders != cfg.fx_sample_folders()
+        cfg.set("fx_samples_folders", fx_folders)
+        cfg.set("fx_samples_folder", "")  # the single folder of older versions is now in the list
         cfg.set("set_duration", int(self.cfg_duration_var.get()))
         cfg.set("energy_curve", self.cfg_curve_var.get())
         cfg.set("mix_bars", int(self.cfg_bars_var.get()))
@@ -1954,7 +1981,10 @@ class ConfigTabMixin:
             self.refresh_project_list()
         if hasattr(self, "rescan_library"):
             self.rescan_library()
-    
+        # the FX panel read its samples when it was built: without this, changing the folders changes nothing
+        if fx_changed and self.fx_panel is not None and self.fx_panel.winfo_exists():
+            self.fx_panel.scan_samples()
+
     def refresh_environment(self):
         self.env_text.delete("1.0", tk.END)
         self.env_text.insert(tk.END, format_environment_report())

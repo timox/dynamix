@@ -241,8 +241,19 @@ L'onglet **FX** du Set Builder (étape 5) règle chaque transition : choisissez
 une transition, puis empilez des effets — **Freeze** (répète les derniers
 temps du morceau sortant, par exemple 4×1 → 2×2 → 1×4), **Filter** (balayage
 passe-haut, passe-bas ou passe-bande avec résonance), **Echo** (calé au tempo)
-et **Sample** (un sample du dossier de samples FX, calé au tempo du morceau
-d'après le BPM écrit dans son nom, répétable). Le graphique en haut de
+et **Sample** (un sample des dossiers de samples FX, calé au tempo du morceau
+d'après le BPM écrit dans son nom, répétable).
+
+Vous pouvez déclarer **plusieurs dossiers de samples** dans l'onglet
+Configuration (**Ajouter…** / **Retirer**) : ils sont lus comme une seule
+liste, et chaque ligne indique de quel dossier vient le sample, de sorte que
+deux fichiers de même nom restent distinguables. Le champ **Filtre** cherche
+aussi bien dans le nom du fichier que dans le nom du dossier — taper le nom
+d'un dossier n'affiche que ses samples. Le bouton **Relire** relit les dossiers
+sans quitter l'onglet. Un dossier devenu introuvable est simplement signalé
+dans le Log, les autres restent utilisables.
+
+Le graphique en haut de
 l'onglet montre A et B avec leurs fondus et chaque effet sur un axe en temps ;
 **▶ Preview (loop)** fait écouter la transition en boucle. **Apply all FX**
 écrit des copies dans `fx\` ; la playlist et l'export Mixxx les utilisent.

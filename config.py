@@ -19,7 +19,8 @@ DEFAULTS: Dict[str, Any] = {
     "projects_root": os.path.join(os.path.expanduser("~"), "DynaMix Projects"),
     "mixxx_db": "",                # empty = auto-detect
     "library_folder": "",          # every track you mixed, one folder, scanned in place (library.py)
-    "fx_samples_folder": "",       # FX samples (risers, impacts, sweeps) used by the transition FX
+    "fx_samples_folders": [],      # FX samples (risers, impacts, sweeps) used by the transition FX
+    "fx_samples_folder": "",       # the single folder of older versions; read by fx_sample_folders() when the list is empty
     "set_duration": 60,
     "energy_curve": "build",
     "mix_bars": 8,
@@ -76,6 +77,14 @@ class Config:
     @property
     def projects_root(self) -> str:
         return os.path.abspath(os.path.expanduser(self.get("projects_root")))
+
+    def fx_sample_folders(self) -> List[str]:
+        """The FX samples folders, in order; falls back to the single folder of an older config."""
+        folders = [str(f).strip() for f in (self.get("fx_samples_folders") or []) if str(f).strip()]
+        if folders:
+            return folders
+        one = (self.get("fx_samples_folder") or "").strip()
+        return [one] if one else []
 
     def mixxx_db_path(self) -> str:
         """Configured Mixxx database, else the auto-detected one, else ''."""

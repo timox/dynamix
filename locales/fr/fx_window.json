@@ -82,10 +82,8 @@
   "+ step": "+ étape",
   "Loop filter": "Filtre de boucle",
   "Loop echo": "Écho de boucle",
-  "Set the FX samples folder in the Configuration tab.": "Choisissez le dossier des samples FX dans l'onglet Configuration.",
   "Filter:": "Filtre :",
   "▶ Sample": "▶ Sample",
-  "Click a sample to use it, double-click to hear it.": "Cliquez sur un sample pour l'utiliser, double-cliquez pour l'écouter.",
   "too long": "trop long",
   "{name} is longer than {seconds} s": "{name} dure plus de {seconds} s",
   "Sample: {name}": "Sample : {name}",
@@ -142,5 +140,9 @@
   "Applied from top to bottom, each effect on what the ones above it left (an echo under a filter echoes the filtered sound). 'On track': the side of the junction it writes to, 'layer' mixes over the result.": "Appliqués de haut en bas, chaque effet sur ce que les précédents ont laissé (un echo sous un filtre fait l'écho du son filtré). « Sur la piste » : le côté de la jonction sur lequel il écrit, « couche » se mélange par-dessus le résultat.",
   "A ends (beats):": "Fin de A (temps) :",
   "(planned: {beats})": "(prévu : {beats})",
-  "Planned": "Prévu"
+  "Planned": "Prévu",
+  "Add one or more FX samples folders in the Configuration tab.": "Ajoutez un ou plusieurs dossiers de samples FX dans l'onglet Configuration.",
+  "Click a sample to use it, double-click to hear it. The filter matches the file name and the folder it comes from.": "Cliquez sur un sample pour l'utiliser, double-cliquez pour l'écouter. Le filtre cherche dans le nom du fichier et dans le dossier d'origine.",
+  "{count} FX samples folder(s) not found (see the Log)": "{count} dossier(s) de samples FX introuvable(s) (voir le Log)",
+  "Rescan": "Relire"
 }

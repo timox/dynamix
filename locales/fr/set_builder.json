@@ -242,8 +242,6 @@
   "DynaMix data (cache, config):": "Données DynaMix (cache, config) :",
   "Music library folder:": "Dossier de la bibliothèque musicale :",
   "Every track you mixed, in one folder (subfolders included). Scanned in place, never copied.": "Tous les morceaux que vous avez mixés, dans un dossier (sous-dossiers compris). Lus sur place, jamais copiés.",
-  "FX samples folder:": "Dossier des samples FX :",
-  "Risers, impacts, sweeps... used by Transition FX (30 s max per sample).": "Risers, impacts, sweeps... utilisés par les FX de transition (30 s max par sample).",
   "FFmpeg (optional):": "FFmpeg (facultatif) :",
   "Audio editors (right-click a track: Open in...)": "Éditeurs audio (clic droit sur un morceau : Ouvrir dans...)",
   "Arguments: {file} is the audio file; empty = start the editor and show the file in Explorer (Ableton Live and Mixbus do not open an audio file given on their command line).": "Arguments : {file} est le fichier audio ; vide = lancer l'éditeur et afficher le fichier dans l'Explorateur (Ableton Live et Mixbus n'ouvrent pas un fichier audio passé en ligne de commande).",
@@ -295,5 +293,10 @@
   "FFmpeg downloaded: M4A/AAC files can now be read": "FFmpeg téléchargé : les fichiers M4A/AAC peuvent maintenant être lus",
   "FFmpeg will be downloaded from:\n{url}\n\ninto:\n{folder}\n\nFFmpeg is free software published under the GPL by its own authors; DynaMix only fetches it for you. The archive weighs several tens of MB.\n\nContinue?": "FFmpeg va être téléchargé depuis :\n{url}\n\nvers :\n{folder}\n\nFFmpeg est un logiciel libre publié sous licence GPL par ses propres auteurs ; DynaMix ne fait que le récupérer pour vous. L'archive pèse plusieurs dizaines de Mo.\n\nContinuer ?",
   "Only needed for M4A/AAC files (MP3, WAV, FLAC and OGG need nothing). Empty = the one on the PATH. 'Download' fetches FFmpeg from its own authors into the DynaMix folder: it is free software under the GPL and is not part of DynaMix.": "Utile seulement pour les fichiers M4A/AAC (MP3, WAV, FLAC et OGG n'ont besoin de rien). Vide = celui du PATH. « Télécharger » récupère FFmpeg auprès de ses auteurs dans le dossier DynaMix : c'est un logiciel libre sous licence GPL, il ne fait pas partie de DynaMix.",
-  "Cannot save the transition sheet: {error}": "Impossible d'enregistrer la feuille de transitions : {error}"
+  "Cannot save the transition sheet: {error}": "Impossible d'enregistrer la feuille de transitions : {error}",
+  "FX samples folders:": "Dossiers de samples FX :",
+  "Add…": "Ajouter…",
+  "Choose an FX samples folder": "Choisir un dossier de samples FX",
+  "This folder is already in the list: {folder}": "Ce dossier est déjà dans la liste : {folder}",
+  "Risers, impacts, sweeps... used by Transition FX (30 s max per sample). Several folders are read as one list; the FX tab names the folder each sample comes from.": "Risers, impacts, sweeps... utilisés par les FX de transition (30 s max par sample). Plusieurs dossiers sont lus comme une seule liste ; l'onglet FX indique de quel dossier vient chaque sample."
 }

@@ -66,6 +66,59 @@ class TestLibrary(unittest.TestCase):
         self.assertEqual(filter_entries(entries, "HOUSE"), [entries[0]])
         self.assertEqual(filter_entries(entries, "  "), entries)
 
+    def test_filter_entries_also_matches_the_folder_a_sample_came_from(self):
+        from library import filter_entries
+        entries = [{"filename": "riser.wav", "root_name": "Vengeance"}, {"filename": "riser.wav", "root_name": "Splice"}]
+        self.assertEqual(filter_entries(entries, "vengeance"), [entries[0]])
+        self.assertEqual(filter_entries(entries, "riser"), entries)
+
+
+class TestScanMany(unittest.TestCase):
+    """Several FX sample folders are scanned as one list, and a folder that went away must not break it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="dynamix_many_")
+        os.environ["DYNAMIX_HOME"] = os.path.join(self.tmp, "home")
+        analysis_store.reset_store()
+        sr = 8000
+        self.a = os.path.join(self.tmp, "Vengeance")
+        self.b = os.path.join(self.tmp, "Splice")
+        for folder, names in ((self.a, ("riser.wav", "zap.wav")), (self.b, ("riser.wav", "impact.wav"))):
+            os.makedirs(folder)
+            for name in names:
+                sf.write(os.path.join(folder, name), np.zeros(sr, dtype="float32"), sr)
+
+    def tearDown(self):
+        os.environ.pop("DYNAMIX_HOME", None)
+        analysis_store.reset_store()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_folders_are_merged_sorted_and_tagged(self):
+        from library import scan_many
+        entries, missing = scan_many([self.a, self.b], use_cache=False)
+        self.assertEqual(missing, [])
+        self.assertEqual([(e["filename"], e["root_name"]) for e in entries],
+                         [("impact.wav", "Splice"), ("riser.wav", "Splice"), ("riser.wav", "Vengeance"),
+                          ("zap.wav", "Vengeance")])
+        self.assertEqual(entries[0]["root"], self.b)
+
+    def test_a_folder_that_went_away_is_reported_not_raised(self):
+        from library import scan_many
+        gone = os.path.join(self.tmp, "nowhere")
+        entries, missing = scan_many([self.a, gone, ""], use_cache=False)
+        self.assertEqual(missing, [gone])
+        self.assertEqual([e["filename"] for e in entries], ["riser.wav", "zap.wav"])
+
+    def test_the_same_folder_twice_is_read_once(self):
+        from library import scan_many
+        entries, missing = scan_many([self.a, self.a + os.sep], use_cache=False)
+        self.assertEqual(missing, [])
+        self.assertEqual([e["filename"] for e in entries], ["riser.wav", "zap.wav"])
+
+    def test_no_folder_at_all(self):
+        from library import scan_many
+        self.assertEqual(scan_many([], use_cache=False), ([], []))
+
 
 if __name__ == "__main__":
     unittest.main()

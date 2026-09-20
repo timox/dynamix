@@ -214,6 +214,7 @@ class TransitionFxPanel(ttk.Frame):
         self.pair_index = None
         self.fx_index = None
         self.samples = []
+        self._sample_roots = 0          # how many folders the samples came from (the list names them past one)
         self._previewing = False
         self._preview_job = None
         self._preview_seq = 0
@@ -1130,9 +1131,9 @@ class TransitionFxPanel(ttk.Frame):
     def _sample_extras(self, fx):
         box = ttk.LabelFrame(self.settings, text=tr("Sample"))
         box.pack(fill=tk.BOTH, expand=True, pady=4)
-        folder = self.app.config.get("fx_samples_folder") or ""
-        if not folder:
-            ttk.Label(box, text=tr("Set the FX samples folder in the Configuration tab."), foreground=MUTED).pack(anchor="w", padx=4)
+        if not self.app.config.fx_sample_folders():
+            ttk.Label(box, text=tr("Add one or more FX samples folders in the Configuration tab."),
+                      foreground=MUTED, wraplength=420, justify=tk.LEFT).pack(anchor="w", padx=4)
             return
         top = ttk.Frame(box)
         top.pack(fill=tk.X, padx=4)
@@ -1140,7 +1141,10 @@ class TransitionFxPanel(ttk.Frame):
         filter_var = tk.StringVar()
         ttk.Entry(top, textvariable=filter_var, width=20).pack(side=tk.LEFT, padx=4)
         ttk.Button(top, text=tr("▶ Sample"), command=self.audition_sample).pack(side=tk.LEFT, padx=4)
-        ttk.Label(box, text=tr("Click a sample to use it, double-click to hear it."), foreground=MUTED).pack(anchor="w", padx=4)
+        ttk.Button(top, text=tr("Rescan"), command=self.scan_samples).pack(side=tk.LEFT, padx=4)
+        ttk.Label(box, text=tr("Click a sample to use it, double-click to hear it. The filter matches the file name "
+                               "and the folder it comes from."),
+                  foreground=MUTED, wraplength=420, justify=tk.LEFT).pack(anchor="w", padx=4)
         self.sample_current_label = ttk.Label(box, text="", wraplength=420, justify=tk.LEFT)
         self.sample_current_label.pack(anchor="w", padx=4)
         self._refresh_sample_label()
@@ -1151,10 +1155,13 @@ class TransitionFxPanel(ttk.Frame):
         def fill(*a):
             self.sample_list.delete(0, tk.END)
             self._shown_samples = library.filter_entries(self.samples, filter_var.get())
+            # the folder is only worth showing when samples come from several: it tells apart two same-named files
+            show_root = getattr(self, "_sample_roots", 0) > 1
             for entry in self._shown_samples:
                 too_long = (entry.get("duration") or 0) > tfx.MAX_SAMPLE_SECONDS
+                root = f"  · {entry['root_name']}" if show_root and entry.get("root_name") else ""
                 self.sample_list.insert(tk.END, f"{entry['filename']}  ({(entry.get('duration') or 0):.1f} s)"
-                                        + ("  - " + tr("too long") if too_long else ""))
+                                        + ("  - " + tr("too long") if too_long else "") + root)
                 if too_long:
                     self.sample_list.itemconfig(tk.END, foreground="#9a9a9a")
         filter_var.trace_add("write", fill)
@@ -1218,13 +1225,17 @@ class TransitionFxPanel(ttk.Frame):
                    for fx in (entry or {}).get("effects") or [])
 
     def scan_samples(self):
-        folder = (self.app.config.get("fx_samples_folder") or "").strip()
-        if not folder:
+        """Read the FX samples folders in the background; call it again when the configuration changes."""
+        folders = self.app.config.fx_sample_folders()
+        if not folders:
+            self.samples = []
+            self._sample_roots = 0
+            self._refresh_sample_settings()
             return
 
         def work():
             try:
-                entries = library.scan(folder, use_cache=False)
+                entries, missing = library.scan_many(folders, use_cache=False)
             except Exception as e:
                 self.app._report_error(tr("FX samples scan failed: {error}", error=e), e)
                 return
@@ -1233,10 +1244,20 @@ class TransitionFxPanel(ttk.Frame):
                 if not self.winfo_exists():
                     return
                 self.samples = entries
-                if self.fx_index is not None and self.effects()[self.fx_index]["type"] == "sample":
-                    self.show_settings()
+                self._sample_roots = len({e["root"] for e in entries})
+                for folder in missing:
+                    log.warning("FX samples: folder not found: %s", folder)
+                if missing:
+                    self.status(tr("{count} FX samples folder(s) not found (see the Log)", count=len(missing)))
+                self._refresh_sample_settings()
             self.app.root.after(0, done)
         threading.Thread(target=work, daemon=True).start()
+
+    def _refresh_sample_settings(self):
+        """Rebuild the settings pane when it is showing a sample effect (the list of samples just changed)."""
+        if self.fx_index is not None and self.fx_index < len(self.effects()) \
+                and self.effects()[self.fx_index]["type"] == "sample":
+            self.show_settings()
 
     def audition_sample(self):
         sel = self.sample_list.curselection() if hasattr(self, "sample_list") else ()

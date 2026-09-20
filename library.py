@@ -71,9 +71,45 @@ def scan(folder: str, progress: Optional[Callable[[int, int, str], None]] = None
     return entries
 
 
+def scan_many(folders: List[str], progress: Optional[Callable[[int, int, str], None]] = None,
+              use_cache: bool = True) -> tuple:
+    """
+    The audio files of several folders as one list sorted by file name (the FX samples folders).
+
+    Every entry carries the folder it came from ('root') and that folder's name ('root_name'), so two
+    samples with the same file name stay apart. A folder that is gone is returned in the second list
+    rather than raised: the others are still usable. Returns (entries, missing folders).
+    """
+    entries: List[Dict] = []
+    missing: List[str] = []
+    seen_roots, seen_files = set(), set()
+    for folder in folders:
+        folder = (folder or "").strip()
+        if not folder:
+            continue
+        root = os.path.abspath(folder)
+        if os.path.normcase(root) in seen_roots:
+            continue  # the same folder given twice
+        seen_roots.add(os.path.normcase(root))
+        if not os.path.isdir(root):
+            missing.append(folder)
+            continue
+        for entry in scan(root, use_cache=use_cache):
+            key = os.path.normcase(entry["file_path"])
+            if key in seen_files:  # reachable from two roots (one nested in the other)
+                continue
+            seen_files.add(key)
+            entries.append(dict(entry, root=root, root_name=os.path.basename(root) or root))
+    entries.sort(key=lambda e: (e["filename"].lower(), e["root_name"].lower()))
+    if progress:
+        progress(len(entries), len(entries), "")
+    return entries, missing
+
+
 def filter_entries(entries: List[Dict], text: str) -> List[Dict]:
-    """Entries whose file name contains text (case-insensitive)."""
+    """Entries whose file name - or the folder they came from - contains text (case-insensitive)."""
     needle = (text or "").strip().lower()
     if not needle:
         return list(entries)
-    return [e for e in entries if needle in e["filename"].lower()]
+    return [e for e in entries
+            if needle in e["filename"].lower() or needle in (e.get("root_name") or "").lower()]

@@ -54,6 +54,26 @@ class TestConfig(unittest.TestCase):
         c.save()
         self.assertEqual(Config().get("fx_samples_folder"), os.path.join(self.tmp, "FX"))
 
+    def test_several_fx_sample_folders(self):
+        from config import Config
+        c = Config()
+        self.assertEqual(c.fx_sample_folders(), [])
+        one, two = os.path.join(self.tmp, "Vengeance"), os.path.join(self.tmp, "Splice")
+        c.set("fx_samples_folders", [one, "", two, "  "])
+        c.save()
+        self.assertEqual(Config().fx_sample_folders(), [one, two])      # blanks dropped, order kept
+
+    def test_the_single_folder_of_an_older_config_is_still_used(self):
+        """A user who set one folder before must find it there, without doing anything."""
+        from config import Config
+        c = Config()
+        c.set("fx_samples_folder", os.path.join(self.tmp, "FX"))
+        c.save()
+        self.assertEqual(Config().fx_sample_folders(), [os.path.join(self.tmp, "FX")])
+        c.set("fx_samples_folders", [os.path.join(self.tmp, "Other")])  # the list wins once it has something
+        c.save()
+        self.assertEqual(Config().fx_sample_folders(), [os.path.join(self.tmp, "Other")])
+
 
 if __name__ == "__main__":
     unittest.main()

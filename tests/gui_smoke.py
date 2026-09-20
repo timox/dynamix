@@ -271,6 +271,27 @@ def scenario():
         check("riser 120BPM.wav" in win.sample_current_label.cget("text"), "the current sample is shown")
         check(win.effects()[1].get("sample_bpm") == 120.0, "picking a sample reads its BPM from the file name")
         check("120 → 120 BPM" in win.sample_current_label.cget("text"), "the sample's tempo fit is shown")
+
+        # a second samples folder added in the Configuration tab must reach the open FX panel: the panel read
+        # its samples once, when it was built, so changing the folders used to change nothing until a reload
+        second = os.path.join(HOME, "fx_samples_2")
+        os.makedirs(second, exist_ok=True)
+        for name in ("riser 120BPM.wav", "zap.wav"):                # the riser is a same-named file on purpose
+            sf.write(os.path.join(second, name), np.full(sr, 0.2, dtype="float32"), sr)
+        app.cfg_fx_samples_list.delete(0, tk.END)   # the tab was built before this scenario set the folder
+        for folder in (fx_samples, second):
+            app.cfg_fx_samples_list.insert(tk.END, folder)
+        app.save_config()
+        check(pump(lambda: len(win.samples) == 3, 5.0),
+              f"adding a samples folder rescans the open FX panel (got {len(win.samples)} samples)")
+        check(app.config.fx_sample_folders() == [fx_samples, second], "both folders are saved")
+        win.show_settings()
+        shown = [win.sample_list.get(i) for i in range(win.sample_list.size())]
+        check(sum("riser 120BPM.wav" in line for line in shown) == 2, f"both risers are listed, got {shown}")
+        check(all("·" in line for line in shown), f"each sample names the folder it comes from, got {shown}")
+        import library
+        check(len(library.filter_entries(win.samples, "fx_samples_2")) == 2,
+              "the filter matches the folder a sample comes from")
         check("repeats" in win._form_vars, "the sample effect has a Repeats field")
         win._form_vars["repeats"].set("3")
         check(win.effects()[1].get("repeats") == 3 and "×3" in win.fx_tree.item("F1", "values")[2],
