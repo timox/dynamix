@@ -67,7 +67,8 @@ def _cues(profile: Dict, entry: Optional[Dict] = None) -> Dict[str, float]:
 
 def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optional[Dict]], bases: Dict[str, str],
                out_dir: str, fmt: str = "same", grids: Optional[Dict[str, Dict]] = None,
-               progress: Optional[Callable[[int, int, str], None]] = None) -> Tuple[List[Dict], List[str]]:
+               progress: Optional[Callable[[int, int, str], None]] = None,
+               output_names: Optional[Dict[str, str]] = None) -> Tuple[List[Dict], List[str]]:
     """
     profiles: planner profiles in set order (original file_path, intro/outro, bpm, duration).
     fx_for_pair(a_path, b_path) -> {"effects": [...], "nudge_ms": n} or None.
@@ -122,7 +123,8 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
         if reduction > 3.0:
             log.warning("FX render: the limiter reduced %s by %.1f dB", prof.get("filename", ""), reduction)
         base = bases.get(prof["file_path"], prof["file_path"])
-        output = output_path_for(base, out_dir, fmt)
+        output = os.path.join(out_dir, output_names[prof["file_path"]]) if output_names and prof["file_path"] in output_names \
+            else output_path_for(base, out_dir, fmt)
         write_audio(output, x, sr)
         duration = len(x) / sr
         result = {"source": prof["file_path"], "input": base, "output": output,
@@ -156,8 +158,9 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             problems.append(N_("transition {n}: {problem}").format(n=a + 1, problem=exc))
             continue
         a_start = int(round(ctx.a_offset * rates[a]))
-        audio[a] = np.concatenate([audio[a][:a_start], ctx.a]).astype(np.float32)
-        spans[a].append((a_start, len(audio[a])))
+        tail = audio[a][a_start + len(ctx.a):] if not any(fx["type"] == "freeze" for fx in effects) else audio[a][:0]
+        audio[a] = np.concatenate([audio[a][:a_start], ctx.a, tail]).astype(np.float32)
+        spans[a].append((a_start, a_start + len(ctx.a)))
         audio[b] = np.concatenate([audio[b][:b_start], ctx.b, audio[b][b_start + b_len:]]).astype(np.float32)
         spans[b].append((b_start, b_start + len(ctx.b)))
         cues[a]["outro_start"], cues[a]["outro_end"] = ctx.outro_start, ctx.a_end
@@ -227,6 +230,7 @@ def render_preview(profile_a: Dict, profile_b: Dict, entry: Dict, bases: Dict[st
     ca, cb = _cues(profile_a, entry), _cues(profile_b)
     ctx = tfx.make_context(a_audio, a_sr, a_beats, ca["outro_start"], ca["outro_end"], b_audio, b_sr, b_beats,
                            cb["intro_start"], entry.get("nudge_ms", 0.0))
+    tfx.sync_outgoing_to_incoming(ctx)
     tfx.apply_effects(ctx, _active(entry.get("effects")))
     # same rule as render_set: B's intro lasts at least as long as A's outro
     clip, sr = tfx.preview_mix(ctx, max(cb["intro_end"], ctx.junction_b + (ctx.a_end - ctx.junction_a)), length)

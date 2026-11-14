@@ -59,6 +59,13 @@ class TestTransitionMeasurements(unittest.TestCase):
         self.assertEqual(self.planner.profiles[0]["measured_file"], A)
         self.assertNotIn("measured on the pre-mastered copy", self.planner.to_text())
 
+    def test_first_track_starts_at_zero_even_when_its_cached_profile_does_not(self):
+        planner = FakePlanner([{"file_path": A}, {"file_path": B}])
+        planner.profile_track = lambda track: dict(profile(track["file_path"], track["file_path"]), intro_start=3.0)
+        planner.plan()
+        self.assertEqual(planner.profiles[0]["intro_start"], 0.0)
+        self.assertEqual(planner.profiles[1]["intro_start"], 3.0)
+
 
 class TestSheetFollowsTheAEndMarkers(unittest.TestCase):
     """The sheet must describe what the set will really play, not only what the plan first decided."""

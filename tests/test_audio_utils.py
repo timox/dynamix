@@ -38,6 +38,17 @@ class TestAudioAnalyzer(unittest.TestCase):
                 self.assertEqual(analyzer.file_path, "test_file.mp3")
                 self.assertEqual(analyzer.sr, self.sample_rate)
                 self.assertEqual(analyzer.duration, 10.0)
+
+    def test_key_detection_limits_cqt_to_middle_two_minutes(self):
+        analyzer = AudioAnalyzer.__new__(AudioAnalyzer)
+        analyzer.sr = self.sample_rate
+        analyzer.y = np.zeros(300 * self.sample_rate, dtype=np.float32)
+        with patch('librosa.feature.chroma_cqt', return_value=np.ones((12, 10))) as chroma:
+            analyzer.detect_key()
+        y = chroma.call_args.kwargs['y']
+        self.assertEqual(len(y), 120 * self.sample_rate)
+        self.assertTrue(np.shares_memory(y, analyzer.y))
+        self.assertEqual(y[0], analyzer.y[90 * self.sample_rate])
     
     def test_analyze_energy_profile(self):
         """Test energy profile analysis"""
@@ -111,4 +122,4 @@ class TestErrorHandling(unittest.TestCase):
             AudioAnalyzer("nonexistent_file.mp3")
     
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

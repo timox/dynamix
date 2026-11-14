@@ -6,7 +6,7 @@ Set project: one folder per set.
         project.json     selection, tracks, proposals, set list, step states, results
         premaster/       corrected copies written by the pre-master pass
         fx/              copies with transition FX (freeze, filters, echo, samples)
-        exports/         M3U playlists, transition sheets, JSON, charts
+        exports/         M3U playlists, full mix WAV, transition sheets, JSON, charts
         snapshots/       saved states of project.json (settings only, restorable)
         source/          (projects created before version 3 only) imported copies
 
@@ -38,17 +38,19 @@ STEPS: List[Tuple[str, str, bool]] = [
     ("fx", "Add transition FX (optional)", False),
     ("playlist", "Write the playlist file (M3U)", False),
     ("mixxx", "Export intro/outro cues to Mixxx", True),
+    ("full_mix", "Create full mix WAV (optional)", False),
 ]
 
 HINTS: Dict[str, str] = {
     "analyze": "Pick tracks in the Library, add them to the Selection, then 'Analyze selection' (cached tracks are instant).",
-    "setlist": "Click 'Propose', compare the variants, then 'Use this proposal' and adjust the order.",
+    "setlist": "Click 'Propose', choose a variant, edit the order, then finalize the set list before planning transitions.",
     "transitions": "Click 'Plan Transitions' to compute intro/outro sections and the transition sheet.",
     "premaster": "Optional: 'Pre-master Set' writes level-matched, phase-repaired copies into the project's premaster folder; later steps then use those copies.",
     "fx": "Optional: 'Transition FX' adds freezes, filter sweeps, echoes and samples on chosen transitions, rendered into the project's fx folder.",
     "playlist": "Optional: 'Create Playlist' writes the set order as an M3U file into the project's exports folder.",
     "mixxx": "Close Mixxx, then 'Export to Mixxx'. Then load the playlist in Auto DJ.",
-    "done": "All steps done. In Mixxx: add the playlist to Auto DJ, mode 'Full Intro + Outro'.",
+    "full_mix": "Create a single WAV mix of the set, with the planned transitions.",
+    "done": "All required steps done. In Mixxx: add the playlist to Auto DJ, mode 'Full Intro + Outro'. You can also render the full mix to WAV.",
 }
 
 
@@ -131,6 +133,7 @@ class SetProject:
             "failed": [],          # selected files whose analysis failed
             "proposals": None,     # {params, created, variants[]} from set_proposer
             "set_list": [],        # ordered file paths of the chosen proposal / edited set
+            "setlist_finalized": False,
             "steps": {key: {"done": False, "at": None, "details": {}} for key, _, _ in STEPS},
             "transitions": None,
             "premaster": None,
@@ -199,6 +202,7 @@ class SetProject:
 
     def _apply(self, loaded: Dict) -> "SetProject":
         """Merge a saved project.json content into the current data (defaults kept for missing keys)."""
+        legacy_setlist_done = bool((loaded.get("steps") or {}).get("setlist", {}).get("done"))
         for key, value in loaded.items():
             if key == "steps":
                 for step_key, state in value.items():
@@ -211,6 +215,8 @@ class SetProject:
                                    "render": (value or {}).get("render")}
             else:
                 self.data[key] = value
+        if "setlist_finalized" not in loaded:
+            self.data["setlist_finalized"] = legacy_setlist_done
         self._migrate()
         return self
 
@@ -366,10 +372,12 @@ class SetProject:
 
     def set_set_list(self, tracks: List[Dict]) -> None:
         self.data["set_list"] = [t["file_path"] for t in tracks]
+        self.data["setlist_finalized"] = False
 
     def set_order(self, file_paths: List[str]) -> None:
         known = {t["file_path"] for t in self.data["tracks"]}
         self.data["set_list"] = [p for p in file_paths if p in known]
+        self.data["setlist_finalized"] = False
         self.invalidate_from("setlist")
 
     def add_to_set(self, file_path: str, position: Optional[int] = None) -> None:
@@ -379,11 +387,13 @@ class SetProject:
             self.data["set_list"].append(file_path)
         else:
             self.data["set_list"].insert(max(0, position), file_path)
+        self.data["setlist_finalized"] = False
         self.invalidate_from("setlist")
 
     def remove_from_set(self, file_path: str) -> None:
         if file_path in self.data["set_list"]:
             self.data["set_list"].remove(file_path)
+            self.data["setlist_finalized"] = False
             self.invalidate_from("setlist")
 
     def move_in_set(self, file_path: str, delta: int) -> int:
@@ -395,6 +405,7 @@ class SetProject:
         j = max(0, min(len(lst) - 1, i + delta))
         if i != j:
             lst.insert(j, lst.pop(i))
+            self.data["setlist_finalized"] = False
             self.invalidate_from("setlist")
         return j
 
@@ -450,7 +461,7 @@ class SetProject:
                 "fx_pending": self.fx_pending()}
 
     def audio_used_text(self, translate=None) -> str:
-        """One line saying which audio the FX, the playlist and the Mixxx export use (translate: i18n.tr for the GUI)."""
+        """One line saying which audio the set's exports and FX use (translate: i18n.tr for the GUI)."""
         t = translate or (lambda text, **values: text.format(**values))
         s = self.audio_sources()
         if not s["total"]:
@@ -463,7 +474,7 @@ class SetProject:
         elif not s["premaster_ready"]:
             text += t(" - no pre-master yet")
         if s["fx_pending"]:
-            text += t(" - FX not rendered on {n} transition(s): click 'Apply all FX'", n=s["fx_pending"])
+            text += t(" - FX not rendered on {n} transition(s) (apply before M3U/Mixxx export; WAV renders them)", n=s["fx_pending"])
         return text
 
     # ------------------------------------------------------------- transition FX
@@ -747,6 +758,7 @@ class SetProject:
                 result["bytes_deleted"] += size
         self.data.update(selection=[], tracks=[], failed=[], proposals=None, set_list=[],
                          transitions=None, premaster=None, fx={"transitions": {}, "render": None})
+        self.data["setlist_finalized"] = False
         if delete_imported:
             self.data["imported"] = []
         for key, _, _ in STEPS:
@@ -771,6 +783,8 @@ class SetProject:
                 continue  # the pre-mastered copies do not depend on the transitions
             self.mark(later, done=False)
         if step in ("analyze", "setlist"):
+            self.data["setlist_finalized"] = False
+        if step in ("analyze", "setlist"):
             self.data["transitions"] = None
             self.data["premaster"] = None
         if step in ("analyze", "setlist", "transitions", "premaster"):
@@ -780,6 +794,8 @@ class SetProject:
         return self.data["steps"].get(step, {"done": False, "at": None, "details": {}})
 
     def is_done(self, step: str) -> bool:
+        if step == "setlist":
+            return bool(self.data.get("setlist_finalized"))
         return bool(self.step_state(step).get("done"))
 
     def next_step(self) -> Tuple[str, str]:
@@ -797,10 +813,10 @@ class SetProject:
                     proposals=len(self.proposal_variants()), set_list=len(self.data['set_list']))]
         for key, label, required in STEPS:
             state = self.step_state(key)
-            mark = "[x]" if state["done"] else "[ ]"  # optional steps say so in their label
+            mark = "[x]" if self.is_done(key) else "[ ]"  # optional steps say so in their label
             when = f" - {state['at']}" if state.get("at") else ""
             details = state.get("details") or {}
-            extra = ", ".join(f"{k}={v}" for k, v in details.items() if k in ("count", "out_dir", "playlist", "db", "file", "cues"))
+            extra = ", ".join(f"{k}={v}" for k, v in details.items() if k in ("count", "out_dir", "playlist", "db", "file", "cues", "format"))
             lines.append(f"  {mark} {tr(label)}{when}{(' | ' + extra) if extra else ''}")
         lines.append(self.audio_used_text(translate=tr))
         key, hint = self.next_step()

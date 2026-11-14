@@ -5,7 +5,7 @@ reports, pre-master, FX render...) runs in a worker thread as a Task that
 reports its progress and can be stopped.
 
 Stopping is cooperative: the worker's progress callback raises TaskCancelled
-at its next call, i.e. between two tracks. TaskCancelled derives from
+at its next call, between tracks or output chunks. TaskCancelled derives from
 BaseException so the `except Exception` blocks of the analysis code let it
 through; a stopped task never applies its results to the project.
 """

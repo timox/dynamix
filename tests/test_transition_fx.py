@@ -32,6 +32,12 @@ def ctx_for(a, b, outro_start=4.0, outro_end=6.0, intro_start=2.0, b_sr=SR):
 
 
 class TestGridAndValidation(unittest.TestCase):
+    def test_context_does_not_copy_silent_audio_after_a_ends(self):
+        audio = np.zeros((60 * SR, 2), dtype=np.float32)
+        ctx = ctx_for(audio, audio)
+        self.assertEqual(len(ctx.a), 7 * SR)
+        self.assertEqual(len(audio), 60 * SR)
+
     def test_beat_time(self):
         beats = [0.0, 0.5, 1.0, 1.6]
         self.assertAlmostEqual(tfx.beat_time(beats, 1, 1), 1.0)
@@ -100,7 +106,7 @@ class TestFilters(unittest.TestCase):
         a = sine(100, 8)
         ctx = ctx_for(a, np.zeros_like(a))  # A audible until 6.0 s, one beat = 0.5 s
         tfx.apply_effects(ctx, [dict(tfx.new_effect("filter"), kind="highpass", start_hz=20, end_hz=2000, beats=4)])
-        np.testing.assert_array_equal(ctx.a[int(6.5 * SR):], a[int(6.5 * SR):])
+        np.testing.assert_array_equal(ctx.a[int(6.5 * SR):], a[int(6.5 * SR):len(ctx.a)])
 
     def test_incoming_lowpass_opens_and_returns_dry(self):
         b = sine(5000, 10)
@@ -213,7 +219,7 @@ class TestFreeze(unittest.TestCase):
         freeze = tfx.new_effect("freeze")
         with self.assertRaisesRegex(ValueError, "only one freeze per transition"):
             tfx.apply_effects(ctx, [freeze, dict(freeze, capture_offset_beats=-4)])
-        np.testing.assert_array_equal(ctx.a, a)   # nothing applied
+        np.testing.assert_array_equal(ctx.a, a[:len(ctx.a)])   # nothing applied
         tfx.apply_effects(ctx, [freeze, dict(freeze, enabled=False)])   # a disabled second freeze is fine
         self.assertAlmostEqual(ctx.a_end, 6.0, places=3)
 
@@ -372,6 +378,19 @@ class TestSampleTempo(unittest.TestCase):
         self.assertEqual(slow.shape[1], 2)
         self.assertIs(tfx.fit_tempo(data, SR, 1.3, "off"), data)
         self.assertIs(tfx.fit_tempo(data, SR, 1.0, "varispeed"), data)
+
+    def test_outgoing_tempo_follows_incoming_only_during_its_exit(self):
+        a = sine(440, 12.0)
+        b = sine(660, 12.0)
+        b_beats = [i * 0.6 for i in range(21)]  # 100 BPM
+        ctx = tfx.make_context(a, SR, grid(12.0), 6.0, 8.0, b, SR, b_beats, 6.0)
+        original_prefix = ctx.a[:ctx.a_index(ctx.junction_a)].copy()
+
+        tfx.sync_outgoing_to_incoming(ctx)
+
+        self.assertAlmostEqual(ctx.a_end - ctx.junction_a, 2.4, delta=0.01)
+        self.assertAlmostEqual(next(t for t in ctx.a_beats if t > ctx.junction_a) - ctx.junction_a, 0.6, delta=0.001)
+        np.testing.assert_array_equal(ctx.a[:len(original_prefix)], original_prefix)
 
     def test_sample_is_fitted_to_the_track_tempo(self):
         tmp = tempfile.mkdtemp(prefix="dynamix_fx_")

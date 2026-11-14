@@ -9,14 +9,13 @@ if not exist venv\Scripts\python.exe (
     echo [ERROR] venv not found. Run install_windows.bat first.
     exit /b 1
 )
-for /f %%v in ('venv\Scripts\python -c "from version import VERSION; print(VERSION)"') do set VERSION=%%v
+for /f "tokens=3" %%v in ('findstr /b "VERSION =" version.py') do set VERSION=%%~v
 if "%VERSION%"=="" (
     echo [ERROR] Could not read the version from version.py.
     exit /b 1
 )
 echo Building DynaMix %VERSION% ...
-venv\Scripts\python -m pip install --upgrade pyinstaller || exit /b 1
-venv\Scripts\python -m PyInstaller packaging\dynamix.spec --noconfirm --distpath dist --workpath build || exit /b 1
+venv\Scripts\python.exe -m PyInstaller packaging\dynamix.spec --noconfirm --distpath dist --workpath build || exit /b 1
 start "" /wait dist\DynaMix\DynaMix.exe --self-test dist\selftest.txt
 set RESULT=%ERRORLEVEL%
 type dist\selftest.txt

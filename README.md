@@ -71,8 +71,9 @@ python gui.py
    5. **Transition FX** (optional): effects per transition, previewed in a loop, drawn on a chart.
    6. **Create Playlist** (optional): an M3U of the set.
    7. **Export to Mixxx**: intro / outro cues and the playlist, ready for Auto DJ.
+   8. **Create full mix WAV** (optional): one continuous render of the set and its transitions.
 3. **Log** tab: the reports of the project (summary, mastering, band analysis, transition sheet,
-   pre-master, Mixxx export) and every message and error.
+   pre-master, Mixxx export and full mix WAV) and every message and error.
 4. **Tasks** tab and status bar: the operations running in the background with their progress,
    and **Stop** (a stopped task leaves the project unchanged).
 
@@ -88,7 +89,7 @@ A set is a **project folder** under the projects folder (default `~/DynaMix Proj
     project.json     options, selection, analysed tracks, proposals, set list, step status, FX settings
     premaster/       corrected copies written by the pre-master pass
     fx/              copies with the transition FX
-    exports/         M3U playlists, transitions.json, charts
+    exports/         M3U playlists, full mix WAV, transitions.json, charts
     exports/reports/ reports, one text file each
     snapshots/       saved states of the settings (Snapshots... button), restorable
 ```
@@ -155,6 +156,10 @@ The **transition chart** shows A and B with their fades, one lane per effect and
 result on a beat axis. **▶ Preview (loop)** re-renders the transition when a setting changes and
 **Nudge (ms)** shifts the junction by ear. **Apply all FX** renders copies into `fx/` with the
 new cue positions. Settings are kept per track pair, so reordering the set keeps them.
+
+The final **Create full mix WAV** step writes one continuous stereo WAV using the planned order,
+transitions and configured FX. Choose 44.1 or 48 kHz and 16, 24 or 32-bit PCM (defaults: 44.1 kHz,
+24-bit). It follows **Use pre-mastered copies** and runs in the background with progress and Stop.
 
 **A ends (beats)** moves where the outgoing track stops being heard. The plan derives it from the
 track's own outro section and its length (`outro_end = outro_start + mix_duration`), which often

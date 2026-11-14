@@ -7,6 +7,7 @@
   "Echo {delay} beat, feedback {feedback}": "Écho {delay} temps, réinjection {feedback}",
   "(choose a sample)": "(choisir un sample)",
   "Sample {name}{repeats} ({anchor}, tempo {tempo})": "Sample {name}{repeats} ({anchor}, tempo {tempo})",
+  "tempo sync skipped: outgoing/incoming ratio x{ratio:.2f} is outside x{lo:g}..x{hi:g}": "Synchronisation du tempo ignorée : le ratio sortant/entrant x{ratio:.2f} est hors de x{lo:g}..x{hi:g}",
   "▶ Preview (loop)": "▶ Pré-écoute (boucle)",
   "■ Stop": "■ Arrêter",
   "Length:": "Durée :",

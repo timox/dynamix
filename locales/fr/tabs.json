@@ -26,7 +26,7 @@
   "Tasks ({n})": "Tâches ({n})",
   "■ Stop selected": "■ Arrêter la sélection",
   "Clear finished": "Effacer les tâches terminées",
-  "Stop ends a task after the track in progress; a stopped task leaves the project unchanged (analyses already done stay in the cache).": "Arrêter termine une tâche après le morceau en cours ; une tâche arrêtée laisse le projet inchangé (les analyses déjà faites restent dans le cache).",
+  "Stop asks a task to stop at its next safe point; a stopped task leaves the project unchanged (analyses already done stay in the cache).": "Arrêter demande à la tâche de s'arrêter au prochain point sûr ; une tâche arrêtée laisse le projet inchangé (les analyses déjà faites restent dans le cache).",
   "Task": "Tâche",
   "Project": "Projet",
   "Progress": "Progression",

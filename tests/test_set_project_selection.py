@@ -80,7 +80,7 @@ class TestSelectionAndProposals(unittest.TestCase):
         self.assertEqual(q.data["proposals"]["params"]["curve"], "all")
         q.mark("transitions")
         self.assertEqual(q.use_proposal(1), [self.c, self.a, self.b])
-        self.assertTrue(q.is_done("setlist"))
+        self.assertFalse(q.is_done("setlist"))  # choosing a proposal leaves the list editable until finalized
         self.assertEqual(q.step_state("setlist")["details"]["curve"], "wave")
         self.assertFalse(q.is_done("transitions"))
         with self.assertRaises(IndexError):

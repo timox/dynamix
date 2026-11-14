@@ -9,7 +9,9 @@ recorded in the project so the panel always shows where you are.
 """
 
 import collections
+import copy
 import logging
+import math
 import os
 import threading
 import tkinter as tk
@@ -34,13 +36,14 @@ from playlist_manager import PlaylistManager
 from set_project import SetProject, STEPS, list_projects
 from fx_window import TransitionFxPanel
 from transition_planner import TransitionPlanner
+from full_mix import render_full_mix
 
 MUTED = "#52514e"
 log = logging.getLogger("dynamix.gui")
 # details of a workflow step: key -> English text (translated when shown)
 STEP_DETAILS = {"count": "count {value}", "cached": "cached {value}", "analyzed": "analyzed {value}",
                 "duration": "duration {value}", "curve": "curve {value}", "score": "score {value}", "file": "file {value}",
-                "playlist": "playlist {value}", "cues": "cues {value}"}
+                "playlist": "playlist {value}", "cues": "cues {value}", "format": "format {value}"}
 # state of a selected track (code compared by the program) -> English text shown
 TRACK_STATES = {"analysed": "analysed", "pending": "pending", "failed": "failed", "missing": "missing"}
 
@@ -57,7 +60,7 @@ class SetBuilderMixin:
         self.playlist_manager = None
         self.current_set_list = None
         self.transition_planner = None
-        self._chart_canvases = {}
+        self._overview_dirty = True
         self._library_rows = []
         self._set_rows = []
         self._selection_rows = []
@@ -65,6 +68,7 @@ class SetBuilderMixin:
         self._library_scanning = False
         self._library_rescan_pending = False
         self._previewing = False
+        self._suppress_set_tree_select = False
         
         # ---- header: project selection
         head = ttk.Frame(frame)
@@ -100,6 +104,7 @@ class SetBuilderMixin:
             "fx": (tr("Transition FX"), self.open_fx_window),
             "playlist": (tr("Create Playlist"), self.create_playlist_from_directory),
             "mixxx": (tr("Export to Mixxx"), self.export_to_mixxx),
+            "full_mix": (tr("Create full mix WAV"), self.create_full_mix),
         }
         for i, (key, label, required) in enumerate(STEPS, 1):
             row = ttk.Frame(steps_frame)
@@ -142,7 +147,7 @@ class SetBuilderMixin:
         ttk.Spinbox(mono_row, from_=40, to=300, increment=10, textvariable=self.mono_bass_hz_var, width=5).pack(side=tk.LEFT, padx=3)
         ttk.Label(mono_row, text="Hz").pack(side=tk.LEFT)
         self.use_premaster_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(grid, text=tr("Use pre-mastered copies (FX, playlist, Mixxx)"), variable=self.use_premaster_var,
+        ttk.Checkbutton(grid, text=tr("Use pre-mastered copies (FX, playlist, Mixxx, full mix)"), variable=self.use_premaster_var,
                         command=self._use_premaster_changed).grid(row=6, column=0, columnspan=2, sticky="w")
         report_row = ttk.Frame(options_frame)
         report_row.pack(anchor="w", padx=4, pady=(0, 4))
@@ -190,7 +195,8 @@ class SetBuilderMixin:
         sel_bar.pack(fill=tk.X, padx=4, pady=2)
         ttk.Button(sel_bar, text=tr("← Remove"), command=self.selection_remove).pack(side=tk.LEFT, padx=2)
         ttk.Button(sel_bar, text=tr("Analyze selection"), command=self.analyze_playlist).pack(side=tk.LEFT, padx=2)
-        ttk.Button(sel_bar, text=tr("Add to set list ▶"), command=self.set_add).pack(side=tk.LEFT, padx=2)
+        self.set_add_button = ttk.Button(sel_bar, text=tr("Add to set list ▶"), command=self.set_add)
+        self.set_add_button.pack(side=tk.LEFT, padx=2)
         self.selection_tree = self._make_tree(sel_frame, ("Filename", "Dur", "BPM", "Key", "Energy", "State"),
                                               {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "State": 70},
                                               selectmode="extended")
@@ -225,12 +231,16 @@ class SetBuilderMixin:
         self.set_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
         set_bar = ttk.Frame(set_frame)
         set_bar.pack(fill=tk.X, padx=4, pady=2)
-        for text, cmd in ((tr("▲ Up"), lambda: self.set_move(-1)), (tr("▼ Down"), lambda: self.set_move(1)), (tr("Remove"), self.set_remove)):
-            ttk.Button(set_bar, text=text, command=cmd).pack(side=tk.LEFT, padx=2)
+        self.set_edit_buttons = [ttk.Button(set_bar, text=text, command=cmd) for text, cmd in (
+            (tr("▲ Up"), lambda: self.set_move(-1)), (tr("▼ Down"), lambda: self.set_move(1)), (tr("Remove"), self.set_remove))]
+        for button in self.set_edit_buttons:
+            button.pack(side=tk.LEFT, padx=2)
+        self.finalize_set_button = ttk.Button(set_bar, text=tr("Finalize set list"), command=self.finalize_set_list)
+        self.finalize_set_button.pack(side=tk.RIGHT, padx=2)
         self.set_tree = self._make_tree(set_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Flags"),
                                         {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Flags": 240})
         self.set_tree.tag_configure("preview", foreground=MUTED)
-        self.set_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.set_tree))
+        self.set_tree.bind("<<TreeviewSelect>>", self._on_set_tree_select)
         self.set_tree.bind("<Double-1>", lambda e: self.set_remove())
         self.set_tree.bind("<Button-3>", lambda e: self._track_menu(e, self.set_tree, self._set_rows))
         
@@ -556,18 +566,22 @@ class SetBuilderMixin:
         for key, label, required in STEPS:
             state = self.project.step_state(key)
             w = self.step_widgets[key]
-            w["status"].config(text="✓" if state.get("done") else "○")
+            w["status"].config(text="✓" if self.project.is_done(key) else "○")
             details = state.get("details") or {}
             parts = []
             if state.get("at"):
                 parts.append(state["at"].replace("T", " ")[:16])
-            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "score", "file", "playlist", "cues"):
+            for k in ("count", "cached", "analyzed", "manual", "duration", "curve", "score", "file", "playlist", "cues", "format"):
                 if k in details:
                     parts.append(tr(STEP_DETAILS[k], value=details[k]) if k != "manual" else tr("edited by hand"))
             w["detail"].config(text=" · ".join(parts))
         key, hint = self.project.next_step()
         self.next_step_label.config(text=tr("Next: {hint}", hint=tr(hint)))
         self.audio_used_label.config(text=self.project.audio_used_text(translate=tr))
+        locked = self.project.is_done("setlist")
+        for button in [self.set_add_button, *self.set_edit_buttons]:
+            button.config(state=tk.DISABLED if locked else tk.NORMAL)
+        self.finalize_set_button.config(text=tr("Edit set list") if locked else tr("Finalize set list"))
         try:
             stats = get_store().stats()
             self.cache_label.config(text=tr("Analysis cache: {files} files, {entries} results", files=stats['files'], entries=stats['entries']))
@@ -592,11 +606,9 @@ class SetBuilderMixin:
         if self.fx_panel is not None:
             self.fx_panel.refresh_sources()
             self.fx_panel.schedule_chart()
-        log.info("%s: apply the FX, write the playlist and export to Mixxx again",
+        log.info("%s; dependent FX copies and exports are stale",
                  "The pre-mastered copies are used" if use else "The originals are used, not the pre-mastered copies")
-        self.update_status(tr("The pre-mastered copies are used: apply the FX, write the playlist and export to Mixxx again") if use
-                           else tr("The originals are used, not the pre-mastered copies: apply the FX, write the playlist and "
-                                   "export to Mixxx again"))
+        self.update_status(tr("Pre-master source changed: update dependent FX copies, playlist, Mixxx export and full mix WAV"))
 
     # ------------------------------------------------------------------ snapshots
     def open_snapshots(self):
@@ -826,9 +838,7 @@ class SetBuilderMixin:
             row["duration"] = row.get("duration") or lib_by_path.get(row["file_path"], {}).get("duration")
             self.selection_tree.insert("", tk.END, iid=f"C{i}", values=self._short_values(row, row["duration"], tr(TRACK_STATES.get(row["state"], row["state"]))))
             self._selection_rows.append(row)
-        for i, t in enumerate(self.project.set_list_tracks(), 1):
-            self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(t, i, mastering.get(t["file_path"])))
-            self._set_rows.append(t)
+        self._refresh_set_list_table(mastering)
         for i, variant in enumerate(self.project.proposal_variants(), 1):
             self.proposal_tree.insert("", tk.END, iid=f"P{i}", values=self._proposal_values(i, variant))
         counts = collections.Counter(r["state"] for r in self._selection_rows)
@@ -840,6 +850,17 @@ class SetBuilderMixin:
         set_seconds = sum(float(t.get("duration") or 0) for t in self._set_rows)
         self.set_caption.config(text=tr("Set list: {count} tracks, {duration} — playing order", count=len(self._set_rows),
                                         duration=self._fmt_time(set_seconds)))
+
+    def _refresh_set_list_table(self, mastering=None):
+        for item in self.set_tree.get_children():
+            self.set_tree.delete(item)
+        self._set_rows = self.project.set_list_tracks() if self.project else []
+        mastering = mastering if mastering is not None else self._mastering_by_path()
+        for i, track in enumerate(self._set_rows, 1):
+            self.set_tree.insert("", tk.END, iid=f"S{i}", values=self._row_values(track, i, mastering.get(track["file_path"])))
+        seconds = sum(float(track.get("duration") or 0) for track in self._set_rows)
+        self.set_caption.config(text=tr("Set list: {count} tracks, {duration} — playing order", count=len(self._set_rows),
+                                        duration=self._fmt_time(seconds)))
     
     def _selected(self, tree, rows):
         sel = tree.selection()
@@ -850,6 +871,10 @@ class SetBuilderMixin:
         except ValueError:
             return None
         return rows[idx] if 0 <= idx < len(rows) else None
+
+    def _on_set_tree_select(self, _event=None):
+        if not self._suppress_set_tree_select:
+            self.on_track_selected(self.set_tree)
 
     def _selected_many(self, tree, rows):
         out = []
@@ -862,15 +887,48 @@ class SetBuilderMixin:
                 out.append(rows[idx])
         return out
 
-    def _after_manual_edit(self):
+    def _after_manual_edit(self, select_path=None):
         curve = (self.project.step_state("setlist").get("details") or {}).get("curve")
         extra = {"curve": curve} if curve else {}
         self.project.mark("setlist", count=len(self.project.set_list), manual=True, **extra)
         self.current_set_list = self.project.set_list_tracks() or None
         self.transition_planner = None
+        self._invalidate_overview()
         self._save_project()
-        self._refresh_tables()
+        self._suppress_set_tree_select = True
+        self._refresh_set_list_table()
+        if select_path in self.project.set_list:
+            index = self.project.set_list.index(select_path)
+            self.set_tree.selection_set(f"S{index + 1}")
+            self.set_tree.see(f"S{index + 1}")
+        self.root.after_idle(lambda: setattr(self, "_suppress_set_tree_select", False))
+
+    def _invalidate_overview(self):
+        if not self._overview_dirty:
+            self._clear_frame(self.overview_frame, tr("Finalize the set list to refresh its analysis."))
+            self._overview_dirty = True
+
+    def finalize_set_list(self):
+        if not self._require_project():
+            return
+        if self.project.is_done("setlist"):
+            self.project.data["setlist_finalized"] = False
+            self._invalidate_overview()
+            self._save_project()
+            self.update_status(tr("Set list unlocked; edit it, then finalize it to run the analysis."))
+            return
+        if len(self.project.set_list) < 2:
+            messagebox.showwarning(tr("Warning"), tr("The set list needs at least two tracks"))
+            return
+        self.project.data["setlist_finalized"] = True
+        details = dict(self.project.step_state("setlist").get("details") or {})
+        details["count"] = len(self.project.set_list)
+        self.project.mark("setlist", **details)
+        self.current_set_list = self.project.set_list_tracks()
+        self._save_project()
         self._render_overview()
+        self.set_notebook.select(self.overview_frame._notebook_tab)
+        self.update_status(tr("Set list finalized; analysis is ready."))
     
     def selection_add(self):
         if not self._require_project():
@@ -905,7 +963,7 @@ class SetBuilderMixin:
         self.update_status(message)
 
     def set_add(self):
-        if not self._require_project() or self._end_preview():
+        if not self._require_project() or self.project.is_done("setlist") or self._end_preview():
             return
         rows = [r for r in self._selected_many(self.selection_tree, self._selection_rows) if r["state"] == "analysed"]
         if not rows:
@@ -919,7 +977,7 @@ class SetBuilderMixin:
         self._after_manual_edit()
     
     def set_remove(self):
-        if not self._require_project() or self._end_preview():
+        if not self._require_project() or self.project.is_done("setlist") or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
@@ -928,16 +986,16 @@ class SetBuilderMixin:
         self._after_manual_edit()
     
     def set_move(self, delta):
-        if not self._require_project() or self._end_preview():
+        if not self._require_project() or self.project.is_done("setlist") or self._end_preview():
             return
         track = self._selected(self.set_tree, self._set_rows)
         if track is None:
             return
+        old_index = self.project.set_list.index(track["file_path"])
         j = self.project.move_in_set(track["file_path"], delta)
-        self._after_manual_edit()
-        if j >= 0:
-            self.set_tree.selection_set(f"S{j + 1}")
-            self.set_tree.see(f"S{j + 1}")
+        if j == old_index:
+            return
+        self._after_manual_edit(select_path=track["file_path"])
     
     # ------------------------------------------------------------------ steps
     def analyze_playlist(self):
@@ -1124,6 +1182,9 @@ class SetBuilderMixin:
         return details.get("curve") or self.energy_curve_var.get()
     
     def _set_tracks_or_warn(self):
+        if self.project and not self.project.is_done("setlist"):
+            messagebox.showwarning(tr("Warning"), tr("Finalize the set list before planning transitions."))
+            return None
         tracks = self.project.set_list_tracks() if self.project else []
         if len(tracks) < 2:
             messagebox.showwarning(tr("Warning"), tr("The set list needs at least two tracks: click 'Propose' or add tracks in the Tracks tab"))
@@ -1167,7 +1228,9 @@ class SetBuilderMixin:
     def mastering_report(self):
         if not self._require_project():
             return
-        tracks = self.project.set_list_tracks() or self.project.tracks
+        tracks = self._set_tracks_or_warn()
+        if tracks is None:
+            return
         originals = [t["file_path"] for t in tracks] or self.project.selection_files()
         if not originals:
             messagebox.showwarning(tr("Warning"), tr("No audio files in the project"))
@@ -1196,9 +1259,8 @@ class SetBuilderMixin:
         """Band tracking, low-mid masking and resonances for the set list (or the library)."""
         if not self._require_project():
             return
-        tracks = self.project.set_list_tracks() or self.project.tracks
-        if not tracks:
-            messagebox.showwarning(tr("Warning"), tr("Analyze the tracks first"))
+        tracks = self._set_tracks_or_warn()
+        if tracks is None:
             return
         
         files, note = self._played_files([t["file_path"] for t in tracks])
@@ -1233,7 +1295,9 @@ class SetBuilderMixin:
     def premaster_set(self):
         if not self._require_project():
             return
-        tracks = self.project.set_list_tracks() or self.project.tracks
+        tracks = self._set_tracks_or_warn()
+        if tracks is None:
+            return
         files = [t["file_path"] for t in tracks]
         if not files:
             messagebox.showwarning(tr("Warning"), tr("Analyze the tracks first"))
@@ -1450,6 +1514,108 @@ class SetBuilderMixin:
         self.add_report(tr("Mixxx Export"), summary)
         self.update_status(tr("Mixxx export: {cues} cues written, {missing} tracks missing", cues=report['cues_written'],
                               missing=len(report['missing'])))
+
+    def _full_mix_format(self):
+        win = tk.Toplevel(self.root)
+        win.title(tr("Full mix WAV settings"))
+        win.transient(self.root)
+        win.resizable(False, False)
+        rate = tk.StringVar(value="44.1 kHz")
+        bits = tk.StringVar(value="24-bit")
+        result = {}
+        body = ttk.Frame(win, padding=12)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text=tr("Sample rate:")).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Combobox(body, textvariable=rate, values=("44.1 kHz", "48 kHz"), state="readonly", width=14).grid(
+            row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(body, text=tr("Bit depth:")).grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Combobox(body, textvariable=bits, values=("16-bit", "24-bit", "32-bit"), state="readonly", width=14).grid(
+            row=1, column=1, sticky="ew", pady=4)
+        buttons = ttk.Frame(body)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="e", pady=(10, 0))
+
+        def accept():
+            result.update(sample_rate=44100 if rate.get().startswith("44.1") else 48000,
+                          bit_depth=int(bits.get().split("-")[0]))
+            win.destroy()
+
+        ttk.Button(buttons, text=tr("Cancel"), command=win.destroy).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(buttons, text=tr("Continue"), command=accept).pack(side=tk.RIGHT)
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        win.grab_set()
+        self.root.wait_window(win)
+        return result or None
+
+    @staticmethod
+    def _full_mix_signature(project):
+        return (tuple(project.set_list), repr(project._plan_cues(project.data.get("transitions"))),
+                repr(project.data.get("fx", {}).get("transitions", {})),
+                bool(project.options.get("use_premaster", True)),
+                repr(project.data.get("premaster")), repr(project.data.get("fx", {}).get("render")))
+
+    def create_full_mix(self):
+        if not self._require_project() or self._end_preview():
+            return
+        project = self.project
+        planner = self._planner_from_project()
+        profiles = planner.profiles if planner is not None else []
+        if len(profiles) < 2:
+            messagebox.showwarning(tr("Warning"), tr("Plan the transitions first (step 3)"))
+            return
+        fmt = self._full_mix_format()
+        if fmt is None:
+            return
+        output_path = filedialog.asksaveasfilename(
+            title=tr("Save full mix WAV"), initialdir=project.exports_dir,
+            initialfile=f"{project.name}.wav", defaultextension=".wav",
+            filetypes=[(tr("WAV audio"), "*.wav"), (tr("All files"), "*.*")], parent=self.root,
+            confirmoverwrite=False)
+        if not output_path:
+            return
+        if not output_path.lower().endswith(".wav"):
+            output_path += ".wav"
+        if os.path.exists(output_path) and not messagebox.askyesno(
+                tr("Replace WAV file?"), tr("The file already exists:\n{path}\n\nReplace it?", path=output_path), parent=self.root):
+            return
+
+        profiles = project.with_a_end_markers([dict(p) for p in profiles])
+        playback_profiles, _ = project.rendered_profiles(profiles)
+        fx_entries = {}
+        for a, b in zip(profiles, profiles[1:]):
+            paths = (a["file_path"], b["file_path"])
+            fx_entries[paths] = copy.deepcopy(project.fx_for_pair(*paths) or {})
+        base_paths = dict(project.premaster_map())
+        existing_fx = dict(project.fx_map())
+        signature = self._full_mix_signature(project)
+
+        def fx_for_pair(a, b):
+            return fx_entries.get((a, b))
+
+        def work(task):
+            task.progress(0, len(profiles), tr("Preparing the full mix"))
+            result = render_full_mix(
+                profiles, playback_profiles, fx_for_pair, base_paths, existing_fx, output_path,
+                sample_rate=fmt["sample_rate"], bit_depth=fmt["bit_depth"],
+                progress=task.progress, cancel=task.check)
+
+            def done():
+                if self.project is not project or self._full_mix_signature(project) != signature:
+                    self.update_status(tr("WAV rendered from an earlier project state; create it again to update it"))
+                    return
+                rate_label = "44.1 kHz" if result["sample_rate"] == 44100 else "48 kHz"
+                project.mark("full_mix", file=os.path.basename(result["file"]),
+                             format=f"{rate_label} / {result['bit_depth']}-bit PCM")
+                self._save_project()
+                detail = tr("Full mix WAV: {file}\nFormat: {rate} Hz, {bits}-bit PCM\nDuration: {duration:.1f} min",
+                            file=result["file"], rate=result["sample_rate"], bits=result["bit_depth"],
+                            duration=result["duration"] / 60.0)
+                self.add_report(tr("Full mix WAV"), detail)
+                self.update_status(tr("Full mix WAV saved: {file}", file=result["file"]))
+
+            self.root.after(0, done)
+
+        self.update_status(tr("Rendering full mix WAV ..."))
+        self._start_task(tr("Create full mix WAV"), work)
     
     # ------------------------------------------------------------------ windows & charts
     def _refresh_transition_measurements(self):
@@ -1521,17 +1687,20 @@ class SetBuilderMixin:
     
     def _clear_frame(self, container, placeholder=None):
         for child in container.winfo_children():
+            canvas = getattr(child, "_dynamix_figure_canvas", None)
             child.destroy()
+            if canvas is not None:
+                canvas.figure.clear()
         if placeholder:
             ttk.Label(container, text=placeholder, foreground=MUTED, wraplength=600).pack(padx=20, pady=20, anchor="w")
     
     def _show_figure(self, container, fig, replace=True):
         """Embed a figure: it follows the container's width and keeps its designed height."""
         if replace:
-            for child in container.winfo_children():
-                child.destroy()
+            self._clear_frame(container)
         canvas = FigureCanvasTkAgg(fig, container)
         widget = canvas.get_tk_widget()
+        widget._dynamix_figure_canvas = canvas
         widget.configure(height=charts.pixel_height(fig), highlightthickness=0)
         widget.pack(fill=tk.X, expand=False, padx=2, pady=(2, 8))
         scroll_canvas = getattr(container, "_scroll_canvas", None)
@@ -1540,13 +1709,17 @@ class SetBuilderMixin:
                 widget.bind(seq, lambda e, c=scroll_canvas: c.yview_scroll(
                     int(-e.delta / 120) if e.delta else (-1 if e.num == 4 else 1), "units"))
         canvas.draw()
-        self._chart_canvases[f"{container}:{len(container.winfo_children())}"] = canvas
         return canvas
     
     def _render_overview(self):
         tracks = self.current_set_list or (self.playlist_manager.tracks if self.playlist_manager else [])
         if not tracks:
             self._clear_frame(self.overview_frame, tr("Analyze the selection and build a set list to see the energy curve and the set map."))
+            self._overview_dirty = False
+            return
+        if self.project and not self.project.is_done("setlist"):
+            self._clear_frame(self.overview_frame, tr("Finalize the set list to refresh its analysis."))
+            self._overview_dirty = True
             return
         self._clear_frame(self.overview_frame)
         targets = None
@@ -1558,6 +1731,7 @@ class SetBuilderMixin:
             sheet = self._sheet_planner()  # the set map draws the same blends as the sheet: markers applied
             self._show_figure(self.overview_frame, charts.set_timeline(sheet.profiles, sheet.transitions,
                                                                        fx_labels=self._fx_labels()), replace=False)
+        self._overview_dirty = False
     
     def _render_premaster(self):
         pm = self.project.data.get("premaster") if self.project else None
@@ -1599,6 +1773,7 @@ class SetBuilderMixin:
         path = copy_path if source == "premaster" else original
         self._clear_frame(self.track_frame)
         self._track_source_header(original, copy_path, source, plays_copy)
+        self._track_cue_editor(profile)
         bpm = float(track.get("bpm") or 0) or None
         key = profile.get("key")
         need_mastering = source == "premaster" or (profile.get("mastering") or {}).get("lufs") is None
@@ -1633,6 +1808,58 @@ class SetBuilderMixin:
                 self._show_figure(self.track_frame, charts.band_dynamics(dict(report, key=key)), replace=False)
             self.root.after(0, show)
         threading.Thread(target=work, daemon=True).start()
+
+    def _track_cue_editor(self, profile):
+        if (not self.project or not self.project.is_done("setlist") or not self.transition_planner or
+                not any(p.get("file_path") == profile.get("file_path") for p in self.transition_planner.profiles)):
+            return
+        frame = ttk.LabelFrame(self.track_frame, text=tr("Adjust transition cues (seconds)"))
+        frame.pack(fill=tk.X, padx=8, pady=6)
+        fields = (("intro_start", tr("Track starts at (s):")), ("intro_end", tr("Intro ends at (s):")),
+                  ("outro_start", tr("Outro starts at (s):")), ("outro_end", tr("Track ends at (s):")))
+        shown = self.project.with_a_end_markers([profile])[0]
+        variables = {}
+        for i, (key, label) in enumerate(fields):
+            column, row = i % 2, i // 2
+            ttk.Label(frame, text=label).grid(row=row, column=column * 2, sticky="w", padx=(6, 2), pady=3)
+            variable = tk.StringVar(value=f"{float(shown.get(key, 0.0)):.2f}")
+            ttk.Entry(frame, textvariable=variable, width=9).grid(row=row, column=column * 2 + 1, sticky="w", padx=(0, 8))
+            variables[key] = variable
+        ttk.Button(frame, text=tr("Apply cue changes"),
+                   command=lambda p=profile, v=variables: self._save_transition_cues(p, v)).grid(
+                       row=2, column=0, columnspan=4, sticky="e", padx=6, pady=4)
+
+    def _save_transition_cues(self, profile, variables):
+        try:
+            cues = {key: float(variable.get()) for key, variable in variables.items()}
+        except ValueError:
+            messagebox.showwarning(tr("Warning"), tr("Cue positions must be numbers."), parent=self.root)
+            return
+        duration = float(profile.get("duration") or 0.0)
+        ordered = (cues["intro_start"], cues["intro_end"], cues["outro_start"], cues["outro_end"])
+        if not all(math.isfinite(value) and 0 <= value <= duration for value in ordered) or not (
+                cues["intro_start"] < cues["intro_end"] <= cues["outro_start"] < cues["outro_end"]):
+            messagebox.showwarning(tr("Warning"), tr("Cue positions must be ordered within the track duration."), parent=self.root)
+            return
+        profiles = [dict(p) for p in self.transition_planner.profiles]
+        index = next((i for i, p in enumerate(profiles) if p.get("file_path") == profile.get("file_path")), None)
+        if index is None or all(profiles[index].get(key) == value for key, value in cues.items()):
+            return
+        old_outro_end = profiles[index].get("outro_end")
+        profiles[index].update(cues)
+        if old_outro_end != cues["outro_end"]:
+            for entry in self.project.data["fx"]["transitions"].values():
+                if entry.get("a") == profile.get("file_path"):
+                    entry["a_end_s"] = None
+        self.transition_planner = self.transition_planner.for_cues(profiles)
+        self.project.set_transitions(self.transition_planner.to_dict())
+        self._save_project()
+        self._render_overview()
+        self._refresh_fx_tab()
+        self._write_sheet_files()
+        self.add_report(tr("Transition Sheet"), self._sheet_planner().to_text(
+            f"DynaMix Transition Sheet - {self.project.name}"), show=False)
+        self.update_status(tr("Transition cues updated; dependent exports need to be redone."))
 
     def _track_section(self, text):
         ttk.Label(self.track_frame, text=text, font=ui_fonts.BOLD).pack(anchor="w", padx=8, pady=(10, 0))
@@ -1683,6 +1910,9 @@ class ConfigTabMixin:
     def create_config_tab(self):
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text=tr("Configuration"))
+        self.config_tab_frame = frame
+        self._environment_loaded = False
+        self.notebook.bind("<<NotebookTabChanged>>", self._environment_tab_selected, add="+")
         cfg = self.config
 
         display = ttk.LabelFrame(frame, text=tr("Display"))
@@ -1816,7 +2046,10 @@ class ConfigTabMixin:
         ttk.Button(env_bar, text=tr("Clear whole cache..."), command=self.clear_whole_cache).pack(side=tk.LEFT, padx=6)
         self.env_text = scrolledtext.ScrolledText(env, height=12, font=ui_fonts.MONO)
         self.env_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
-        self.refresh_environment()
+
+    def _environment_tab_selected(self, _event=None):
+        if not self._environment_loaded and self.notebook.select() == str(self.config_tab_frame):
+            self.refresh_environment()
 
     def apply_font_size(self, size, redraw=True):
         """Apply a font size to the whole GUI and the charts; with `redraw`, draw the shown charts again."""
@@ -1988,6 +2221,7 @@ class ConfigTabMixin:
     def refresh_environment(self):
         self.env_text.delete("1.0", tk.END)
         self.env_text.insert(tk.END, format_environment_report())
+        self._environment_loaded = True
 
     def clear_whole_cache(self):
         store = get_store()

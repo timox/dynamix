@@ -153,9 +153,17 @@ def loudness_range(x: np.ndarray, fs: float) -> float:
 
 
 def true_peak_db(x: np.ndarray, fs: float, oversample: int = 4) -> float:
-    """True peak in dBTP (4x oversampled)."""
-    up = signal.resample_poly(x, oversample, 1, axis=0)
-    peak = float(np.max(np.abs(up))) if len(up) else 0.0
+    """True peak in dBTP, oversampled in bounded blocks."""
+    block = max(1, int(fs * 10))
+    margin = 16
+    peak = 0.0
+    for start in range(0, len(x), block):
+        end = min(len(x), start + block)
+        left, right = max(0, start - margin), min(len(x), end + margin)
+        up = signal.resample_poly(x[left:right], oversample, 1, axis=0)
+        core = up[(start - left) * oversample:(end - left) * oversample]
+        if len(core):
+            peak = max(peak, float(np.max(np.abs(core))))
     return 20 * np.log10(max(peak, 1e-9))
 
 

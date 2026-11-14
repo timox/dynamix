@@ -1,4 +1,3 @@
-import librosa
 import numpy as np
 from typing import Tuple
 import warnings
@@ -9,6 +8,7 @@ class AudioAnalyzer:
     
     def __init__(self, file_path: str):
         """Initialize analyzer with audio file"""
+        import librosa
         self.file_path = file_path
         self.y, self.sr = librosa.load(file_path, sr=None)
         self.duration = librosa.get_duration(y=self.y, sr=self.sr)
@@ -18,6 +18,7 @@ class AudioAnalyzer:
         Detect BPM using multiple methods and return the most reliable result
         Returns: (bpm, confidence)
         """
+        import librosa
         # librosa >= 0.10 returns tempo as a 1-element array and moved
         # ``librosa.beat.tempo`` to ``librosa.feature.tempo``; handle both.
         tempo_fn = getattr(librosa.feature, "tempo", None) or librosa.beat.tempo
@@ -51,8 +52,12 @@ class AudioAnalyzer:
         Detect musical key using chromagram analysis
         Returns: (key, confidence)
         """
-        # Extract chromagram and average it over time
-        chroma = librosa.feature.chroma_cqt(y=self.y, sr=self.sr)
+        import librosa
+        # Bound CQT's temporary arrays on long tracks; the middle avoids intro/outro material.
+        # shortcut: key uses the middle 120 s; extend it if long-form ambient tracks need whole-track tonality.
+        excerpt = min(len(self.y), 120 * self.sr)
+        start = max(0, (len(self.y) - excerpt) // 2)
+        chroma = librosa.feature.chroma_cqt(y=self.y[start:start + excerpt], sr=self.sr)
         chroma_avg = np.mean(chroma, axis=1)
         
         # Krumhansl-Schmuckler key profiles (librosa has no built-in key detector)
@@ -92,6 +97,7 @@ class AudioAnalyzer:
         Analyze beat grid and return beat times and strengths
         Returns: (beat_times, beat_strengths)
         """
+        import librosa
         # Get onset strength
         onset_env = librosa.onset.onset_strength(y=self.y, sr=self.sr)
         
@@ -111,6 +117,7 @@ class AudioAnalyzer:
         Analyze energy profile with customizable window size
         Returns: (times, energy_values)
         """
+        import librosa
         # Calculate RMS energy
         hop_length = int(self.sr * window_size / 4)  # 25% overlap
         rms = librosa.feature.rms(y=self.y, hop_length=hop_length)[0]
@@ -162,6 +169,7 @@ class AudioAnalyzer:
         quiet intros/outros do not dilute the result.
         Returns: (energy_level, components)
         """
+        import librosa
         if bpm is None:
             bpm, _ = self.detect_bpm()
 

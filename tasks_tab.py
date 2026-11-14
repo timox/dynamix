@@ -56,7 +56,7 @@ class TasksTabMixin:
         bar.pack(fill=tk.X, padx=10, pady=(10, 4))
         ttk.Button(bar, text=tr("■ Stop selected"), command=self.stop_selected_task).pack(side=tk.LEFT)
         ttk.Button(bar, text=tr("Clear finished"), command=self.clear_finished_tasks).pack(side=tk.LEFT, padx=6)
-        ttk.Label(bar, text=tr("Stop ends a task after the track in progress; a stopped task leaves the project unchanged "
+        ttk.Label(bar, text=tr("Stop asks a task to stop at its next safe point; a stopped task leaves the project unchanged "
                                "(analyses already done stay in the cache)."), foreground=MUTED).pack(side=tk.LEFT, padx=8)
         self.tasks_tree = ttk.Treeview(frame, columns=("Task", "Project", "Progress", "Time", "State"), show="headings",
                                        selectmode="browse")

@@ -271,7 +271,9 @@ class TransitionPlanner:
         for i, track in enumerate(self.tracks):
             if progress_callback:
                 progress_callback(i + 1, total, os.path.basename(track['file_path']))
-            profile = self.profile_track(track)
+            profile = dict(self.profile_track(track))
+            if i == 0:
+                profile['intro_start'] = 0.0  # the first track has no previous track to mix in from
             target = (measure or {}).get(track['file_path'])
             if target and target != track['file_path']:
                 self.measure(profile, target)

@@ -39,10 +39,11 @@ class TestSetProject(unittest.TestCase):
         p.set_set_list([{"file_path": "/m/a.wav"}, {"file_path": "/m/b.wav"}])
         for key, _, _ in STEPS:
             p.mark(key)
+        p.data["setlist_finalized"] = True
         p.data["transitions"] = {"tracks": []}
         p.add_to_set("/m/c.wav")
         self.assertEqual(p.set_list, ["/m/a.wav", "/m/b.wav", "/m/c.wav"])
-        self.assertTrue(p.is_done("setlist"))
+        self.assertFalse(p.is_done("setlist"))
         self.assertFalse(p.is_done("transitions"))
         self.assertIsNone(p.data["transitions"])
         self.assertEqual(p.move_in_set("/m/c.wav", -2), 0)
@@ -54,11 +55,12 @@ class TestSetProject(unittest.TestCase):
         self.assertEqual(len(p.set_list), 2)
         p.set_order(["/m/b.wav", "/m/c.wav", "/m/zzz.wav"])
         self.assertEqual(p.set_list, ["/m/b.wav", "/m/c.wav"])
+        self.assertFalse(p.is_done("setlist"))
 
     def test_next_step_order(self):
         p = SetProject.create(self.root, "steps")
         self.assertEqual(p.next_step()[0], "analyze")
-        p.mark("analyze"); p.mark("setlist"); p.mark("transitions")
+        p.mark("analyze"); p.mark("setlist"); p.data["setlist_finalized"] = True; p.mark("transitions")
         self.assertEqual(p.next_step()[0], "mixxx")
         p.mark("mixxx")
         self.assertEqual(p.next_step()[0], "done")

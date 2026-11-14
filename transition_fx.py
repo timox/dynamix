@@ -388,6 +388,7 @@ class TransitionContext:
     b_beats: List[float]
     junction_b: float
     outro_start: float = 0.0  # A's outro start in the rendered copy (the junction, or the freeze capture point)
+    a_sync_period: Optional[float] = None
     overflow: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=np.float32))
     warnings: List[str] = field(default_factory=list)
 
@@ -407,7 +408,7 @@ class TransitionContext:
 
     @property
     def a_period(self) -> float:
-        return median_period(self.a_beats)
+        return self.a_sync_period or median_period(self.a_beats)
 
     def a_local_bpm(self) -> float:
         """Tempo of A around the junction (median of the 8 beats before it)."""
@@ -445,10 +446,39 @@ def make_context(a_audio: np.ndarray, a_sr: int, a_beats: Sequence[float], a_out
     b_start = int(round(b_offset * b_sr))
     b_stop = min(len(b_audio), int(round((junction_b + b_region_s) * b_sr)))
     a_end = max(junction_a, float(a_outro_end) + nudge)
-    return TransitionContext(a=np.array(a_audio[a_start:], copy=True), a_sr=int(a_sr), a_offset=a_start / a_sr,
+    a_stop = max(a_start, min(len(a_audio), int(round((a_end + 2 * median_period(a_beats)) * a_sr))))
+    return TransitionContext(a=np.array(a_audio[a_start:a_stop], copy=True), a_sr=int(a_sr), a_offset=a_start / a_sr,
                              a_beats=list(a_beats), junction_a=junction_a, a_end=a_end,
                              b=np.array(b_audio[b_start:b_stop], copy=True), b_sr=int(b_sr), b_offset=b_start / b_sr,
                              b_beats=list(b_beats), junction_b=junction_b, outro_start=junction_a)
+
+
+def sync_outgoing_to_incoming(ctx: TransitionContext) -> TransitionContext:
+    """Change A's speed from the junction to its exit so its outro follows B's local BPM."""
+    a_bpm = ctx.a_local_bpm()
+    b_near = ctx.b_beats[max(0, ctx.b_junction_index - 8):ctx.b_junction_index + 1]
+    ratio = (60.0 / median_period(b_near)) / a_bpm if a_bpm > 0 else 1.0
+    if abs(ratio - 1.0) < 1e-3:
+        return ctx
+    if not MIN_TEMPO_RATIO <= ratio <= MAX_TEMPO_RATIO:
+        ctx.warnings.append(N_("tempo sync skipped: outgoing/incoming ratio x{ratio:.2f} is outside x{lo:g}..x{hi:g}")
+                            .format(ratio=ratio, lo=MIN_TEMPO_RATIO, hi=MAX_TEMPO_RATIO))
+        return ctx
+
+    start = max(0, min(len(ctx.a), ctx.a_index(ctx.junction_a)))
+    stop = max(start, min(len(ctx.a), ctx.a_index(ctx.a_end)))
+    if stop <= start:
+        return ctx
+    old_end = ctx.a_end
+    stretched = fit_tempo(ctx.a[start:stop], ctx.a_sr, ratio, "varispeed")
+    shift = len(stretched) / ctx.a_sr - (stop - start) / ctx.a_sr
+    ctx.a = np.concatenate((ctx.a[:start], stretched, ctx.a[stop:])).astype(np.float32)
+    ctx.a_end += shift
+    ctx.a_sync_period = median_period(b_near)
+    ctx.a_beats = [t if t <= ctx.junction_a else
+                   ctx.junction_a + (t - ctx.junction_a) / ratio if t <= old_end else t + shift
+                   for t in ctx.a_beats]
+    return ctx
 
 
 def _add_layer(ctx: TransitionContext, layer: np.ndarray, start_t: float) -> None:

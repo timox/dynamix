@@ -17,7 +17,7 @@ python gui.py
 - **Purpose**: Build a set as a project, step by step, without ever redoing work
 - **Projects**: a set is a folder under the projects folder (see the
   Configuration tab): `project.json`, `premaster/` (corrected copies) and
-  `exports/` (M3U, transition sheets, JSON, charts). The tracks come from your
+  `exports/` (M3U, full mix WAV, transition sheets, JSON, charts). The tracks come from your
   **music library**: one folder holding every track you mixed, set in the
   Configuration tab and scanned in place (nothing is copied, the library is
   never written to). The project combobox reopens any existing project.
@@ -28,14 +28,14 @@ python gui.py
   project's settings (selection, set list, transitions, FX settings, options)
   under a name in the project's `snapshots/` folder and restores one later
   (the current state is saved first as "before restore"; steps whose audio
-  copies changed since, and the playlist and Mixxx export, are to redo).
+  copies changed since, and the playlist, Mixxx export and full mix WAV, are to redo).
 - **Which audio is played**: the line under "Next:" says what the FX, the
-  playlist and the Mixxx export use (FX copies, pre-mastered copies,
+  playlist, the Mixxx export and full mix WAV use (FX copies, pre-mastered copies,
   originals). **Use pre-mastered copies** in *Options for this set* (on by
   default) chooses between the pre-mastered copies and the originals; changing
-  it means applying the FX, writing the playlist and exporting again. The FX
+  it means refreshing the later exports. The FX
   tab shows it per transition ("Plays from: A pre-mastered copy · B original").
-- **Workflow panel**: the six steps with a ✓ / ○ status, the date and key
+- **Workflow panel**: the steps with a ✓ / ○ status, the date and key
   figures of each, and a "Next:" hint:
     1. Select and analyze (BPM, key, energy; cached per file)
     2. Propose a set list (several variants from the selection; use one)
@@ -49,6 +49,8 @@ python gui.py
     5. Transition FX (optional, copies with FX into the project's fx folder)
     6. Create Playlist (optional, M3U into exports/)
     7. Export to Mixxx (uses the database set in the Configuration tab)
+    8. Create full mix WAV (optional; one continuous file with the planned transitions)
+  The WAV export offers 44.1 or 48 kHz and 16, 24 or 32-bit PCM (24-bit / 44.1 kHz by default); it uses the existing pre-master setting, includes configured FX and runs in the background with progress and Stop.
   Redoing an early step resets the later ones, so the status is always true.
 - **Tracks tab**, three columns:
   **Library** (every track of the library folder, with a filter; double-click
