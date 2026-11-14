@@ -34,7 +34,7 @@ MUTED = "#52514e"
 PLAN_CHANGED = "The transitions or the set list changed: plan the transitions again (step 3)"
 NO_SAMPLE_FILE = "Choose a file for the Sample effect: click a sample in the list"
 
-FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample", "scratch": "Scratch"}
+FX_NAMES = {"freeze": "Freeze", "filter": "Filter", "echo": "Echo", "sample": "Sample", "scratch": "Scratch", "tempo": "Tempo ramp"}
 MAX_A_END_BEATS = 64  # how far after the junction the 'A ends' marker can be moved
 
 # (key, label, kind, choices or (min, max))
@@ -66,6 +66,8 @@ FIELDS = {
                ("repeats", "Repeats", "int", (1, 16)),
                ("tempo", "Tempo", "choice", ("varispeed", "stretch", "off")),
                ("sample_bpm", "Sample BPM", "float", (40, 250))],
+    "tempo": [("target", "Target BPM", "choice", ("half", "match", "double")),
+              ("ramp_beats", "Ramp length (beats)", "choice", (2, 4, 8, 16))],
 }
 FIELDS["scratch"] = [("sequence", "Sequence", "text", None),
                      ("length_beats", "Length (beats)", "choice", (2, 4, 8, 16)),
@@ -74,7 +76,8 @@ FIELDS["scratch"] = [("sequence", "Sequence", "text", None),
                      ("ramp", "Ramp", "choice", ("exponential", "linear")),
                      ("gain_db", "Gain (dB)", "float", (-24, 6))]
 # choices shown with a word instead of their stored value
-CHOICE_LABELS = {"release_beats": {tfx.NO_RELEASE: "no return (stays filtered)"}}
+CHOICE_LABELS = {"release_beats": {tfx.NO_RELEASE: "no return (stays filtered)"},
+                 "target": {"half": "BPM B ÷ 2", "match": "BPM B", "double": "BPM B × 2"}}
 # scopes of transition_fx.effect_scope that are a word rather than a track name (A, B and A+B read the same anywhere)
 SCOPE_LABELS = {"layer": "layer"}
 
@@ -144,6 +147,9 @@ def effect_summary(fx: dict) -> str:
     if t == "scratch":
         return tr("Scratch {sequence} · {beats} beats ({side})", sequence=fx.get("sequence") or "",
                   beats=fx.get("length_beats", 8), side=fx.get("side", "outgoing"))
+    if t == "tempo":
+        return tr("Tempo ramp {target} · {beats} beats", target=choice_label("target", fx.get("target", "match")),
+                  beats=fx.get("ramp_beats", 8))
     return str(t)
 
 
@@ -744,6 +750,9 @@ class TransitionFxPanel(ttk.Frame):
             self._scratch_extras(fx)
         if fx["type"] == "filter":
             self._filter_extras(fx)
+        if fx["type"] == "tempo":
+            ttk.Label(self.settings, text=tr("Changes A's playback speed and pitch from the junction; the target is held until A ends."),
+                      foreground=MUTED, wraplength=380, justify=tk.LEFT).pack(anchor="w", pady=4)
 
     def _filter_extras(self, fx):
         box = ttk.LabelFrame(self.settings, text=tr("Filter response"))

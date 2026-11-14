@@ -90,6 +90,17 @@ class TestRenderSet(unittest.TestCase):
         self.assertLess(rms(data[end, 0]), rms(base[end]) - 6)
         self.assertEqual([sha1(p) for p in self.paths], self.hashes)
 
+    def test_tempo_fx_updates_the_rendered_cue_and_track_duration(self):
+        from fx_render import render_set
+        fx = {(self.paths[0], self.paths[1]): {"effects": [
+            dict(tfx.new_effect("tempo"), target="double", ramp_beats=4)]}}
+        results, problems = render_set(self.profiles[:2], lambda a, b: fx.get((a, b)), {}, os.path.join(self.tmp, "tempo"),
+                                       grids={p: self.grid for p in self.paths})
+        self.assertEqual(problems, [])
+        delta = float(tfx._tempo_time(2.0, 2.0, 2.0)) - 2.0
+        self.assertAlmostEqual(results[0]["outro_end"], 10.0 + delta, places=3)
+        self.assertAlmostEqual(results[0]["duration"], 12.0 + delta, places=3)
+
     def test_copy_is_identical_outside_the_modified_spans(self):
         from fx_render import render_set
         sr = 8000

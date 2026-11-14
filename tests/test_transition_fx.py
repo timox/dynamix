@@ -379,18 +379,20 @@ class TestSampleTempo(unittest.TestCase):
         self.assertIs(tfx.fit_tempo(data, SR, 1.3, "off"), data)
         self.assertIs(tfx.fit_tempo(data, SR, 1.0, "varispeed"), data)
 
-    def test_outgoing_tempo_follows_incoming_only_during_its_exit(self):
+    def test_explicit_tempo_ramp_hits_selected_double_bpm_and_preserves_audio_outside(self):
         a = sine(440, 12.0)
         b = sine(660, 12.0)
         b_beats = [i * 0.6 for i in range(21)]  # 100 BPM
         ctx = tfx.make_context(a, SR, grid(12.0), 6.0, 8.0, b, SR, b_beats, 6.0)
-        original_prefix = ctx.a[:ctx.a_index(ctx.junction_a)].copy()
-
-        tfx.sync_outgoing_to_incoming(ctx)
-
-        self.assertAlmostEqual(ctx.a_end - ctx.junction_a, 2.4, delta=0.01)
-        self.assertAlmostEqual(next(t for t in ctx.a_beats if t > ctx.junction_a) - ctx.junction_a, 0.6, delta=0.001)
+        start, stop = ctx.a_index(ctx.junction_a), ctx.a_index(ctx.a_end)
+        original_prefix, original_suffix = ctx.a[:start].copy(), ctx.a[stop:].copy()
+        fx = dict(tfx.new_effect("tempo"), target="double", ramp_beats=4)
+        tfx.apply_effects(ctx, [fx])
+        expected_duration = float(tfx._tempo_time(2.0, 2.0, 200.0 / 120.0))
+        self.assertAlmostEqual(ctx.a_end - ctx.junction_a, expected_duration, delta=1 / SR)
+        self.assertAlmostEqual(ctx.a_period, 0.3, delta=1e-9)
         np.testing.assert_array_equal(ctx.a[:len(original_prefix)], original_prefix)
+        np.testing.assert_array_equal(ctx.a[ctx.a_index(ctx.a_end):ctx.a_index(ctx.a_end) + len(original_suffix)], original_suffix)
 
     def test_sample_is_fitted_to_the_track_tempo(self):
         tmp = tempfile.mkdtemp(prefix="dynamix_fx_")
@@ -446,6 +448,7 @@ class TestEffectScope(unittest.TestCase):
         self.assertEqual(tfx.effect_scope(tfx.new_effect("freeze")), "A")
         self.assertEqual(tfx.effect_scope(tfx.new_effect("echo")), "A")
         self.assertEqual(tfx.effect_scope(tfx.new_effect("sample")), "layer")
+        self.assertEqual(tfx.effect_scope(tfx.new_effect("tempo")), "A")
         for side, scope in (("outgoing", "A"), ("incoming", "B"), ("across", "A+B")):
             self.assertEqual(tfx.effect_scope(dict(tfx.new_effect("filter"), side=side)), scope)
         for side, scope in (("outgoing", "A"), ("incoming", "B")):

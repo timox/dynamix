@@ -6,4 +6,4 @@ packaging/dynamix.iss, through packaging/build_windows.bat) and by the
 Configuration tab, so a release only ever needs this file changed.
 """
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"

@@ -41,6 +41,15 @@ class TestTransitionLayout(unittest.TestCase):
         self.assertLessEqual(lay["view"][0], 0.0)          # 8 beats before the junction
         self.assertGreaterEqual(lay["view"][1], 10.0)      # 8 beats after A ends
 
+    def test_tempo_ramp_layout_reaches_target_and_changes_a_end(self):
+        fx = dict(tfx.new_effect("tempo"), target="double", ramp_beats=2)
+        lay = layout([fx])
+        lane = lay["lanes"][0]
+        self.assertEqual(lane["label"], "Tempo A 120 → 240 BPM")
+        self.assertEqual([b["kind"] for b in lane["blocks"]], ["tempo_ramp", "tempo_hold"])
+        self.assertAlmostEqual(lane["blocks"][0]["end"], 4.0 + math.log(2), places=5)
+        self.assertAlmostEqual(lay["a_end"], 4.5 + math.log(2), places=5)
+
     def test_freeze_moves_the_junction_like_the_engine(self):
         freeze = dict(tfx.new_effect("freeze"), capture_offset_beats=-2, tail_beats=1,
                       steps=[{"beats": 1, "repeats": 2}, {"beats": 0.5, "repeats": 2}])

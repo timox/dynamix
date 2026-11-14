@@ -146,7 +146,6 @@ def render_full_mix(profiles: Sequence[Dict], playback_profiles: Sequence[Dict],
                                        float(profile_a.get("outro_end", profile_a.get("duration", 0.0))),
                                        audio_b, sr_b, beats_b,
                                        float(profile_b.get("intro_start", 0.0)), nudge)
-                tfx.sync_outgoing_to_incoming(ctx)
                 b_intro_end = max(float(profile_b.get("intro_end", 0.0)),
                                   ctx.junction_b + (ctx.a_end - ctx.junction_a))
                 clip, clip_sr = tfx.preview_mix(ctx, b_intro_end, "short")

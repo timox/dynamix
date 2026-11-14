@@ -25,7 +25,7 @@ from scipy import signal
 
 from i18n import N_
 
-FX_TYPES = ("freeze", "filter", "echo", "sample", "scratch")
+FX_TYPES = ("freeze", "filter", "echo", "sample", "scratch", "tempo")
 BLOCK = 256
 EDGE_FADE_S = 0.005
 MAX_FREEZE_BEATS = 64
@@ -123,6 +123,7 @@ _RANGES = {
     "sample": {"offset_beats": (-16, 16), "gain_db": (-24, 6), "fade_in_ms": (0, 2000), "fade_out_ms": (0, 2000),
                "sample_bpm": (40, 250), "repeats": (1, 16)},
     "scratch": {"start_offset_beats": (-32, 16), "gain_db": (-24, 6)},
+    "tempo": {"ramp_beats": (2, 16)},
 }
 _CHOICES = {
     "filter": {"side": ("outgoing", "incoming", "across"), "kind": ("highpass", "lowpass", "bandpass"),
@@ -132,6 +133,7 @@ _CHOICES = {
     "sample": {"anchor": ("end_at_junction", "start_at_junction", "center_on_junction"),
                "tempo": ("varispeed", "stretch", "off")},
     "scratch": {"length_beats": (2, 4, 8, 16), "side": ("outgoing", "incoming"), "ramp": ("exponential", "linear")},
+    "tempo": {"target": ("half", "match", "double"), "ramp_beats": (2, 4, 8, 16)},
 }
 DEFAULTS = {
     "freeze": {"enabled": True, "capture_offset_beats": 0, "steps": [{"beats": 1, "repeats": 4}], "loop_filter": None,
@@ -145,6 +147,7 @@ DEFAULTS = {
                "fade_in_ms": 5, "fade_out_ms": 5, "tempo": "varispeed", "sample_bpm": None, "repeats": 1},
     "scratch": {"enabled": True, "sequence": "d81b0 u81b0", "length_beats": 8, "start_offset_beats": -8,
                 "side": "outgoing", "ramp": "exponential", "gain_db": 0.0},
+    "tempo": {"enabled": True, "target": "match", "ramp_beats": 8},
 }
 
 
@@ -388,7 +391,7 @@ class TransitionContext:
     b_beats: List[float]
     junction_b: float
     outro_start: float = 0.0  # A's outro start in the rendered copy (the junction, or the freeze capture point)
-    a_sync_period: Optional[float] = None
+    a_period_override: Optional[float] = None
     overflow: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=np.float32))
     warnings: List[str] = field(default_factory=list)
 
@@ -408,13 +411,13 @@ class TransitionContext:
 
     @property
     def a_period(self) -> float:
-        return self.a_sync_period or median_period(self.a_beats)
+        return self.a_period_override or median_period(self.a_beats)
 
     def a_local_bpm(self) -> float:
         """Tempo of A around the junction (median of the 8 beats before it)."""
         j = self.a_junction_index
         near = self.a_beats[max(0, j - 8):j + 1]
-        return 60.0 / (median_period(near) if len(near) >= 3 else self.a_period)
+        return 60.0 / (median_period(near) if len(near) >= 3 else median_period(self.a_beats))
 
     def a_beat(self, offset_beats: float) -> float:
         """Seconds in A of the beat offset_beats away from the junction (the nudge included)."""
@@ -451,34 +454,6 @@ def make_context(a_audio: np.ndarray, a_sr: int, a_beats: Sequence[float], a_out
                              a_beats=list(a_beats), junction_a=junction_a, a_end=a_end,
                              b=np.array(b_audio[b_start:b_stop], copy=True), b_sr=int(b_sr), b_offset=b_start / b_sr,
                              b_beats=list(b_beats), junction_b=junction_b, outro_start=junction_a)
-
-
-def sync_outgoing_to_incoming(ctx: TransitionContext) -> TransitionContext:
-    """Change A's speed from the junction to its exit so its outro follows B's local BPM."""
-    a_bpm = ctx.a_local_bpm()
-    b_near = ctx.b_beats[max(0, ctx.b_junction_index - 8):ctx.b_junction_index + 1]
-    ratio = (60.0 / median_period(b_near)) / a_bpm if a_bpm > 0 else 1.0
-    if abs(ratio - 1.0) < 1e-3:
-        return ctx
-    if not MIN_TEMPO_RATIO <= ratio <= MAX_TEMPO_RATIO:
-        ctx.warnings.append(N_("tempo sync skipped: outgoing/incoming ratio x{ratio:.2f} is outside x{lo:g}..x{hi:g}")
-                            .format(ratio=ratio, lo=MIN_TEMPO_RATIO, hi=MAX_TEMPO_RATIO))
-        return ctx
-
-    start = max(0, min(len(ctx.a), ctx.a_index(ctx.junction_a)))
-    stop = max(start, min(len(ctx.a), ctx.a_index(ctx.a_end)))
-    if stop <= start:
-        return ctx
-    old_end = ctx.a_end
-    stretched = fit_tempo(ctx.a[start:stop], ctx.a_sr, ratio, "varispeed")
-    shift = len(stretched) / ctx.a_sr - (stop - start) / ctx.a_sr
-    ctx.a = np.concatenate((ctx.a[:start], stretched, ctx.a[stop:])).astype(np.float32)
-    ctx.a_end += shift
-    ctx.a_sync_period = median_period(b_near)
-    ctx.a_beats = [t if t <= ctx.junction_a else
-                   ctx.junction_a + (t - ctx.junction_a) / ratio if t <= old_end else t + shift
-                   for t in ctx.a_beats]
-    return ctx
 
 
 def _add_layer(ctx: TransitionContext, layer: np.ndarray, start_t: float) -> None:
@@ -843,10 +818,64 @@ def _apply_scratch(ctx: TransitionContext, fx: Dict) -> None:
     audio[start_i:start_i + n] = region
 
 
+def _tempo_time(seconds, ramp_seconds: float, ratio: float):
+    """Map source time to output time while linearly changing playback speed."""
+    x = np.asarray(seconds, dtype=float)
+    if abs(ratio - 1.0) < 1e-9:
+        return x
+    ramp_end = ramp_seconds * math.log(ratio) / (ratio - 1.0)
+    ramp = ramp_seconds * np.log1p((ratio - 1.0) * np.minimum(x, ramp_seconds) / ramp_seconds) / (ratio - 1.0)
+    return np.where(x <= ramp_seconds, ramp, ramp_end + (x - ramp_seconds) / ratio)
+
+
+def _tempo_target(ctx: TransitionContext, fx: Dict) -> float:
+    factor = {"half": 0.5, "match": 1.0, "double": 2.0}[fx["target"]]
+    b_near = ctx.b_beats[max(0, ctx.b_junction_index - 8):ctx.b_junction_index + 1]
+    return 60.0 / median_period(b_near) * factor
+
+
+def _apply_tempo(ctx: TransitionContext, fx: Dict) -> None:
+    target_bpm = _tempo_target(ctx, fx)
+    source_bpm = ctx.a_local_bpm()
+    ratio = target_bpm / source_bpm
+    start = max(0, min(len(ctx.a), ctx.a_index(ctx.junction_a)))
+    stop = max(start, min(len(ctx.a), ctx.a_index(ctx.a_end)))
+    if stop <= start or source_bpm <= 0:
+        return
+    old_end = ctx.a_end
+    duration = (stop - start) / ctx.a_sr
+    ramp_seconds = min(float(fx["ramp_beats"]) * 60.0 / source_bpm, duration)
+    new_duration = float(_tempo_time(duration, ramp_seconds, ratio))
+    new_length = max(1, int(round(new_duration * ctx.a_sr)))
+    warped = np.empty((new_length, 2), dtype=np.float32)
+    for block_start in range(0, new_length, 65536):
+        block_end = min(new_length, block_start + 65536)
+        output_time = np.arange(block_start, block_end, dtype=float) / ctx.a_sr
+        if abs(ratio - 1.0) < 1e-9:
+            source_time = output_time
+        else:
+            ramp_output = ramp_seconds * math.log(ratio) / (ratio - 1.0)
+            source_time = ramp_seconds + (output_time - ramp_output) * ratio
+            ramping = output_time <= ramp_output
+            source_time[ramping] = ramp_seconds * np.expm1((ratio - 1.0) * output_time[ramping] / ramp_seconds) / (ratio - 1.0)
+        positions = np.clip(source_time * ctx.a_sr, 0, stop - start - 1)
+        left = positions.astype(np.int64)
+        fraction = (positions - left).astype(np.float32)[:, None]
+        right = np.minimum(left + 1, stop - start - 1)
+        warped[block_start:block_end] = ctx.a[start + left] * (1.0 - fraction) + ctx.a[start + right] * fraction
+    delta = new_length / ctx.a_sr - duration
+    ctx.a = np.concatenate((ctx.a[:start], warped, ctx.a[stop:])).astype(np.float32)
+    ctx.a_end += delta
+    ctx.a_beats = [t if t <= ctx.junction_a else
+                   ctx.junction_a + float(_tempo_time(t - ctx.junction_a, ramp_seconds, ratio)) if t <= old_end else t + delta
+                   for t in ctx.a_beats]
+    ctx.a_period_override = 60.0 / target_bpm
+
+
 _APPLY = {"freeze": _apply_freeze, "filter": _apply_filter, "echo": _apply_echo, "sample": _apply_sample,
-          "scratch": _apply_scratch}
+          "scratch": _apply_scratch, "tempo": _apply_tempo}
 # what an effect writes to; 'layer' is mixed over whatever the effects before it left
-_SCOPE = {"freeze": "A", "echo": "A", "sample": "layer"}
+_SCOPE = {"freeze": "A", "echo": "A", "sample": "layer", "tempo": "A"}
 _SIDE_SCOPE = {"outgoing": "A", "incoming": "B", "across": "A+B"}
 
 
@@ -867,6 +896,8 @@ def apply_effects(ctx: TransitionContext, effects: Sequence[Dict]) -> Transition
             raise ValueError("; ".join(problems))
     if sum(1 for fx in enabled if fx["type"] == "freeze") > 1:
         raise ValueError("only one freeze per transition")
+    if sum(1 for fx in enabled if fx["type"] == "tempo") > 1:
+        raise ValueError("only one tempo ramp per transition")
     # a freeze redefines where A ends and where B enters: freezes first, then the other effects in stack order
     ordered = [fx for fx in enabled if fx["type"] == "freeze"] + [fx for fx in enabled if fx["type"] != "freeze"]
     for fx in ordered:
@@ -1079,6 +1110,26 @@ def _layout_scratch(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Di
     return lane
 
 
+def _layout_tempo(ctx: TransitionContext, fx: Dict, warnings: List[str]) -> Dict:
+    source_bpm = ctx.a_local_bpm()
+    target_bpm = _tempo_target(ctx, fx)
+    old_end = ctx.a_end
+    duration = max(0.0, old_end - ctx.junction_a)
+    ramp_seconds = min(float(fx["ramp_beats"]) * 60.0 / source_bpm, duration) if source_bpm else 0.0
+    ratio = target_bpm / source_bpm if source_bpm else 1.0
+    new_duration = float(_tempo_time(duration, ramp_seconds, ratio)) if duration and ramp_seconds else duration
+    shift = new_duration - duration
+    ctx.a_end += shift
+    ctx.a_beats = [t if t <= ctx.junction_a else
+                   ctx.junction_a + float(_tempo_time(t - ctx.junction_a, ramp_seconds, ratio)) if t <= old_end else t + shift
+                   for t in ctx.a_beats]
+    ctx.a_period_override = 60.0 / target_bpm
+    ramp_end = ctx.junction_a + float(_tempo_time(ramp_seconds, ramp_seconds, ratio)) if ramp_seconds else ctx.junction_a
+    return {"type": "tempo", "label": f"Tempo A {source_bpm:.0f} → {target_bpm:.0f} BPM",
+            "blocks": [{"start": ctx.junction_a, "end": ramp_end, "kind": "tempo_ramp", "label": f"{source_bpm:.0f} → {target_bpm:.0f} BPM"},
+                       {"start": ramp_end, "end": ctx.a_end, "kind": "tempo_hold", "label": f"{target_bpm:.0f} BPM"}]}
+
+
 def transition_layout(a_beats: Sequence[float], b_beats: Sequence[float], a_outro_start: float, a_outro_end: float,
                       b_intro_start: float, effects: Sequence[Dict], nudge_ms: float = 0.0,
                       sample_seconds: Optional[Callable[[str], Optional[float]]] = None, length: str = "short") -> Dict:
@@ -1107,7 +1158,7 @@ def transition_layout(a_beats: Sequence[float], b_beats: Sequence[float], a_outr
             lanes[i] = _layout_sample(ctx, fx, warnings, sample_seconds)
         else:
             lanes[i] = {"freeze": _layout_freeze, "filter": _layout_filter, "echo": _layout_echo,
-                        "scratch": _layout_scratch}[fx["type"]](ctx, fx, warnings)
+                        "scratch": _layout_scratch, "tempo": _layout_tempo}[fx["type"]](ctx, fx, warnings)
     period = ctx.a_period
     if length == "long":
         view = (ctx.junction_a - 20.0, max(ctx.junction_a + 10.0, ctx.a_end + 2.0))
