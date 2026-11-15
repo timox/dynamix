@@ -387,6 +387,10 @@ class SetBuilderMixin:
             position = int((self.config.get("pane_sizes", {}) or {}).get(key, 0))
             if position > 0 and len(paned.panes()) > index + 1:
                 paned.sashpos(index, position)
+            for name in paned.panes():
+                section = paned.nametowidget(name)
+                if isinstance(section, FoldableSection) and not section.expanded:
+                    self.root.after_idle(section._fit_pane)
         except (tk.TclError, TypeError, ValueError):
             pass
     
