@@ -5,6 +5,7 @@ User documentation lives at the root of the repository:
 - [README.md](../README.md): what DynaMix does, installation, command line, project layout
 - [GUI_README.md](../GUI_README.md): the GUI tab by tab
 - [INSTALL_WINDOWS.md](../INSTALL_WINDOWS.md): installation and use on Windows (French)
+- [Screenshots](../README.md#screenshots): set builder, set overview, track analysis and pre-mastering
 
 This folder keeps the design documents written while building each part of the set workflow.
 They record the decisions and their reasons; the code is the reference for the current

@@ -80,6 +80,27 @@ python gui.py
 Redoing an early step resets the later ones, so the workflow status is always true. The GUI is
 described tab by tab in [GUI_README.md](GUI_README.md).
 
+## Screenshots
+
+The screenshots below show the set builder, set overview, track analysis and pre-master summary.
+They are full-resolution captures from the French interface.
+
+**Set selection and proposals**
+
+![Set Builder with the analysed track selection, set proposals and editable set list](docs/images/set-builder-selection.png)
+
+**Set overview and transition map**
+
+![Set tempo curve and timeline showing intro, outro and transition effects](docs/images/set-overview.png)
+
+**Track mastering and band analysis**
+
+![Track detail with loudness, stereo phase, bass mono compatibility and tonal balance charts](docs/images/track-mastering-analysis.png)
+
+**Pre-master summary**
+
+![Pre-master comparison of loudness and true peak before and after processing](docs/images/premaster-summary.png)
+
 ## Set projects
 
 A set is a **project folder** under the projects folder (default `~/DynaMix Projects`):
