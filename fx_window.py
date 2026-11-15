@@ -285,13 +285,13 @@ class TransitionFxPanel(ttk.Frame):
         self._chart_message(tr("Select a transition to see it: A and B, the fades and every effect on a beat axis."))
         panes = ttk.PanedWindow(rows, orient=tk.HORIZONTAL)
         rows.add(panes, weight=1)
-        rows.bind("<ButtonRelease-1>", lambda _e: app._save_pane_position("fx.chart", rows, 0), add="+")
+        rows.bind("<ButtonRelease-1>", lambda _e: self.app._save_pane_position("fx.chart", rows, 0), add="+")
         panes.bind("<ButtonRelease-1>", lambda _e: [
-            app._save_pane_position(f"fx.columns.{i}", panes, i) for i in range(2)
+            self.app._save_pane_position(f"fx.columns.{i}", panes, i) for i in range(2)
         ], add="+")
-        app.root.after(150, app._restore_pane_position, "fx.chart", rows, 0)
+        self.app.root.after(150, self.app._restore_pane_position, "fx.chart", rows, 0)
         for i in range(2):
-            app.root.after(150, app._restore_pane_position, f"fx.columns.{i}", panes, i)
+            self.app.root.after(150, self.app._restore_pane_position, f"fx.columns.{i}", panes, i)
 
         left = ttk.Frame(panes)
         panes.add(left, weight=1)
