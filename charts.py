@@ -402,6 +402,49 @@ def premaster_before_after(results: Sequence[Dict], target_lufs: float = -14.0, 
     return _finish(fig)
 
 
+def premaster_spectral_comparison(before: Dict, after: Dict, gain_db: Optional[float],
+                                  lufs_before: Optional[float], lufs_after: Optional[float]) -> Figure:
+    """Compare full-track spectral shape and band energy on shared scales."""
+    fig = _figure(10.0, 5.3)
+    grid = fig.add_gridspec(2, 2, height_ratios=[1.35, 1.0])
+    left = fig.add_subplot(grid[0, 0])
+    right = fig.add_subplot(grid[0, 1], sharex=left, sharey=left)
+    band = fig.add_subplot(grid[1, :])
+    matrices = [np.asarray(data["spectrogram_db"], dtype=float) for data in (before, after)]
+    vmin = float(min(np.percentile(matrix, 8) for matrix in matrices))
+    vmax = float(max(np.percentile(matrix, 99) for matrix in matrices))
+    for ax, data, matrix, title in ((left, before, matrices[0], tr("Original")),
+                                    (right, after, matrices[1], tr("Pre-master copy"))):
+        freqs = np.asarray(data["frequencies_hz"])
+        ax.imshow(matrix.T, origin="lower", aspect="auto", interpolation="nearest",
+                  extent=(0, float(data["duration_s"]), freqs[0], freqs[-1]),
+                  vmin=vmin, vmax=vmax, cmap="magma")
+        ax.set_yscale("log")
+        ax.set_ylim(20, min(20000, max(freqs[-1], 20.01)))
+        ax.set_title(title)
+        ax.set_xlabel(tr("Time (s)"))
+        ax.set_ylabel(tr("Frequency (Hz)"))
+        _style(ax, "")
+    labels = [tr(label) for label in ("Sub (20–60 Hz)", "Low (60–250 Hz)", "Low-mid (250–800 Hz)",
+                                      "Mid (0.8–2.5 kHz)", "High-mid (2.5–6 kHz)", "High (6–20 kHz)")]
+    keys = ("sub", "low", "low_mid", "mid", "high_mid", "high")
+    x = np.arange(len(keys))
+    width = 0.36
+    band.bar(x - width / 2, [before["band_balance_db"][key] for key in keys], width,
+             label=tr("Original"), color=BLUE_LIGHT)
+    band.bar(x + width / 2, [after["band_balance_db"][key] for key in keys], width,
+             label=tr("Pre-master copy"), color=BLUE)
+    band.set_xticks(x, labels, rotation=12, ha="right")
+    band.set_ylabel(tr("Band level (dB)"))
+    band.legend(frameon=False, ncols=2, loc="upper right")
+    _style(band)
+    loudness = lambda value: f"{float(value):.1f} LUFS" if value is not None else "—"
+    gain = f"{gain_db:+.1f} dB" if gain_db is not None else "—"
+    fig.suptitle(tr("Pre-master comparison · gain {gain} · loudness {before} → {after}",
+                    gain=gain, before=loudness(lufs_before), after=loudness(lufs_after)), color=TEXT)
+    return _finish(fig)
+
+
 def save(fig: Figure, path: str) -> str:
     fig.savefig(path, dpi=110, facecolor=SURFACE)
     return path
