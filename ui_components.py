@@ -60,7 +60,6 @@ class FoldableSection(ttk.Frame):
     def _fit_pane(self):
         pane = self.master
         try:
-            pane.update_idletasks()
             panes = pane.panes()
             index = panes.index(str(self))
             if len(panes) < 2:
