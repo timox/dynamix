@@ -79,5 +79,5 @@
 - Générer : `dist/DynaMix-<version>-setup.exe`
 
 - [x] Lancer `git diff --check`, `py_compile`, puis l’auto-contrôle embarqué dans l’application empaquetée.
-- [ ] Construire l’installeur Windows, réinstaller DynaMix sur ce poste et vérifier l’auto-contrôle de la version installée.
+- [x] Construire l’installeur Windows, réinstaller DynaMix sur ce poste et vérifier l’auto-contrôle de la version installée.
 - [ ] Créer et pousser des commits intermédiaires isolés sur `origin/main`, comme demandé; ne pas publier de release.
