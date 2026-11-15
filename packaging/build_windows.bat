@@ -9,13 +9,23 @@ if not exist venv\Scripts\python.exe (
     echo [ERROR] venv not found. Run install_windows.bat first.
     exit /b 1
 )
+python -c "import sys; print('Python from PATH: ' + sys.executable)" || (
+    echo [ERROR] Python on PATH is not usable. Add the installed Python 3.11 or 3.12 to PATH.
+    exit /b 1
+)
+for /f "delims=" %%p in ('python -c "import sys; print(sys.executable)"') do set "BUILD_PYTHON=%%p"
+set "PYTHONPATH=%CD%\venv\Lib\site-packages"
+"%BUILD_PYTHON%" -c "import PyInstaller, librosa, numpy, scipy, matplotlib" || (
+    echo [ERROR] Build dependencies are missing from the repository venv. Run install_windows.bat first.
+    exit /b 1
+)
 for /f "tokens=3" %%v in ('findstr /b "VERSION =" version.py') do set VERSION=%%~v
 if "%VERSION%"=="" (
     echo [ERROR] Could not read the version from version.py.
     exit /b 1
 )
 echo Building DynaMix %VERSION% ...
-venv\Scripts\python.exe -m PyInstaller packaging\dynamix.spec --noconfirm --distpath dist --workpath build || exit /b 1
+"%BUILD_PYTHON%" -m PyInstaller packaging\dynamix.spec --noconfirm --distpath dist --workpath build || exit /b 1
 start "" /wait dist\DynaMix\DynaMix.exe --self-test dist\selftest.txt
 set RESULT=%ERRORLEVEL%
 type dist\selftest.txt

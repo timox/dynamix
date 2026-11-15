@@ -16,7 +16,7 @@ class FoldableSection(ttk.Frame):
         states = config.get("fold_states", {}) if config is not None else {}
         if key and isinstance(states, dict):
             self.expanded = bool(states.get(key, expanded))
-        self.header = ttk.Button(self, text="", anchor="w", command=self.toggle)
+        self.header = ttk.Button(self, text="", command=self.toggle)
         self.header.pack(fill=tk.X)
         self.body = ttk.Frame(self)
         self._update_header()
