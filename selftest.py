@@ -94,6 +94,16 @@ def run(report_path=None) -> int:
         features = AudioAnalyzer(files["a"]).get_audio_features()
         return f"BPM {features['bpm']:.1f}, key {features['key']}, energy level {features['energy_level']:.1f}"
 
+    def spectral_comparison():
+        import numpy as np
+        from spectrogram import analyze_spectrum
+        result = analyze_spectrum(files["a"], max_time_bins=20, freq_bins=32)
+        image = np.asarray(result["spectrogram_db"])
+        assert image.shape == (10, 32), image.shape
+        assert np.isfinite(image).all()
+        assert len(result["band_balance_db"]) == 6
+        return f"{image.shape[0]}×{image.shape[1]} bins, {result['duration_s']:.1f} s"
+
     def mastering_check():
         import numpy as np
         from mastering import check_files, true_peak_limiter
@@ -125,9 +135,11 @@ def run(report_path=None) -> int:
         return "SQLite read / write"
 
     for name, fn in (("Tk and fonts", tk_fonts), ("Charts", charts_png), ("Audio files (WAV, FLAC, MP3)", audio_files),
-                     ("Track analysis (librosa)", analysis), ("Mastering check and limiter (numba)", mastering_check),
+                     ("Track analysis (librosa)", analysis), ("Premaster spectral comparison", spectral_comparison),
+                     ("Mastering check and limiter (numba)", mastering_check),
                      ("Transition FX", transition_fx), ("Analysis cache", cache)):
-        if name in ("Track analysis (librosa)", "Mastering check and limiter (numba)") and "a" not in files:
+        if name in ("Track analysis (librosa)", "Premaster spectral comparison",
+                    "Mastering check and limiter (numba)") and "a" not in files:
             failures.append(name)
             lines.append(f"[FAIL] {name}: skipped, the test audio could not be written")
             continue
