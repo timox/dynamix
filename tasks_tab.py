@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from i18n import tr
+from ui_components import FoldableSection
 
 log = logging.getLogger("dynamix.tasks")
 MUTED = "#52514e"
@@ -58,13 +59,15 @@ class TasksTabMixin:
         ttk.Button(bar, text=tr("Clear finished"), command=self.clear_finished_tasks).pack(side=tk.LEFT, padx=6)
         ttk.Label(bar, text=tr("Stop asks a task to stop at its next safe point; a stopped task leaves the project unchanged "
                                "(analyses already done stay in the cache)."), foreground=MUTED).pack(side=tk.LEFT, padx=8)
-        self.tasks_tree = ttk.Treeview(frame, columns=("Task", "Project", "Progress", "Time", "State"), show="headings",
+        task_list = FoldableSection(frame, tr("Background tasks"), self.config, "tasks.list")
+        task_list.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.tasks_tree = ttk.Treeview(task_list.body, columns=("Task", "Project", "Progress", "Time", "State"), show="headings",
                                        selectmode="browse")
         for col, width, stretch in (("Task", 180, False), ("Project", 140, False), ("Progress", 480, True),
                                     ("Time", 60, False), ("State", 90, False)):
             self.tasks_tree.heading(col, text=tr(col))
             self.tasks_tree.column(col, width=width, stretch=stretch, anchor="w")
-        self.tasks_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.tasks_tree.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.root.after(300, self._poll_tasks)
 
     # ------------------------------------------------------------------ running tasks

@@ -31,6 +31,10 @@ DEFAULTS: Dict[str, Any] = {
     "output_format": "same",       # same | wav | flac | mp3 | ogg
     "font_size": 9,                # GUI text size in points (ui_fonts.py), charts included
     "language": "auto",            # auto (the Windows language) | en | fr, applied at the next start (i18n.py)
+    "window_geometry": "1200x800",
+    "fold_states": {},
+    "pane_sizes": {},
+    "workflow_sidebar_visible": True,
     "ffmpeg_path": "",             # optional (M4A/AAC decoding); empty = the one on the PATH
     # audio editors a track can be opened in (audio_tools.py): path, and arguments where {file} is the audio file
     "editor_audacity": "", "editor_audacity_args": "{file}",

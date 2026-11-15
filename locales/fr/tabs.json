@@ -59,5 +59,7 @@
   "Analysis cache": "Cache d'analyse",
   "{files} files, {entries} results, {size:.1f} MB at {path}": "{files} fichiers, {entries} résultats, {size:.1f} Mo dans {path}",
   "DynaMix home": "Dossier DynaMix",
-  "{name} failed: {error}": "{name} : échec ({error})"
+  "{name} failed: {error}": "{name} : échec ({error})",
+  "Application log": "Journal de l'application",
+  "Background tasks": "Tâches en arrière-plan"
 }

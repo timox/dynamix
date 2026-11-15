@@ -406,5 +406,13 @@
   "Low-mid (250–800 Hz)": "Bas-médiums (250–800 Hz)",
   "Mid (0.8–2.5 kHz)": "Médiums (0,8–2,5 kHz)",
   "High-mid (2.5–6 kHz)": "Hauts-médiums (2,5–6 kHz)",
-  "High (6–20 kHz)": "Aigus (6–20 kHz)"
+  "High (6–20 kHz)": "Aigus (6–20 kHz)",
+  "Hide workflow panel": "Replier le volet des étapes",
+  "Show workflow panel": "Afficher le volet des étapes",
+  "Correction proposals": "Propositions de correction",
+  "Energy curve": "Courbe d'énergie",
+  "Set map": "Carte du set",
+  "Pre-master comparison": "Comparaison du pré-master",
+  "Transition marker list": "Liste des marqueurs de transition",
+  "Track source": "Source du morceau"
 }

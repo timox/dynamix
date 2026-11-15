@@ -41,6 +41,7 @@ from set_project import SetProject, STEPS, list_projects
 from fx_window import Player, TransitionFxPanel
 from transition_planner import TransitionPlanner
 from full_mix import render_full_mix
+from ui_components import FoldableSection
 
 MUTED = "#52514e"
 log = logging.getLogger("dynamix.gui")
@@ -108,12 +109,17 @@ class SetBuilderMixin:
         
         paned = ttk.PanedWindow(frame, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.workflow_paned = paned
+        self.workflow_sidebar_visible = bool(self.config.get("workflow_sidebar_visible", True))
+        paned.bind("<ButtonRelease-1>", lambda _e: self._save_pane_position("workflow_sidebar", paned, 0), add="+")
         
         # ---- left: workflow + options
         left = ttk.Frame(paned, width=350)
+        self.workflow_sidebar = left
         paned.add(left, weight=0)
-        steps_frame = ttk.LabelFrame(left, text=tr("Workflow"))
-        steps_frame.pack(fill=tk.X, padx=2, pady=2)
+        workflow_section = FoldableSection(left, tr("Workflow"), self.config, "sidebar.workflow")
+        workflow_section.pack(fill=tk.X, padx=2, pady=2)
+        steps_frame = workflow_section.body
         self.step_widgets = {}
         actions = {
             "analyze": (tr("Analyze"), self.analyze_playlist),
@@ -144,8 +150,9 @@ class SetBuilderMixin:
         self.audio_used_label = ttk.Label(steps_frame, text="", foreground=MUTED, wraplength=330, anchor="w", justify=tk.LEFT)
         self.audio_used_label.pack(fill=tk.X, padx=6, pady=(0, 4))
         
-        options_frame = ttk.LabelFrame(left, text=tr("Options for this set"))
-        options_frame.pack(fill=tk.X, padx=2, pady=6)
+        options_section = FoldableSection(left, tr("Options for this set"), self.config, "sidebar.options")
+        options_section.pack(fill=tk.X, padx=2, pady=6)
+        options_frame = options_section.body
         grid = ttk.Frame(options_frame)
         grid.pack(fill=tk.X, padx=4, pady=4)
         # set duration and energy curve are edited in the Proposals panel of the Tracks tab
@@ -178,27 +185,42 @@ class SetBuilderMixin:
         # ---- right: notebook
         right = ttk.Frame(paned)
         paned.add(right, weight=1)
+        right_bar = ttk.Frame(right)
+        right_bar.pack(fill=tk.X)
+        self.workflow_toggle_button = ttk.Button(right_bar, command=self._toggle_workflow_sidebar)
+        self.workflow_toggle_button.pack(side=tk.LEFT, padx=4, pady=2)
+        self._update_workflow_toggle()
         self.set_notebook = ttk.Notebook(right)
         self.set_notebook.pack(fill=tk.BOTH, expand=True)
+        if not self.workflow_sidebar_visible:
+            paned.forget(left)
+        else:
+            self.root.after(100, self._restore_pane_position, "workflow_sidebar", paned, 0)
         
         tracks_tab = ttk.Frame(self.set_notebook)
         self.set_notebook.add(tracks_tab, text=tr("Tracks"))
         lists = ttk.PanedWindow(tracks_tab, orient=tk.HORIZONTAL)
         lists.pack(fill=tk.BOTH, expand=True)
+        lists.bind("<ButtonRelease-1>", lambda _e: [
+            self._save_pane_position(f"tracks.{i}", lists, i) for i in range(2)
+        ], add="+")
+        for i in range(2):
+            self.root.after(120, self._restore_pane_position, f"tracks.{i}", lists, i)
 
         # column 1: every track of the library folder
-        lib_frame = ttk.Frame(lists)
+        lib_frame = FoldableSection(lists, tr("Library"), self.config, "tracks.library")
         lists.add(lib_frame, weight=1)
-        self.library_caption = ttk.Label(lib_frame, text=tr("Library"), foreground=MUTED, anchor="w")
+        lib_body = lib_frame.body
+        self.library_caption = ttk.Label(lib_body, text=tr("Library"), foreground=MUTED, anchor="w")
         self.library_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        lib_bar = ttk.Frame(lib_frame)
+        lib_bar = ttk.Frame(lib_body)
         lib_bar.pack(fill=tk.X, padx=4, pady=2)
         ttk.Label(lib_bar, text=tr("Filter:")).pack(side=tk.LEFT)
         self.library_filter_var = tk.StringVar()
         ttk.Entry(lib_bar, textvariable=self.library_filter_var, width=16).pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
         ttk.Button(lib_bar, text=tr("Rescan"), command=self.rescan_library).pack(side=tk.LEFT, padx=2)
         ttk.Button(lib_bar, text=tr("Add to selection →"), command=self.selection_add).pack(side=tk.LEFT, padx=2)
-        self.library_tree = self._make_tree(lib_frame, ("Filename", "Dur", "BPM", "Key", "Energy", "Sel"),
+        self.library_tree = self._make_tree(lib_body, ("Filename", "Dur", "BPM", "Key", "Energy", "Sel"),
                                             {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "Sel": 35},
                                             selectmode="extended")
         self.library_tree.bind("<Double-1>", lambda e: self.selection_add())
@@ -206,17 +228,18 @@ class SetBuilderMixin:
         self.library_filter_var.trace_add("write", lambda *args: self._refresh_library_table())
 
         # column 2: the tracks picked for this set
-        sel_frame = ttk.Frame(lists)
+        sel_frame = FoldableSection(lists, tr("Selection"), self.config, "tracks.selection")
         lists.add(sel_frame, weight=1)
-        self.selection_caption = ttk.Label(sel_frame, text=tr("Selection"), foreground=MUTED, anchor="w")
+        sel_body = sel_frame.body
+        self.selection_caption = ttk.Label(sel_body, text=tr("Selection"), foreground=MUTED, anchor="w")
         self.selection_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        sel_bar = ttk.Frame(sel_frame)
+        sel_bar = ttk.Frame(sel_body)
         sel_bar.pack(fill=tk.X, padx=4, pady=2)
         ttk.Button(sel_bar, text=tr("← Remove"), command=self.selection_remove).pack(side=tk.LEFT, padx=2)
         ttk.Button(sel_bar, text=tr("Analyze selection"), command=self.analyze_playlist).pack(side=tk.LEFT, padx=2)
         self.set_add_button = ttk.Button(sel_bar, text=tr("Add to set list ▶"), command=self.set_add)
         self.set_add_button.pack(side=tk.LEFT, padx=2)
-        self.selection_tree = self._make_tree(sel_frame, ("Filename", "Dur", "BPM", "Key", "Energy", "State"),
+        self.selection_tree = self._make_tree(sel_body, ("Filename", "Dur", "BPM", "Key", "Energy", "State"),
                                               {"Filename": 220, "Dur": 55, "BPM": 50, "Key": 75, "Energy": 50, "State": 70},
                                               selectmode="extended")
         self.selection_tree.bind("<<TreeviewSelect>>", lambda e: self.on_track_selected(self.selection_tree))
@@ -226,9 +249,11 @@ class SetBuilderMixin:
         # column 3: proposals and the set list
         right_col = ttk.Frame(lists)
         lists.add(right_col, weight=1)
-        prop_frame = ttk.LabelFrame(right_col, text=tr("Proposals (from the analysed selection)"))
+        prop_frame = FoldableSection(right_col, tr("Proposals (from the analysed selection)"),
+                                     self.config, "tracks.proposals")
         prop_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
-        prop_bar = ttk.Frame(prop_frame)
+        prop_body = prop_frame.body
+        prop_bar = ttk.Frame(prop_body)
         prop_bar.pack(fill=tk.X, padx=4, pady=2)
         ttk.Label(prop_bar, text=tr("Duration (min):")).pack(side=tk.LEFT)
         ttk.Spinbox(prop_bar, from_=15, to=240, textvariable=self.set_duration_var, width=5).pack(side=tk.LEFT, padx=3)
@@ -236,19 +261,20 @@ class SetBuilderMixin:
         ttk.Combobox(prop_bar, textvariable=self.energy_curve_var, values=list(set_proposer.CURVES) + ["all"],
                      width=11, state="readonly").pack(side=tk.LEFT, padx=3)
         ttk.Button(prop_bar, text=tr("Propose"), command=self.create_set_list).pack(side=tk.LEFT, padx=3)
-        prop_body = ttk.Frame(prop_frame)
-        prop_body.pack(fill=tk.X, padx=4)
-        self.proposal_tree = self._make_tree(prop_body, ("#", "Curve", "Tracks", "Duration", "Score", "Worst"),
+        proposals_table = ttk.Frame(prop_body)
+        proposals_table.pack(fill=tk.X, padx=4)
+        self.proposal_tree = self._make_tree(proposals_table, ("#", "Curve", "Tracks", "Duration", "Score", "Worst"),
                                              {"#": 30, "Curve": 90, "Tracks": 50, "Duration": 120, "Score": 50, "Worst": 90},
                                              height=4)
         self.proposal_tree.bind("<<TreeviewSelect>>", lambda e: self.preview_proposal())
         self.proposal_tree.bind("<Double-1>", lambda e: self.use_selected_proposal())
-        ttk.Button(prop_frame, text=tr("Use this proposal"), command=self.use_selected_proposal).pack(anchor="w", padx=4, pady=4)
-        set_frame = ttk.Frame(right_col)
+        ttk.Button(prop_body, text=tr("Use this proposal"), command=self.use_selected_proposal).pack(anchor="w", padx=4, pady=4)
+        set_frame = FoldableSection(right_col, tr("Set list"), self.config, "tracks.set_list")
         set_frame.pack(fill=tk.BOTH, expand=True)
-        self.set_caption = ttk.Label(set_frame, text=tr("Set list (playing order)"), foreground=MUTED, anchor="w")
+        set_body = set_frame.body
+        self.set_caption = ttk.Label(set_body, text=tr("Set list (playing order)"), foreground=MUTED, anchor="w")
         self.set_caption.pack(fill=tk.X, padx=4, pady=(4, 0))
-        set_bar = ttk.Frame(set_frame)
+        set_bar = ttk.Frame(set_body)
         set_bar.pack(fill=tk.X, padx=4, pady=2)
         self.set_edit_buttons = [ttk.Button(set_bar, text=text, command=cmd) for text, cmd in (
             (tr("▲ Up"), lambda: self.set_move(-1)), (tr("▼ Down"), lambda: self.set_move(1)), (tr("Remove"), self.set_remove))]
@@ -256,7 +282,7 @@ class SetBuilderMixin:
             button.pack(side=tk.LEFT, padx=2)
         self.finalize_set_button = ttk.Button(set_bar, text=tr("Finalize set list"), command=self.finalize_set_list)
         self.finalize_set_button.pack(side=tk.RIGHT, padx=2)
-        self.set_tree = self._make_tree(set_frame, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Flags"),
+        self.set_tree = self._make_tree(set_body, ("#", "Filename", "BPM", "Key", "Dur", "Energy", "Master", "Flags"),
                                         {"#": 35, "Filename": 200, "BPM": 55, "Key": 75, "Dur": 50, "Energy": 55, "Master": 55, "Flags": 240})
         self.set_tree.tag_configure("preview", foreground=MUTED)
         self.set_tree.bind("<<TreeviewSelect>>", self._on_set_tree_select)
@@ -325,6 +351,44 @@ class SetBuilderMixin:
         inner._scroll_canvas = canvas
         inner._notebook_tab = outer  # what set_notebook.select() needs: the inner frame is not a tab
         return inner
+
+    def _update_workflow_toggle(self):
+        self.workflow_toggle_button.configure(
+            text=tr("Hide workflow panel") if self.workflow_sidebar_visible else tr("Show workflow panel"))
+
+    def _toggle_workflow_sidebar(self):
+        if self.workflow_sidebar_visible:
+            self._save_pane_position("workflow_sidebar", self.workflow_paned, 0)
+            self.workflow_paned.forget(self.workflow_sidebar)
+            self.workflow_sidebar_visible = False
+        else:
+            self.workflow_paned.insert(0, self.workflow_sidebar, weight=0)
+            self.workflow_sidebar_visible = True
+            self.root.after(100, self._restore_pane_position, "workflow_sidebar", self.workflow_paned, 0)
+        self.config.set("workflow_sidebar_visible", self.workflow_sidebar_visible)
+        self.config.save()
+        self._update_workflow_toggle()
+
+    def _save_pane_position(self, key, paned, index):
+        try:
+            if len(paned.panes()) <= index + 1:
+                return
+            position = int(paned.sashpos(index))
+        except (tk.TclError, ValueError):
+            return
+        if position > 0:
+            sizes = dict(self.config.get("pane_sizes", {}) or {})
+            sizes[key] = position
+            self.config.set("pane_sizes", sizes)
+            self.config.save()
+
+    def _restore_pane_position(self, key, paned, index):
+        try:
+            position = int((self.config.get("pane_sizes", {}) or {}).get(key, 0))
+            if position > 0 and len(paned.panes()) > index + 1:
+                paned.sashpos(index, position)
+        except (tk.TclError, TypeError, ValueError):
+            pass
     
     # ------------------------------------------------------------------ open a track in an audio editor
     def _track_menu_entries(self, path):
@@ -1173,8 +1237,8 @@ class SetBuilderMixin:
                                         "'Use this proposal' to keep it", number=index + 1, curve=variant['curve'],
                                         score=variant['score'], count=len(tracks), duration=self._fmt_time(variant['effective_seconds'])))
         self._clear_frame(self.overview_frame)
-        self._show_figure(self.overview_frame,
-                          charts.set_overview(tracks, set_proposer.curve_targets(tracks, variant["curve"], self._mix_bars())))
+        self._show_folded_figure(self.overview_frame, tr("Energy curve"), "overview.energy",
+                                 charts.set_overview(tracks, set_proposer.curve_targets(tracks, variant["curve"], self._mix_bars())))
 
     def use_selected_proposal(self):
         if not self._require_project():
@@ -1755,6 +1819,13 @@ class SetBuilderMixin:
                     int(-e.delta / 120) if e.delta else (-1 if e.num == 4 else 1), "units"))
         canvas.draw()
         return canvas
+
+    def _show_folded_figure(self, container, title, key, fig):
+        section = FoldableSection(container, title, self.config, key)
+        section.pack(fill=tk.X, expand=False, padx=4, pady=3)
+        section.body._scroll_canvas = getattr(container, "_scroll_canvas", None)
+        self._show_figure(section.body, fig)
+        return section
     
     def _render_overview(self):
         tracks = self.current_set_list or (self.playlist_manager.tracks if self.playlist_manager else [])
@@ -1770,12 +1841,14 @@ class SetBuilderMixin:
         targets = None
         if self.current_set_list:
             targets = set_proposer.curve_targets(tracks, self._set_curve(), self._mix_bars())
-        self._show_figure(self.overview_frame, charts.set_overview(tracks, targets))
+        self._show_folded_figure(self.overview_frame, tr("Energy curve"), "overview.energy",
+                                 charts.set_overview(tracks, targets))
         planner = self.transition_planner
         if planner and planner.profiles:
             sheet = self._sheet_planner()  # the set map draws the same blends as the sheet: markers applied
-            self._show_figure(self.overview_frame, charts.set_timeline(sheet.profiles, sheet.transitions,
-                                                                       fx_labels=self._fx_labels()), replace=False)
+            self._show_folded_figure(self.overview_frame, tr("Set map"), "overview.map",
+                                     charts.set_timeline(sheet.profiles, sheet.transitions,
+                                                         fx_labels=self._fx_labels()))
         self._overview_dirty = False
     
     def _render_premaster(self):
@@ -1784,7 +1857,10 @@ class SetBuilderMixin:
             self._clear_frame(self.premaster_frame, tr("Run 'Pre-master Set' to see what was changed on every track."))
             return
         self._clear_frame(self.premaster_frame)
-        self._show_figure(self.premaster_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
+        report = FoldableSection(self.premaster_frame, tr("Pre-master comparison"), self.config, "premaster.comparison")
+        report.pack(fill=tk.X, padx=4, pady=3)
+        report.body._scroll_canvas = getattr(self.premaster_frame, "_scroll_canvas", None)
+        self._show_figure(report.body, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
         ttk.Label(self.premaster_frame, text=tr("The detailed pre-master report is in the Log tab."),
                   foreground=MUTED).pack(anchor="w", padx=4, pady=(0, 8))
 
@@ -1792,14 +1868,16 @@ class SetBuilderMixin:
         ttk.Label(self.transition_cues_frame, text=tr(
             "Transition markers are proposed automatically. Select a track to correct its start, intro end, outro start, or end."),
                   wraplength=900, justify=tk.LEFT).pack(anchor="w", padx=8, pady=6)
-        table = ttk.Frame(self.transition_cues_frame)
+        table = FoldableSection(self.transition_cues_frame, tr("Transition marker list"), self.config, "transitions.list")
         table.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
         columns = ("#", "Track", "Start", "Intro end", "Outro start", "End")
         widths = {"#": 36, "Track": 300, "Start": 105, "Intro end": 105, "Outro start": 105, "End": 105}
-        self.transition_cue_tree = self._make_tree(table, columns, widths, height=10)
+        self.transition_cue_tree = self._make_tree(table.body, columns, widths, height=10)
         self.transition_cue_tree.bind("<<TreeviewSelect>>", lambda _e: self._transition_cue_selected())
-        edit = ttk.LabelFrame(self.transition_cues_frame, text=tr("Selected track markers (seconds)"))
-        edit.pack(fill=tk.X, padx=6, pady=(2, 8))
+        edit_section = FoldableSection(self.transition_cues_frame, tr("Selected track markers (seconds)"),
+                                       self.config, "transitions.editor")
+        edit_section.pack(fill=tk.X, padx=6, pady=(2, 8))
+        edit = edit_section.body
         self._transition_cue_vars = {}
         fields = (("intro_start", tr("Track starts at (s):")), ("intro_end", tr("Intro ends at (s):")),
                   ("outro_start", tr("Outro starts at (s):")), ("outro_end", tr("Track ends at (s):")))
@@ -1872,28 +1950,40 @@ class SetBuilderMixin:
         self._save_transition_cues(self._transition_cue_profile, self._transition_cue_vars)
 
     def _build_auto_fixes_tab(self):
+        self.auto_fixes_frame.columnconfigure(0, weight=1)
+        self.auto_fixes_frame.rowconfigure(2, weight=1)
         ttk.Label(self.auto_fixes_frame, text=tr(
             "Run Band Analysis first. Only persistent resonance cuts can currently be applied automatically. "
             "Low-mid masking is shown as a diagnostic and needs a more reliable dynamic-EQ model."),
-                  wraplength=900, justify=tk.LEFT).pack(anchor="w", padx=8, pady=6)
-        tree_frame = ttk.Frame(self.auto_fixes_frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+                  wraplength=900, justify=tk.LEFT).grid(row=0, column=0, sticky="ew", padx=8, pady=6)
+        panels = ttk.PanedWindow(self.auto_fixes_frame, orient=tk.VERTICAL)
+        panels.grid(row=2, column=0, sticky="nsew", padx=6, pady=3)
+        self._auto_fix_panels = panels
+        corrections_section = FoldableSection(panels, tr("Correction proposals"),
+                                              self.config, "corrections.proposals")
+        panels.add(corrections_section, weight=1)
+        corrections_panel = corrections_section.body
+        tree_frame = ttk.Frame(corrections_panel)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.auto_fix_tree = self._make_tree(tree_frame, ("Track", "Correction", "Status"),
-                                             {"Track": 220, "Correction": 330, "Status": 150}, height=12)
+                                             {"Track": 220, "Correction": 330, "Status": 150}, height=7)
         self.auto_fix_tree.bind("<<TreeviewSelect>>", lambda e: self._auto_fix_selected_changed())
-        row = ttk.Frame(self.auto_fixes_frame)
-        row.pack(fill=tk.X, padx=6, pady=5)
+        row = ttk.Frame(corrections_panel)
+        row.pack(fill=tk.X, padx=6, pady=3)
         ttk.Button(row, text=tr("Validate after listening"), command=self._approve_auto_fix).pack(side=tk.LEFT, padx=2)
         ttk.Button(row, text=tr("Remove validation"), command=self._unapprove_auto_fix).pack(side=tk.LEFT, padx=2)
-        self.auto_fix_status = ttk.Label(self.auto_fixes_frame, text="", foreground=MUTED, wraplength=900)
-        self.auto_fix_status.pack(anchor="w", padx=8, pady=4)
-        self.auto_fix_spectral_frame = ttk.LabelFrame(self.auto_fixes_frame, text=tr("Full-track audio comparison"))
-        self.auto_fix_spectral_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=6, pady=4)
-        ttk.Label(self.auto_fix_spectral_frame,
+        self.auto_fix_status = ttk.Label(corrections_panel, text="", foreground=MUTED, wraplength=900)
+        self.auto_fix_status.pack(anchor="w", padx=8, pady=(0, 4))
+        self.auto_fix_spectral_frame = FoldableSection(
+            panels, tr("Full-track audio comparison"), self.config, "corrections.comparison")
+        panels.add(self.auto_fix_spectral_frame, weight=2)
+        ttk.Label(self.auto_fix_spectral_frame.body,
                   text=tr("Select a correction to compare the original and pre-master."),
                   foreground=MUTED).pack(anchor="w", padx=6, pady=4)
+        self.root.after(120, self._restore_pane_position, "corrections", panels, 0)
+        panels.bind("<ButtonRelease-1>", lambda _e: self._save_pane_position("corrections", panels, 0), add="+")
         player = ttk.LabelFrame(self.auto_fixes_frame, text=tr("Listening preview · 30-second passage"))
-        player.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=(4, 8))
+        player.grid(row=3, column=0, sticky="ew", padx=6, pady=(3, 7))
         controls = ttk.Frame(player)
         controls.pack(fill=tk.X, padx=6, pady=(4, 2))
         self._auto_fix_mode_labels = {
@@ -1978,7 +2068,7 @@ class SetBuilderMixin:
         result = self._selected_premaster_result(path)
         if result is None:
             self._auto_fix_spectral_cache.clear()
-            self._clear_frame(self.auto_fix_spectral_frame,
+            self._clear_frame(self.auto_fix_spectral_frame.body,
                               tr("Run Pre-master Set to compare the original with its rendered copy."))
             return
         key = tuple((p, os.path.getsize(p), os.stat(p).st_mtime_ns) for p in (path, result["output"]))
@@ -1987,8 +2077,8 @@ class SetBuilderMixin:
             self._show_auto_fix_spectral(sequence, result, *cached)
             return
         self._auto_fix_spectral_cache.clear()
-        self._clear_frame(self.auto_fix_spectral_frame)
-        ttk.Label(self.auto_fix_spectral_frame, text=tr("Analysing complete tracks…"),
+        self._clear_frame(self.auto_fix_spectral_frame.body)
+        ttk.Label(self.auto_fix_spectral_frame.body, text=tr("Analysing complete tracks…"),
                   foreground=MUTED).pack(anchor="w", padx=6, pady=4)
         def work(task):
             try:
@@ -2017,20 +2107,20 @@ class SetBuilderMixin:
         key = tuple((p, os.path.getsize(p), os.stat(p).st_mtime_ns) for p in
                     (result["input"], result["output"]))
         self._auto_fix_spectral_cache = {key: (before, after)}
-        self._clear_frame(self.auto_fix_spectral_frame)
+        self._clear_frame(self.auto_fix_spectral_frame.body)
         actions = result.get("actions") or {}
-        self._show_figure(self.auto_fix_spectral_frame, charts.premaster_spectral_comparison(
+        self._show_figure(self.auto_fix_spectral_frame.body, charts.premaster_spectral_comparison(
             before, after, actions.get("gain_db"), (result.get("before") or {}).get("lufs"),
             (result.get("after") or {}).get("lufs")))
 
     def _auto_fix_spectral_failed(self, sequence, error):
         if sequence == self._auto_fix_spectral_sequence:
-            self._clear_frame(self.auto_fix_spectral_frame,
+            self._clear_frame(self.auto_fix_spectral_frame.body,
                               tr("Could not compare tracks: {error}", error=error))
 
     def _auto_fix_spectral_stopped(self, sequence):
         if sequence == self._auto_fix_spectral_sequence:
-            self._clear_frame(self.auto_fix_spectral_frame, tr("Spectral comparison stopped."))
+            self._clear_frame(self.auto_fix_spectral_frame.body, tr("Spectral comparison stopped."))
 
     def _preview_auto_fix_matched(self):
         item = self._selected_auto_fix()
@@ -2091,7 +2181,7 @@ class SetBuilderMixin:
             self._cancel_auto_fix_spectral_task()
             self._auto_fix_spectral_sequence += 1
             self._auto_fix_spectral_cache.clear()
-            self._clear_frame(self.auto_fix_spectral_frame,
+            self._clear_frame(self.auto_fix_spectral_frame.body,
                               tr("Select a correction to compare the original and pre-master."))
             self.auto_fix_position_scale.configure(to=0.0)
             self.auto_fix_position_label.config(text=tr("Select a correction to listen"))
@@ -2322,8 +2412,8 @@ class SetBuilderMixin:
         key = profile.get("key")
         need_mastering = source == "premaster" or (profile.get("mastering") or {}).get("lufs") is None
         if not need_mastering:
-            self._track_section(tr("Mastering: loudness, stereo phase, tone balance"))
-            self._show_figure(self.track_frame, charts.track_detail(profile, median), replace=False)
+            section = self._track_section(tr("Mastering: loudness, stereo phase, tone balance"))
+            self._show_figure(section, charts.track_detail(profile, median))
         placeholder = ttk.Label(self.track_frame, text=(
             tr("Analysing {file}: mastering, bands, low-mid masking and resonances ...", file=os.path.basename(path)) if need_mastering
             else tr("Analysing {file}: bands, low-mid masking and resonances ...", file=os.path.basename(path))),
@@ -2349,11 +2439,11 @@ class SetBuilderMixin:
                     return  # another track or version was selected meanwhile
                 placeholder.destroy()
                 if mastering is not None:
-                    self._track_section(tr("Mastering: loudness, stereo phase, tone balance"))
+                    section = self._track_section(tr("Mastering: loudness, stereo phase, tone balance"))
                     shown = dict(profile, mastering=mastering, filename=os.path.basename(path))
-                    self._show_figure(self.track_frame, charts.track_detail(shown, median), replace=False)
-                self._track_section(tr("Band analysis: band tracking, low-mid masking, resonances"))
-                self._show_figure(self.track_frame, charts.band_dynamics(dict(report, key=key)), replace=False)
+                    self._show_figure(section, charts.track_detail(shown, median))
+                section = self._track_section(tr("Band analysis: band tracking, low-mid masking, resonances"))
+                self._show_figure(section, charts.band_dynamics(dict(report, key=key)))
             self.root.after(0, show)
         threading.Thread(target=work, daemon=True).start()
 
@@ -2396,12 +2486,19 @@ class SetBuilderMixin:
         self.update_status(tr("Transition cues updated; dependent exports need to be redone."))
 
     def _track_section(self, text):
-        ttk.Label(self.track_frame, text=text, font=ui_fonts.BOLD).pack(anchor="w", padx=8, pady=(10, 0))
+        key = "track.mastering" if text == tr("Mastering: loudness, stereo phase, tone balance") else "track.bands"
+        section = FoldableSection(self.track_frame, text, self.config, key)
+        section.pack(fill=tk.X, padx=4, pady=3)
+        section.body._scroll_canvas = getattr(self.track_frame, "_scroll_canvas", None)
+        return section.body
 
     def _track_source_header(self, original, copy_path, source, plays_copy):
         """Which file the Track tab analyses, and the choice between the original and the pre-mastered copy."""
-        row = ttk.Frame(self.track_frame)
-        row.pack(fill=tk.X, padx=8, pady=(8, 2))
+        source_section = FoldableSection(self.track_frame, tr("Track source"), self.config, "track.source")
+        source_section.pack(fill=tk.X, padx=4, pady=3)
+        source_section.body._scroll_canvas = getattr(self.track_frame, "_scroll_canvas", None)
+        row = ttk.Frame(source_section.body)
+        row.pack(fill=tk.X, padx=8, pady=(4, 2))
         shown = copy_path if source == "premaster" else original
         self.track_source_label = ttk.Label(
             row, text=(tr("File analysed: pre-mastered copy — {file}", file=shown) if source == "premaster"
@@ -2449,9 +2546,9 @@ class ConfigTabMixin:
         self.notebook.bind("<<NotebookTabChanged>>", self._environment_tab_selected, add="+")
         cfg = self.config
 
-        display = ttk.LabelFrame(frame, text=tr("Display"))
+        display = FoldableSection(frame, tr("Display"), self.config, "config.display")
         display.pack(fill=tk.X, padx=10, pady=(10, 5))
-        drow = ttk.Frame(display)
+        drow = ttk.Frame(display.body)
         drow.pack(fill=tk.X, padx=6, pady=6)
         ttk.Label(drow, text=tr("Font size:")).pack(side=tk.LEFT)
         self.cfg_font_size_var = tk.StringVar(value=str(self.font_size))
@@ -2470,9 +2567,9 @@ class ConfigTabMixin:
         language_box.pack(side=tk.LEFT, padx=4)
         language_box.bind("<<ComboboxSelected>>", lambda e: self._language_changed())
 
-        paths = ttk.LabelFrame(frame, text=tr("Paths"))
+        paths = FoldableSection(frame, tr("Paths"), self.config, "config.paths")
         paths.pack(fill=tk.X, padx=10, pady=5)
-        grid = ttk.Frame(paths)
+        grid = ttk.Frame(paths.body)
         grid.pack(fill=tk.X, padx=6, pady=6)
         ttk.Label(grid, text=tr("Projects folder:")).grid(row=0, column=0, sticky="w", pady=3)
         self.cfg_projects_var = tk.StringVar(value=cfg.get("projects_root"))
@@ -2517,9 +2614,10 @@ class ConfigTabMixin:
                   foreground=MUTED, wraplength=900, justify=tk.LEFT).grid(row=10, column=1, columnspan=4, sticky="w", padx=4)
         grid.columnconfigure(1, weight=1)
 
-        editors = ttk.LabelFrame(frame, text=tr("Audio editors (right-click a track: Open in...)"))
+        editors = FoldableSection(frame, tr("Audio editors (right-click a track: Open in...)"),
+                                  self.config, "config.editors")
         editors.pack(fill=tk.X, padx=10, pady=5)
-        eg = ttk.Frame(editors)
+        eg = ttk.Frame(editors.body)
         eg.pack(fill=tk.X, padx=6, pady=6)
         ttk.Label(eg, text=tr("Arguments: {file} is the audio file; empty = start the editor and show the file in Explorer "
                               "(Ableton Live and Mixbus do not open an audio file given on their command line).", file="{file}"),
@@ -2539,9 +2637,9 @@ class ConfigTabMixin:
                                                                                    sticky="w", padx=4, pady=(4, 0))
         eg.columnconfigure(1, weight=1)
         
-        defaults = ttk.LabelFrame(frame, text=tr("Defaults for new projects"))
+        defaults = FoldableSection(frame, tr("Defaults for new projects"), self.config, "config.defaults")
         defaults.pack(fill=tk.X, padx=10, pady=5)
-        dg = ttk.Frame(defaults)
+        dg = ttk.Frame(defaults.body)
         dg.pack(fill=tk.X, padx=6, pady=6)
         ttk.Label(dg, text=tr("Set duration (min):")).grid(row=0, column=0, sticky="w", pady=2)
         self.cfg_duration_var = tk.IntVar(value=int(cfg.get("set_duration")))
@@ -2572,13 +2670,14 @@ class ConfigTabMixin:
         self.cfg_status = ttk.Label(btns, text="", foreground=MUTED)
         self.cfg_status.pack(side=tk.LEFT, padx=10)
         
-        env = ttk.LabelFrame(frame, text=tr("Environment (what DynaMix found on this machine)"))
+        env = FoldableSection(frame, tr("Environment (what DynaMix found on this machine)"),
+                              self.config, "config.environment")
         env.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        env_bar = ttk.Frame(env)
+        env_bar = ttk.Frame(env.body)
         env_bar.pack(anchor="w", padx=6, pady=4)
         ttk.Button(env_bar, text=tr("Refresh"), command=self.refresh_environment).pack(side=tk.LEFT)
         ttk.Button(env_bar, text=tr("Clear whole cache..."), command=self.clear_whole_cache).pack(side=tk.LEFT, padx=6)
-        self.env_text = scrolledtext.ScrolledText(env, height=12, font=ui_fonts.MONO)
+        self.env_text = scrolledtext.ScrolledText(env.body, height=12, font=ui_fonts.MONO)
         self.env_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
     def _environment_tab_selected(self, _event=None):

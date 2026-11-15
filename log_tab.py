@@ -15,6 +15,7 @@ from tkinter import ttk
 import app_log
 import reports
 from i18n import tr
+from ui_components import FoldableSection
 
 # filter codes (the combobox shows their translation, see _log_level_code)
 LEVELS = {"All": logging.DEBUG, "Reports": None, "Warnings and errors": logging.WARNING, "Errors": logging.ERROR}
@@ -53,9 +54,9 @@ class LogTabMixin:
         ttk.Button(bar, text=tr("Open log folder"), command=self._log_open_folder).pack(side=tk.LEFT, padx=4)
         ttk.Button(bar, text=tr("Open reports folder"), command=self._reports_open_folder).pack(side=tk.LEFT, padx=4)
 
-        self.reports_box = ttk.LabelFrame(frame, text=tr("Reports (open project)"))
+        self.reports_box = FoldableSection(frame, tr("Reports (open project)"), self.config, "log.reports")
         self.reports_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
-        self.reports_tree = ttk.Treeview(self.reports_box, columns=("Time", "Report"), show="headings",
+        self.reports_tree = ttk.Treeview(self.reports_box.body, columns=("Time", "Report"), show="headings",
                                          height=6, selectmode="browse")
         self.reports_tree.heading("Time", text=tr("Time"))
         self.reports_tree.heading("Report", text=tr("Report"))
@@ -63,7 +64,7 @@ class LogTabMixin:
         self.reports_tree.column("Report", width=200)
         self.reports_tree.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0), pady=4)
         self.reports_tree.bind("<<TreeviewSelect>>", lambda e: self._report_selected())
-        viewer = ttk.Frame(self.reports_box)
+        viewer = ttk.Frame(self.reports_box.body)
         viewer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.report_text = tk.Text(viewer, wrap=tk.NONE, font="DynaMixMono", state=tk.DISABLED, height=12)
         rvsb = ttk.Scrollbar(viewer, orient=tk.VERTICAL, command=self.report_text.yview)
@@ -73,11 +74,11 @@ class LogTabMixin:
         rhsb.pack(side=tk.BOTTOM, fill=tk.X)
         self.report_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.log_body = ttk.Frame(frame)
+        self.log_body = FoldableSection(frame, tr("Application log"), self.config, "log.application")
         self.log_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        self.log_text = tk.Text(self.log_body, wrap=tk.NONE, font="DynaMixMono", state=tk.DISABLED)
-        vsb = ttk.Scrollbar(self.log_body, orient=tk.VERTICAL, command=self.log_text.yview)
-        hsb = ttk.Scrollbar(self.log_body, orient=tk.HORIZONTAL, command=self.log_text.xview)
+        self.log_text = tk.Text(self.log_body.body, wrap=tk.NONE, font="DynaMixMono", state=tk.DISABLED)
+        vsb = ttk.Scrollbar(self.log_body.body, orient=tk.VERTICAL, command=self.log_text.yview)
+        hsb = ttk.Scrollbar(self.log_body.body, orient=tk.HORIZONTAL, command=self.log_text.xview)
         self.log_text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         hsb.pack(side=tk.BOTTOM, fill=tk.X)

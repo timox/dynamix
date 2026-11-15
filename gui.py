@@ -6,6 +6,7 @@ transitions, pre-master, transition FX, playlist and Mixxx export.
 
 import logging
 import os
+import re
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -30,9 +31,12 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
 
     def __init__(self, root, log_buffer=None):
         self.root = root
-        self.root.geometry("1200x800")
-
         self.config = Config()
+        geometry = self.config.get("window_geometry", "1200x800")
+        self.root.geometry(geometry if re.fullmatch(r"\d+x\d+", str(geometry)) else "1200x800")
+        self.root.minsize(960, 640)
+        self._window_geometry_job = None
+        self.root.bind("<Configure>", self._queue_window_geometry_save, add="+")
         i18n.set_language(self.config.get("language"))  # before any text is shown
         self.root.title(tr("DynaMix - DJ Set Builder"))
         self.log_buffer = log_buffer  # app_log.LogBuffer shown by the Log tab (None: not captured)
@@ -62,6 +66,20 @@ class DynaMixGUI(SetBuilderMixin, ConfigTabMixin, LogTabMixin, TasksTabMixin):
         self.create_config_tab()
         self.create_log_tab()
         self.create_tasks_tab()
+
+    def _queue_window_geometry_save(self, event):
+        if event.widget is not self.root or self.root.state() != "normal":
+            return
+        if self._window_geometry_job is not None:
+            self.root.after_cancel(self._window_geometry_job)
+        self._window_geometry_job = self.root.after(700, self._save_window_geometry)
+
+    def _save_window_geometry(self):
+        self._window_geometry_job = None
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        if width >= 960 and height >= 640:
+            self.config.set("window_geometry", f"{width}x{height}")
+            self.config.save()
 
     def update_status(self, message: str):
         """Update status bar"""

@@ -82,6 +82,7 @@ setup(
         "selftest",
         "tasks",
         "tasks_tab",
+        "ui_components",
     ],
     python_requires=">=3.8",
     install_requires=read_requirements(),
