@@ -16,9 +16,14 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+
+
+# Several views can request the same full-track DSP while background jobs run.
+AUDIO_ANALYSIS_LOCK = threading.RLock()
 
 # Bump when an analyser changes in a way that makes old results wrong.
 ANALYZER_VERSION = "2026.09.07"

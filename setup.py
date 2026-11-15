@@ -65,6 +65,7 @@ setup(
         "analysis_store",
         "set_project",
         "charts",
+        "spectrogram",
         "config",
         "set_builder",
         "gui",
@@ -175,4 +176,4 @@ setup(
             "universal": True,
         },
     },
-) 
+)

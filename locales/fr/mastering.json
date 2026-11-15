@@ -1,4 +1,5 @@
 {
+  ", validated EQ: {cuts}": ", EQ validée : {cuts}",
   "_about": "French texts of the mastering check and pre-master pass (mastering.py): stored flags (N_ templates, translated at display time) and the text reports. Keys are the English texts of the code, values their translation; keep every {placeholder} unchanged. Jargon stays English where DJs use it (LUFS, true peak, PLR, pre-master, set, mono).",
 
   "polarity inverted between channels (correlation {corr:+.2f})": "polarité inversée entre les canaux (corrélation {corr:+.2f})",

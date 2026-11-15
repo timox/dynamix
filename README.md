@@ -125,6 +125,12 @@ since are marked to redo). **Reset project...** starts a set again from an empty
 tracks to be analysed again. Projects created by older versions keep working: their imported
 `source/` copies become their selection.
 
+Generated audio copies carry a bracketed stage marker in the filename so they remain identifiable
+in libraries that hide folders: `Title [PREMASTER].wav`, `Title [PREMASTER+FIX].wav`, or
+`Title [FX+PREMASTER+FIX].wav`. FX copies also identify their source stage (`[FX+PREMASTER]` or
+`[FX+SETLIST]`); playlists and full mixes default to `[SETLIST]` and `[FULLMIX]`. Original tracks
+are never renamed. Re-rendering replaces the stage marker instead of appending another one.
+
 - **Analysis cache** (`analysis_store.py`): `%LOCALAPPDATA%\DynaMix\analysis.sqlite` on Windows,
   `~/.dynamix/analysis.sqlite` elsewhere (`DYNAMIX_HOME` overrides).
 - **Configuration** (`config.py`): `config.json` next to the cache.

@@ -14,7 +14,7 @@ _HOP = 2048
 _READ_FRAMES = 262144
 
 
-def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256) -> Dict:
+def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256, check=None) -> Dict:
     """Return a display-sized log-frequency spectrogram and full-track band balance."""
     if max_time_bins < 1 or freq_bins < 2:
         raise ValueError("Spectrogram dimensions must be positive")
@@ -27,8 +27,6 @@ def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256) 
         edges = np.geomspace(20.0, max(20.01, nyquist), freq_bins + 1)
         centers = np.sqrt(edges[:-1] * edges[1:])
         time_bins = min(max_time_bins, max(1, int(np.ceil(duration / 2))))
-        power_sum = np.zeros(freq_bins, dtype=np.float64)
-        power_count = np.zeros(freq_bins, dtype=np.float64)
         band_sum = np.zeros(len(BANDS), dtype=np.float64)
         band_count = np.zeros(len(BANDS), dtype=np.float64)
         image_sum = np.zeros((time_bins, freq_bins), dtype=np.float64)
@@ -39,6 +37,8 @@ def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256) 
         carry = np.empty((0, audio.channels), dtype=np.float32)
         offset = 0
         while True:
+            if check is not None:
+                check()
             block = audio.read(_READ_FRAMES, dtype="float32", always_2d=True)
             if not len(block):
                 break
@@ -51,12 +51,8 @@ def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256) 
                 spec = np.fft.rfft(mono * window, axis=-1)
                 pxx = (np.abs(spec) ** 2) / (_NFFT * _NFFT)
                 fbin = np.clip(np.searchsorted(edges, frequencies, side="right") - 1, 0, freq_bins - 1)
-                for j in range(freq_bins):
-                    mask = fbin == j
-                    if np.any(mask):
-                        vals = pxx[:, mask].mean(axis=1)
-                        power_sum[j] += vals.sum()
-                        power_count[j] += len(vals)
+                binned = np.stack([pxx[:, fbin == j].mean(axis=1) if np.any(fbin == j)
+                                   else np.full(usable, 1e-20) for j in range(freq_bins)], axis=1)
                 for j, mask in enumerate(bands_idx):
                     if np.any(mask):
                         vals = pxx[:, mask].sum(axis=1)
@@ -67,20 +63,15 @@ def analyze_spectrum(path: str, max_time_bins: int = 900, freq_bins: int = 256) 
                 # Aggregate spectra into the bounded time-frequency display grid.
                 for tid in np.unique(tids):
                     selected = tids == tid
-                    image_sum[tid] += np.maximum(1e-20, np.stack([
-                        pxx[selected][:, fbin == j].mean(axis=1) if np.any(fbin == j)
-                        else np.full(np.count_nonzero(selected), 1e-20) for j in range(freq_bins)
-                    ], axis=1)).mean(axis=0)
-                    image_count[tid] += 1
+                    image_sum[tid] += np.maximum(1e-20, binned[selected]).sum(axis=0)
+                    image_count[tid] += np.count_nonzero(selected)
                 offset += usable * _HOP
             keep = min(_NFFT - _HOP, len(block))
             carry = block[-keep:].copy() if keep else np.empty((0, audio.channels), dtype=np.float32)
-        average = power_sum / np.maximum(power_count, 1)
         balance = {name: float(10 * np.log10(max(band_sum[i] / max(band_count[i], 1), 1e-20)))
                    for i, (name, _, _) in enumerate(BANDS)}
         db = 10 * np.log10(np.maximum(image_sum / np.maximum(image_count[:, None], 1), 1e-20))
         return {"duration_s": duration, "sample_rate": fs,
-                "times_s": ((np.arange(time_bins) + 0.5) * duration / time_bins).tolist(),
-                "frequencies_hz": centers.tolist(), "spectrogram_db": db.astype(np.float32).tolist(),
-                "band_balance_db": balance,
-                "average_spectrum_db": (10 * np.log10(np.maximum(average, 1e-20))).tolist()}
+                "times_s": (np.arange(time_bins) + 0.5) * duration / time_bins,
+                "frequencies_hz": centers, "spectrogram_db": db.astype(np.float32),
+                "band_balance_db": balance}

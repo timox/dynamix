@@ -91,6 +91,16 @@ def key_note(resonances: List[Dict], key: Optional[str]) -> Optional[str]:
               "(bass line, drone), check by ear before cutting").format(count=len(in_key), total=len(resonances), key=key)
 
 
+def resonance_corrections(report: Dict) -> List[Dict]:
+    """Convert detected persistent peaks into bounded EQ cuts (also works with older cached reports)."""
+    corrections = report.get("eq_corrections")
+    if corrections is not None:
+        return list(corrections)
+    return [{"freq_hz": r["freq_hz"], "gain_db": round(-min(6.0, max(2.0, r["prominence_db"] * 0.5)), 1),
+             "q": min(r["q"], 12), "prominence_db": r["prominence_db"], "persistence": r["persistence"]}
+            for r in report.get("resonances", [])[:3]]
+
+
 def _band_sos(fs: float, lo: float, hi: float, order: int = 4):
     nyq = fs / 2
     hi = min(hi, nyq * 0.98)
@@ -275,8 +285,11 @@ def analyze_bands(path: str, bpm: Optional[float] = None, audio: Optional[Tuple[
         template = [N_("persistent resonances: {first}"), N_("persistent resonances: {first}, {second}"),
                     N_("persistent resonances: {first}, {second}, {third}")][len(described) - 1]
         flags.append(template.format(**dict(zip(("first", "second", "third"), described))))
+    eq_corrections = []
     for r in resonances[:3]:
         gain = -min(6.0, max(2.0, r["prominence_db"] * 0.5))
+        eq_corrections.append({"freq_hz": r["freq_hz"], "gain_db": round(gain, 1), "q": min(r["q"], 12),
+                               "prominence_db": r["prominence_db"], "persistence": r["persistence"]})
         suggestions.append(N_("cut {gain:.0f} dB at {freq:.0f} Hz, Q {q:.0f} (+{prominence:.0f} dB, {share:.0f}% of the time)")
                            .format(gain=abs(gain), freq=r["freq_hz"], q=min(r["q"], 12), prominence=r["prominence_db"],
                                    share=r["persistence"] * 100))
@@ -286,7 +299,7 @@ def analyze_bands(path: str, bpm: Optional[float] = None, audio: Optional[Tuple[
         "file_path": path, "filename": os.path.basename(path), "bpm": bpm, "sample_rate": int(fs),
         "release_s": round((60.0 / bpm) / 4 if bpm else 0.12, 3),
         "stats": stats, "mud": mud, "resonances": resonances, "chart": chart,
-        "flags": flags, "eq_suggestions": suggestions, "verdict": verdict,
+        "flags": flags, "eq_suggestions": suggestions, "eq_corrections": eq_corrections, "verdict": verdict,
     }
 
 
@@ -323,14 +336,15 @@ def format_recommendation(kind: str, reasons: List[str]) -> str:
 
 
 def analyze_bands_cached(path: str, bpm: Optional[float] = None) -> Dict:
-    from analysis_store import get_store
-    store = get_store()
-    cached = store.get(path, "bands")
-    if cached is not None:
-        return cached
-    report = analyze_bands(path, bpm)
-    store.put(path, "bands", report)
-    return report
+    from analysis_store import AUDIO_ANALYSIS_LOCK, get_store
+    with AUDIO_ANALYSIS_LOCK:
+        store = get_store()
+        cached = store.get(path, "bands")
+        if cached is not None:
+            return cached
+        report = analyze_bands(path, bpm)
+        store.put(path, "bands", report)
+        return report
 
 
 def format_band_report(report: Dict, key: Optional[str] = None) -> str:

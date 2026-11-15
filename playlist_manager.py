@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from typing import List, Dict
 from audio_utils import AudioAnalyzer, upgrade_features
-from analysis_store import get_store
+from analysis_store import AUDIO_ANALYSIS_LOCK, get_store
 from set_proposer import energy_value, propose, transition_cost
 
 # Output folders DynaMix creates inside a music folder; never scanned as tracks.
@@ -89,8 +89,9 @@ class PlaylistManager:
                 if features is None:
                     status = 'analyzed'
                     print(f"Analyzing track {i+1}/{len(file_paths)}: {os.path.basename(file_path)}")
-                    analyzer = AudioAnalyzer(file_path)
-                    features = analyzer.get_audio_features()
+                    with AUDIO_ANALYSIS_LOCK:
+                        analyzer = AudioAnalyzer(file_path)
+                        features = analyzer.get_audio_features()
                     if store:
                         try:
                             store.put(file_path, 'features', features)
@@ -213,4 +214,3 @@ class PlaylistManager:
             raise ValueError("No tracks analyzed. Run analyze_playlist() first.")
         curve = {'build_up': 'build'}.get(energy_curve, energy_curve)
         return propose(list(self.tracks), duration_minutes * 60, curve=curve, mix_bars=mix_bars, variants=1)[0]['tracks']
-    

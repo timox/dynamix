@@ -30,6 +30,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -542,9 +543,110 @@ def fix_phase(x: np.ndarray, fs: int, phase: Dict, mono_bass_hz: float = 120.0) 
     return y, actions
 
 
+def apply_eq_corrections(x: np.ndarray, fs: int, corrections: List[Dict]) -> Tuple[np.ndarray, List[Dict]]:
+    """Apply validated parametric cuts and return the filters actually applied."""
+    applied = []
+    for correction in corrections or []:
+        freq, gain, q = (float(correction[k]) for k in ('freq_hz', 'gain_db', 'q'))
+        if not (20.0 <= freq < fs / 2 and -12.0 <= gain <= 0.0 and 0.1 <= q <= 12.0):
+            continue
+        a = 10 ** (gain / 40.0)
+        w0 = 2 * np.pi * freq / fs
+        alpha, cos_w0 = np.sin(w0) / (2 * q), np.cos(w0)
+        a0 = 1 + alpha / a
+        b = np.array([1 + alpha * a, -2 * cos_w0, 1 - alpha * a]) / a0
+        den = np.array([1.0, -2 * cos_w0 / a0, (1 - alpha / a) / a0])
+        x = signal.lfilter(b, den, x, axis=0).astype(np.float32)
+        applied.append({'freq_hz': freq, 'gain_db': gain, 'q': q})
+    return x, applied
+
+
+def render_preview_segment(path: str, output_path: str, start_s: float, duration_s: float,
+                           premaster: bool = False, target_lufs: float = -14.0,
+                           tone_target: Optional[Dict[str, float]] = None, repair_phase: bool = True,
+                           mono_bass_hz: float = 0.0, eq_corrections: Optional[List[Dict]] = None,
+                           report: Optional[Dict] = None) -> Tuple[float, float]:
+    """Render a short audition segment; only the selected audio and a short filter pre-roll are held in memory."""
+    eq_corrections = eq_corrections or []
+    with sf.SoundFile(path) as source:
+        fs = int(source.samplerate)
+        start = min(max(0, int(round(float(start_s) * fs))), len(source))
+        end = min(len(source), start + max(1, int(round(float(duration_s) * fs))))
+        preroll = int(1.5 * fs) if premaster or eq_corrections else 0
+        read_start = max(0, start - preroll)
+        source.seek(read_start)
+        x = source.read(end - read_start, dtype='float32', always_2d=True)
+    actual_duration = (end - start) / fs
+    if not len(x):
+        raise ValueError("The selected preview position is past the end of the track")
+
+    if premaster:
+        before = report or analyze_mastering_cached(path)
+        actions = {}
+        if repair_phase:
+            x, phase_actions = fix_phase(x, fs, before.get('phase', {}))
+            actions.update(phase_actions)
+        if mono_bass_hz > 0 and 'mono_bass_below_hz' not in actions:
+            phase = before.get('phase') or {}
+            already = phase.get('bass_is_mono') and (phase.get('mono_below_hz') or 0) >= mono_bass_hz
+            if phase.get('stereo') and not already:
+                x = mono_bass(x, fs, mono_bass_hz)
+                actions['mono_bass_below_hz'] = mono_bass_hz
+        x, _ = apply_eq_corrections(x, fs, eq_corrections)
+        b, a = _biquad_high_pass(fs, 20.0, 0.707)
+        x = signal.lfilter(b, a, x, axis=0).astype(np.float32)
+        if tone_target is not None:
+            balance = spectral_balance(x, fs) if actions or eq_corrections else before['balance_db']
+            x, _ = apply_tone_match(x, fs, balance, tone_target)
+        lufs = before.get('lufs')
+        gain_db = float(np.clip(target_lufs - lufs, -30.0, 30.0)) if lufs is not None else 0.0
+        x = (x * 10 ** (gain_db / 20)).astype(np.float32)
+        x = true_peak_limiter(x, fs, ceiling_db=-1.0)
+    elif eq_corrections:
+        x, _ = apply_eq_corrections(x, fs, eq_corrections)
+
+    x = x[start - read_start:]
+    write_audio(output_path, x, fs)
+    return start / fs, len(x) / fs
+
+
+def render_matched_preview_segment(reference_path: str, comparison_path: str, output_path: str,
+                                   start_s: float, duration_s: float, comparison: bool = True) -> Tuple[float, float, float]:
+    """Render one of two aligned excerpts, matching only the comparison excerpt to reference LUFS."""
+    with sf.SoundFile(reference_path) as reference, sf.SoundFile(comparison_path) as source:
+        if int(reference.samplerate) != int(source.samplerate):
+            raise ValueError("The original and pre-master sample rates differ")
+        fs = int(source.samplerate)
+        start = min(max(0, int(round(float(start_s) * fs))), len(source), len(reference))
+        count = min(max(1, int(round(float(duration_s) * fs))), len(source) - start, len(reference) - start)
+        if count <= 0:
+            raise ValueError("The selected preview position is past the end of a track")
+        source.seek(start)
+        x = source.read(count, dtype="float32", always_2d=True)
+        reference.seek(start)
+        ref = reference.read(count, dtype="float32", always_2d=True)
+    ref_lufs = integrated_loudness(ref, fs)
+    source_lufs = integrated_loudness(x, fs)
+    gain_db = 0.0
+    if comparison:
+        if np.isfinite(ref_lufs) and np.isfinite(source_lufs) and source_lufs > -60:
+            gain_db = float(np.clip(ref_lufs - source_lufs, -18.0, 18.0))
+            peak = float(np.max(np.abs(x))) if x.size else 0.0
+            if peak > 0:
+                gain_db = min(gain_db, 20 * np.log10(0.999 / peak))
+            x = (x * 10 ** (gain_db / 20)).astype(np.float32)
+        else:
+            raise ValueError("The selected excerpt is too quiet for reliable loudness matching")
+    else:
+        x = ref
+    write_audio(output_path, x, fs)
+    return start / fs, len(x) / fs, gain_db
+
+
 def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, ceiling_db: float = -1.0,
                     tone_target: Optional[Dict[str, float]] = None, remove_dc: bool = True,
-                    report: Optional[Dict] = None, repair_phase: bool = True, mono_bass_hz: float = 0.0) -> Dict:
+                    report: Optional[Dict] = None, repair_phase: bool = True, mono_bass_hz: float = 0.0,
+                    eq_corrections: Optional[List[Dict]] = None) -> Dict:
     """
     Write a corrected copy of one track. Returns what was done.
     mono_bass_hz > 0 forces the bass below that frequency to mono (skipped when it already is).
@@ -562,6 +664,10 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
         if phase.get('stereo') and not already:
             x = mono_bass(x, fs, mono_bass_hz)
             actions['mono_bass_below_hz'] = mono_bass_hz
+
+    x, applied_eq = apply_eq_corrections(x, fs, eq_corrections or [])
+    if applied_eq:
+        actions['eq_corrections'] = applied_eq
 
     if remove_dc:
         b, a = _biquad_high_pass(fs, 20.0, 0.707)
@@ -589,13 +695,31 @@ def premaster_track(path: str, output_path: str, target_lufs: float = -14.0, cei
     return {'input': path, 'output': output_path, 'before': before, 'after': after, 'actions': actions}
 
 
-def output_path_for(path: str, out_dir: str, fmt: str = 'same') -> str:
+_DYNAMIX_STAGE = re.compile(r" \[(?:SETLIST|PREMASTER(?:\+FIX)?|FX(?:\+(?:SETLIST|PREMASTER)(?:\+FIX)?)?)\]$", re.IGNORECASE)
+
+
+def output_path_for(path: str, out_dir: str, fmt: str = 'same', stage: Optional[str] = None) -> str:
     """Where a processed copy of path goes in out_dir (libsndfile cannot write M4A/AAC/AIFF: FLAC instead)."""
     base, ext = os.path.splitext(os.path.basename(path))
+    base = _DYNAMIX_STAGE.sub('', base)
+    if stage:
+        base += f" [{stage}]"
     out_ext = ext if fmt == 'same' else f".{fmt}"
     if out_ext.lower() in ('.m4a', '.aac', '.aiff', '.aif'):
         out_ext = '.flac'
     return os.path.join(out_dir, base + out_ext)
+
+
+def fx_stage_for(path: str) -> str:
+    """Describe the base used by an FX render in its library-visible filename."""
+    base = os.path.splitext(os.path.basename(path))[0]
+    match = _DYNAMIX_STAGE.search(base)
+    source_stage = match.group(0).strip(' []').upper() if match else ''
+    if source_stage == 'PREMASTER+FIX':
+        return 'FX+PREMASTER+FIX'
+    if source_stage == 'PREMASTER':
+        return 'FX+PREMASTER'
+    return 'FX+SETLIST'
 
 
 def write_audio(output_path: str, x: np.ndarray, fs: int) -> None:
@@ -611,14 +735,15 @@ def write_audio(output_path: str, x: np.ndarray, fs: int) -> None:
 
 def analyze_mastering_cached(path: str) -> Dict:
     """analyze_mastering() through the per-file analysis cache."""
-    from analysis_store import get_store
-    store = get_store()
-    cached = store.get(path, 'mastering')
-    if cached is not None:
-        return cached
-    report = analyze_mastering(path)
-    store.put(path, 'mastering', report)
-    return report
+    from analysis_store import AUDIO_ANALYSIS_LOCK, get_store
+    with AUDIO_ANALYSIS_LOCK:
+        store = get_store()
+        cached = store.get(path, 'mastering')
+        if cached is not None:
+            return cached
+        report = analyze_mastering(path)
+        store.put(path, 'mastering', report)
+        return report
 
 
 def collect_files(target: str) -> List[str]:
@@ -706,7 +831,7 @@ def format_check_summary(reports: List[Dict]) -> str:
 
 def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, ceiling_db: float = -1.0,
                     tone_match: bool = False, fmt: str = 'same', progress=None, repair_phase: bool = True,
-                    mono_bass_hz: float = 0.0) -> List[Dict]:
+                    mono_bass_hz: float = 0.0, corrections_by_path: Optional[Dict[str, List[Dict]]] = None) -> List[Dict]:
     """Pre-master a list of files into out_dir. Returns per-track results."""
     os.makedirs(out_dir, exist_ok=True)
     if progress:
@@ -720,10 +845,12 @@ def premaster_files(files: List[str], out_dir: str, target_lufs: float = -14.0, 
         if 'error' in report:
             results.append({'input': path, 'error': report['error']})
             continue
-        output_path = output_path_for(path, out_dir, fmt)
+        fixes = (corrections_by_path or {}).get(path, [])
+        output_path = output_path_for(path, out_dir, fmt, 'PREMASTER+FIX' if fixes else 'PREMASTER')
         try:
             results.append(premaster_track(path, output_path, target_lufs, ceiling_db, tone_target,
-                                           report=report, repair_phase=repair_phase, mono_bass_hz=mono_bass_hz))
+                                           report=report, repair_phase=repair_phase, mono_bass_hz=mono_bass_hz,
+                                           eq_corrections=fixes))
         except Exception as exc:
             results.append({'input': path, 'error': str(exc)})
     return results
@@ -743,6 +870,10 @@ def format_premaster_summary(results: List[Dict], out_dir: str) -> str:
             tone += tr(", polarity fixed")
         if 'mono_bass_below_hz' in a:
             tone += tr(", bass mono below {hz:.0f} Hz", hz=a['mono_bass_below_hz'])
+        if a.get('eq_corrections'):
+            cuts = ", ".join(f"{c['gain_db']:+.1f} dB at {c['freq_hz']:.0f} Hz (Q {c['q']:.1f})"
+                              for c in a['eq_corrections'])
+            tone += tr(", validated EQ: {cuts}", cuts=cuts)
         lines.append(tr("{name}: {before:.1f} -> {after:.1f} LUFS (gain {gain:+.1f} dB{tone}), true peak {tp:+.1f} dBTP, "
                         "score {score_before:.0f} -> {score_after:.0f}",
                         name=os.path.basename(r['output']), before=r['before']['lufs'], after=r['after']['lufs'],
@@ -832,10 +963,21 @@ def main():
     else:
         from set_project import SetProject
         project = None
+        corrections = {}
         if os.path.isdir(args.target) and SetProject.exists(args.target):
             project = SetProject.open(args.target)
             tracks = project.set_list_tracks() or project.tracks
             files = [t['file_path'] for t in tracks] or project.selection_files()
+            from analysis_store import get_store
+            from band_analysis import resonance_corrections
+            store = get_store()
+            for path, saved in (project.data.get('auto_fixes') or {}).items():
+                current = resonance_corrections(store.get(path, 'bands') or {})
+                valid = [c for c in saved if any(
+                    all(abs(float(c[k]) - float(candidate[k])) < 0.05 for k in ('freq_hz', 'gain_db', 'q'))
+                    for candidate in current)]
+                if valid:
+                    corrections[path] = valid
             args.out = args.out or project.premaster_dir
             if args.lufs == -14.0:
                 args.lufs = float(project.options.get("target_lufs", -14.0))
@@ -853,7 +995,8 @@ def main():
             args.out = os.path.join(base, PREMASTER_DIRNAME)
         results = premaster_files(files, args.out, args.lufs, args.tp, args.tone, args.format,
                                   progress=lambda i, n, name: print(f"Pre-mastering {i}/{n}: {name}"),
-                                  repair_phase=not args.no_phase_fix, mono_bass_hz=args.mono_bass or 0.0)
+                                  repair_phase=not args.no_phase_fix, mono_bass_hz=args.mono_bass or 0.0,
+                                  corrections_by_path=corrections)
         summary = format_premaster_summary(results, args.out)
         print()
         print(summary)

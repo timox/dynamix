@@ -19,7 +19,7 @@ import numpy as np
 
 import transition_fx as tfx
 from i18n import N_
-from mastering import load_audio, output_path_for, true_peak_limiter, write_audio
+from mastering import fx_stage_for, load_audio, output_path_for, true_peak_limiter, write_audio
 
 log = logging.getLogger("dynamix.fx")
 
@@ -124,7 +124,7 @@ def render_set(profiles: Sequence[Dict], fx_for_pair: Callable[[str, str], Optio
             log.warning("FX render: the limiter reduced %s by %.1f dB", prof.get("filename", ""), reduction)
         base = bases.get(prof["file_path"], prof["file_path"])
         output = os.path.join(out_dir, output_names[prof["file_path"]]) if output_names and prof["file_path"] in output_names \
-            else output_path_for(base, out_dir, fmt)
+            else output_path_for(base, out_dir, fmt, fx_stage_for(base))
         write_audio(output, x, sr)
         duration = len(x) / sr
         result = {"source": prof["file_path"], "input": base, "output": output,

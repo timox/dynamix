@@ -137,6 +137,7 @@ class SetProject:
             "steps": {key: {"done": False, "at": None, "details": {}} for key, _, _ in STEPS},
             "transitions": None,
             "premaster": None,
+            "auto_fixes": {},       # explicitly auditioned and approved EQ cuts, keyed by original track path
             "fx": {"transitions": {}, "render": None},  # FX recipes per track pair, and the last render
             "notes": "",
         }
@@ -334,6 +335,7 @@ class SetProject:
         self.data["tracks"] = []
         self.data["failed"] = []
         self.data["proposals"] = None
+        self.data["auto_fixes"] = {}
         self.mark("analyze", done=False)
         self.invalidate_from("analyze")
 

@@ -97,11 +97,24 @@ def run(report_path=None) -> int:
     def spectral_comparison():
         import numpy as np
         from spectrogram import analyze_spectrum
-        result = analyze_spectrum(files["a"], max_time_bins=20, freq_bins=32)
+        from mastering import render_matched_preview_segment
+        checks = 0
+        def check():
+            nonlocal checks
+            checks += 1
+        result = analyze_spectrum(files["a"], max_time_bins=20, freq_bins=32, check=check)
         image = np.asarray(result["spectrogram_db"])
         assert image.shape == (10, 32), image.shape
         assert np.isfinite(image).all()
         assert len(result["band_balance_db"]) == 6
+        assert checks > 1, checks
+        import charts
+        figure = charts.premaster_spectral_comparison(result, result, 0.0, -14.0, -14.0)
+        assert len(figure.axes) == 3
+        figure.clear()
+        preview = os.path.join(tmp, "matched_preview.wav")
+        start, duration, gain = render_matched_preview_segment(files["a"], files["b"], preview, 2.0, 5.0)
+        assert start == 2.0 and duration == 5.0 and np.isfinite(gain)
         return f"{image.shape[0]}×{image.shape[1]} bins, {result['duration_s']:.1f} s"
 
     def mastering_check():

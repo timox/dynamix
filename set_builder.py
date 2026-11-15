@@ -14,10 +14,12 @@ import logging
 import math
 import os
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import soundfile as sf
 
 import audio_tools
 import charts
@@ -28,13 +30,15 @@ import ui_fonts
 import set_proposer
 from analysis_store import get_store, dynamix_home
 from config import format_environment_report
-from mastering import (analyze_mastering_cached, check_files, format_check_summary, premaster_files, format_premaster_summary,
-                       playlist_tone_target)
-from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation
+from mastering import (analyze_mastering_cached, check_files, format_check_summary, premaster_files,
+                       format_premaster_summary, playlist_tone_target, render_preview_segment,
+                       render_matched_preview_segment)
+from spectrogram import analyze_spectrum
+from band_analysis import analyze_bands_cached, format_band_summary, mix_recommendation, resonance_corrections
 from mixxx_export import MixxxExporter, find_mixxx_db, format_report
 from playlist_manager import PlaylistManager
 from set_project import SetProject, STEPS, list_projects
-from fx_window import TransitionFxPanel
+from fx_window import Player, TransitionFxPanel
 from transition_planner import TransitionPlanner
 from full_mix import render_full_mix
 
@@ -46,6 +50,10 @@ STEP_DETAILS = {"count": "count {value}", "cached": "cached {value}", "analyzed"
                 "playlist": "playlist {value}", "cues": "cues {value}", "format": "format {value}"}
 # state of a selected track (code compared by the program) -> English text shown
 TRACK_STATES = {"analysed": "analysed", "pending": "pending", "failed": "failed", "missing": "missing"}
+
+
+def _path_key(path):
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
 
 
 class SetBuilderMixin:
@@ -69,6 +77,17 @@ class SetBuilderMixin:
         self._library_rescan_pending = False
         self._previewing = False
         self._suppress_set_tree_select = False
+        self._auto_fix_player = Player()
+        self._auto_fix_spectral_sequence = 0
+        self._auto_fix_spectral_cache = {}
+        self._auto_fix_spectral_task = None
+        self._auto_fix_matched_toggle = False
+        self._auto_fix_sequence = 0
+        self._auto_fix_play = None
+        self._auto_fix_timer = None
+        self._auto_fix_rendering = False
+        self._auto_fix_dragging = False
+        self._auto_fix_anchor_position = 0.0
         
         # ---- header: project selection
         head = ttk.Frame(frame)
@@ -247,6 +266,14 @@ class SetBuilderMixin:
         self.overview_frame = self._scrollable_tab(tr("Overview"))
         self.track_frame = self._scrollable_tab(tr("Track"))
         self.premaster_frame = self._scrollable_tab(tr("Pre-master"))
+        self.auto_fixes_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.auto_fixes_frame, text=tr("Corrections"))
+        self._auto_fix_rows = []
+        self._auto_fix_auditioned = set()
+        self._build_auto_fixes_tab()
+        self.transition_cues_frame = ttk.Frame(self.set_notebook)
+        self.set_notebook.add(self.transition_cues_frame, text=tr("Transitions"))
+        self._build_transition_cues_tab()
         for f, msg in ((self.overview_frame, tr("Analyze the tracks and build a set list to see the energy curve and the set map.")),
                        (self.track_frame, tr("Select a track in the Tracks tab to see its energy envelope, intro/outro and tone balance.")),
                        (self.premaster_frame, tr("Run 'Pre-master Set' to see what was changed on every track."))):
@@ -478,6 +505,7 @@ class SetBuilderMixin:
             self.transition_planner = None
             self._save_project()
             self._refresh_tables()
+            self._render_auto_fixes()
             self._render_overview()
             self._refresh_fx_tab()
         self.rescan_library()
@@ -520,6 +548,7 @@ class SetBuilderMixin:
         self._clear_frame(self.overview_frame, tr("Analyze the tracks and build a set list to see the energy curve and the set map."))
         self._render_overview()
         self._render_premaster()
+        self._render_auto_fixes()
         self._refresh_fx_tab()
         self._reports_refresh()
         self.update_status(tr("Project '{name}' loaded", name=project.name))
@@ -831,6 +860,7 @@ class SetBuilderMixin:
                 tree.delete(item)
         self._selection_rows, self._set_rows = [], []
         if self.project is None:
+            self._refresh_transition_cues_tab()
             return
         mastering = self._mastering_by_path()
         lib_by_path = {e["file_path"]: e for e in self._library_entries}
@@ -850,6 +880,7 @@ class SetBuilderMixin:
         set_seconds = sum(float(t.get("duration") or 0) for t in self._set_rows)
         self.set_caption.config(text=tr("Set list: {count} tracks, {duration} — playing order", count=len(self._set_rows),
                                         duration=self._fmt_time(set_seconds)))
+        self._refresh_transition_cues_tab()
 
     def _refresh_set_list_table(self, mastering=None):
         for item in self.set_tree.get_children():
@@ -927,6 +958,7 @@ class SetBuilderMixin:
         self.current_set_list = self.project.set_list_tracks()
         self._save_project()
         self._render_overview()
+        self._render_auto_fixes()
         self.set_notebook.select(self.overview_frame._notebook_tab)
         self.update_status(tr("Set list finalized; analysis is ready."))
     
@@ -1263,7 +1295,8 @@ class SetBuilderMixin:
         if tracks is None:
             return
         
-        files, note = self._played_files([t["file_path"] for t in tracks])
+        files = [t["file_path"] for t in tracks]
+        note = tr("Band analysis uses the original tracks so approved corrections are applied once in the pre-master.")
 
         def work(task):
             try:
@@ -1284,6 +1317,7 @@ class SetBuilderMixin:
                     summary = (tr("MIX REVISION RECOMMENDED for {count}/{total} tracks: {names}", count=len(needs_mix),
                                   total=len(reports), names=", ".join(needs_mix)) + "\n\n" + summary)
                 self.root.after(0, self.add_report, tr("Band Analysis"), summary, False)
+                self.root.after(0, self._render_auto_fixes)
                 self.root.after(0, self.update_status, tr("Band analysis done: {count}/{total} tracks need a mix "
                                                          "revision (report in the Log tab)", count=len(needs_mix), total=len(reports)))
             except Exception as e:
@@ -1308,12 +1342,21 @@ class SetBuilderMixin:
         tone = bool(self.premaster_tone_var.get())
         phase = bool(self.premaster_phase_var.get())
         mono_hz = float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0
+        corrections = project.data.get("auto_fixes") or {}
+        from analysis_store import get_store
+        store = get_store()
+        corrections = {path: [saved for saved in values
+                              if any(all(abs(float(saved[k]) - float(current[k])) < 0.05 for k in ("freq_hz", "gain_db", "q"))
+                                     for current in resonance_corrections(store.get(path, "bands") or {}))]
+                       for path, values in corrections.items()}
+        corrections = {path: values for path, values in corrections.items() if values}
         fmt = self.config.get("output_format", "same")
         
         def work(task):
             try:
                 results = premaster_files(files, out_dir, target_lufs=target_lufs, tone_match=tone, repair_phase=phase, fmt=fmt,
                                           mono_bass_hz=mono_hz,
+                                          corrections_by_path=corrections,
                                           progress=lambda i, n, name: task.progress(i, n, name))
                 task.check()  # stopped: the copies already written are overwritten next time, the project is unchanged
                 summary = format_premaster_summary(results, out_dir)
@@ -1419,6 +1462,8 @@ class SetBuilderMixin:
             return False
 
     def _fx_tab_changed(self):
+        if not self._auto_fix_tab_visible():
+            self._stop_auto_fix_playback()
         if self._fx_tab_visible():
             if self.project is not None:
                 self._refresh_fx_tab()
@@ -1447,7 +1492,7 @@ class SetBuilderMixin:
             return
         tracks, counts = self._with_rendered(tracks)
         filename = filedialog.asksaveasfilename(
-            title=tr("Save Playlist"), initialdir=self.project.exports_dir, initialfile=f"{self.project.name}.m3u",
+            title=tr("Save Playlist"), initialdir=self.project.exports_dir, initialfile=f"{self.project.name} [SETLIST].m3u",
             defaultextension=".m3u", filetypes=[(tr("M3U playlist"), "*.m3u"), (tr("M3U8 playlist (UTF-8)"), "*.m3u8"),
                                                 (tr("All files"), "*.*")])
         if not filename:
@@ -1567,7 +1612,7 @@ class SetBuilderMixin:
             return
         output_path = filedialog.asksaveasfilename(
             title=tr("Save full mix WAV"), initialdir=project.exports_dir,
-            initialfile=f"{project.name}.wav", defaultextension=".wav",
+            initialfile=f"{project.name} [FULLMIX].wav", defaultextension=".wav",
             filetypes=[(tr("WAV audio"), "*.wav"), (tr("All files"), "*.*")], parent=self.root,
             confirmoverwrite=False)
         if not output_path:
@@ -1742,6 +1787,505 @@ class SetBuilderMixin:
         self._show_figure(self.premaster_frame, charts.premaster_before_after(pm["results"], float(pm.get("target_lufs", -14.0))))
         ttk.Label(self.premaster_frame, text=tr("The detailed pre-master report is in the Log tab."),
                   foreground=MUTED).pack(anchor="w", padx=4, pady=(0, 8))
+
+    def _build_transition_cues_tab(self):
+        ttk.Label(self.transition_cues_frame, text=tr(
+            "Transition markers are proposed automatically. Select a track to correct its start, intro end, outro start, or end."),
+                  wraplength=900, justify=tk.LEFT).pack(anchor="w", padx=8, pady=6)
+        table = ttk.Frame(self.transition_cues_frame)
+        table.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        columns = ("#", "Track", "Start", "Intro end", "Outro start", "End")
+        widths = {"#": 36, "Track": 300, "Start": 105, "Intro end": 105, "Outro start": 105, "End": 105}
+        self.transition_cue_tree = self._make_tree(table, columns, widths, height=10)
+        self.transition_cue_tree.bind("<<TreeviewSelect>>", lambda _e: self._transition_cue_selected())
+        edit = ttk.LabelFrame(self.transition_cues_frame, text=tr("Selected track markers (seconds)"))
+        edit.pack(fill=tk.X, padx=6, pady=(2, 8))
+        self._transition_cue_vars = {}
+        fields = (("intro_start", tr("Track starts at (s):")), ("intro_end", tr("Intro ends at (s):")),
+                  ("outro_start", tr("Outro starts at (s):")), ("outro_end", tr("Track ends at (s):")))
+        for i, (key, label) in enumerate(fields):
+            column, row = (i % 2) * 2, i // 2
+            variable = tk.StringVar()
+            self._transition_cue_vars[key] = variable
+            ttk.Label(edit, text=label).grid(row=row, column=column, sticky="w", padx=(6, 2), pady=4)
+            ttk.Entry(edit, textvariable=variable, width=12).grid(row=row, column=column + 1, sticky="w", padx=(0, 12), pady=4)
+        actions = ttk.Frame(edit)
+        actions.grid(row=2, column=0, columnspan=4, sticky="ew", padx=6, pady=4)
+        ttk.Button(actions, text=tr("Start first track at 0 s"), command=self._first_track_cue_zero).pack(side=tk.LEFT)
+        ttk.Button(actions, text=tr("Apply cue changes"), command=self._apply_transition_cues).pack(side=tk.RIGHT)
+        self.transition_cue_status = ttk.Label(self.transition_cues_frame, text="", foreground=MUTED, wraplength=900)
+        self.transition_cue_status.pack(anchor="w", padx=8, pady=(0, 6))
+
+    def _refresh_transition_cues_tab(self):
+        if not hasattr(self, "transition_cue_tree"):
+            return
+        active_path = (_path_key(self._transition_cue_profile.get("file_path", ""))
+                       if getattr(self, "_transition_cue_profile", None) else None)
+        for iid in self.transition_cue_tree.get_children():
+            self.transition_cue_tree.delete(iid)
+        self._transition_cue_rows = []
+        project = self.project
+        profiles = (self.transition_planner.profiles if self.transition_planner else
+                    ((project.data.get("transitions") or {}).get("tracks") or []) if project else [])
+        if not profiles:
+            self._transition_cue_profile = None
+            self.transition_cue_status.config(text=tr("Plan transitions to see and edit the proposed markers."))
+            for variable in self._transition_cue_vars.values():
+                variable.set("")
+            return
+        marked = project.with_a_end_markers(profiles) if project else profiles
+        for i, profile in enumerate(marked, 1):
+            self._transition_cue_rows.append(profile)
+            self.transition_cue_tree.insert("", tk.END, iid=f"T{i}", values=(
+                i, profile.get("filename", os.path.basename(profile.get("file_path", ""))),
+                *(f"{float(profile.get(k, 0.0)):.2f}" for k in
+                  ("intro_start", "intro_end", "outro_start", "outro_end"))))
+        self.transition_cue_status.config(text=tr("Select a track to edit its four playback markers."))
+        if active_path:
+            for i, profile in enumerate(self._transition_cue_rows, 1):
+                if _path_key(profile.get("file_path", "")) == active_path:
+                    self.transition_cue_tree.selection_set(f"T{i}")
+                    self._transition_cue_selected()
+                    break
+
+    def _transition_cue_selected(self):
+        selected = self.transition_cue_tree.selection()
+        if not selected:
+            return
+        try:
+            index = int(selected[0][1:]) - 1
+            profile = self._transition_cue_rows[index]
+        except (ValueError, IndexError):
+            return
+        self._transition_cue_profile = profile
+        for key, variable in self._transition_cue_vars.items():
+            variable.set(f"{float(profile.get(key, 0.0)):.2f}")
+
+    def _first_track_cue_zero(self):
+        if self.project and self._transition_cue_profile and self.project.set_list:
+            if _path_key(self.project.set_list[0]) == _path_key(self._transition_cue_profile.get("file_path", "")):
+                self._transition_cue_vars["intro_start"].set("0.00")
+
+    def _apply_transition_cues(self):
+        if self._transition_cue_profile is None:
+            return
+        self._save_transition_cues(self._transition_cue_profile, self._transition_cue_vars)
+
+    def _build_auto_fixes_tab(self):
+        ttk.Label(self.auto_fixes_frame, text=tr(
+            "Run Band Analysis first. Only persistent resonance cuts can currently be applied automatically. "
+            "Low-mid masking is shown as a diagnostic and needs a more reliable dynamic-EQ model."),
+                  wraplength=900, justify=tk.LEFT).pack(anchor="w", padx=8, pady=6)
+        tree_frame = ttk.Frame(self.auto_fixes_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        self.auto_fix_tree = self._make_tree(tree_frame, ("Track", "Correction", "Status"),
+                                             {"Track": 220, "Correction": 330, "Status": 150}, height=12)
+        self.auto_fix_tree.bind("<<TreeviewSelect>>", lambda e: self._auto_fix_selected_changed())
+        row = ttk.Frame(self.auto_fixes_frame)
+        row.pack(fill=tk.X, padx=6, pady=5)
+        ttk.Button(row, text=tr("Validate after listening"), command=self._approve_auto_fix).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row, text=tr("Remove validation"), command=self._unapprove_auto_fix).pack(side=tk.LEFT, padx=2)
+        self.auto_fix_status = ttk.Label(self.auto_fixes_frame, text="", foreground=MUTED, wraplength=900)
+        self.auto_fix_status.pack(anchor="w", padx=8, pady=4)
+        self.auto_fix_spectral_frame = ttk.LabelFrame(self.auto_fixes_frame, text=tr("Full-track audio comparison"))
+        self.auto_fix_spectral_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=6, pady=4)
+        ttk.Label(self.auto_fix_spectral_frame,
+                  text=tr("Select a correction to compare the original and pre-master."),
+                  foreground=MUTED).pack(anchor="w", padx=6, pady=4)
+        player = ttk.LabelFrame(self.auto_fixes_frame, text=tr("Listening preview · 30-second passage"))
+        player.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=(4, 8))
+        controls = ttk.Frame(player)
+        controls.pack(fill=tk.X, padx=6, pady=(4, 2))
+        self._auto_fix_mode_labels = {
+            "original": tr("Original"), "original_fix": tr("Original + fix"),
+            "premaster": tr("Pre-master"), "premaster_fix": tr("Pre-master + fix"),
+        }
+        self._auto_fix_mode_codes = {label: code for code, label in self._auto_fix_mode_labels.items()}
+        self.auto_fix_mode_var = tk.StringVar(value=self._auto_fix_mode_labels["original"])
+        ttk.Label(controls, text=tr("Version:")).pack(side=tk.LEFT)
+        self.auto_fix_mode_combo = ttk.Combobox(controls, textvariable=self.auto_fix_mode_var,
+                                                values=tuple(self._auto_fix_mode_labels.values()),
+                                                state="readonly", width=24)
+        self.auto_fix_mode_combo.pack(side=tk.LEFT, padx=4)
+        self.auto_fix_mode_combo.bind("<<ComboboxSelected>>", self._auto_fix_mode_changed)
+        ttk.Button(controls, text=tr("▶ Listen"), command=self._preview_auto_fix).pack(side=tk.LEFT, padx=(8, 2))
+        ttk.Button(controls, text=tr("A/B · matched loudness"), command=self._preview_auto_fix_matched).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text=tr("■ Stop"), command=self._stop_auto_fix_playback).pack(side=tk.LEFT, padx=2)
+        position = ttk.Frame(player)
+        position.pack(fill=tk.X, padx=6, pady=(2, 5))
+        ttk.Label(position, text=tr("Position:")).pack(side=tk.LEFT)
+        self.auto_fix_position_var = tk.DoubleVar(value=0.0)
+        self.auto_fix_position_scale = ttk.Scale(position, from_=0.0, to=0.0, orient=tk.HORIZONTAL,
+                                                 variable=self.auto_fix_position_var)
+        self.auto_fix_position_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        self.auto_fix_position_scale.bind("<ButtonPress-1>", lambda e: setattr(self, "_auto_fix_dragging", True))
+        self.auto_fix_position_scale.bind("<ButtonRelease-1>", self._auto_fix_position_released)
+        self.auto_fix_position_label = ttk.Label(position, text=tr("Select a correction to listen"),
+                                                 foreground=MUTED, width=30)
+        self.auto_fix_position_label.pack(side=tk.LEFT)
+
+    def _render_auto_fixes(self):
+        if not hasattr(self, "auto_fix_tree"):
+            return
+        self._stop_auto_fix_playback()
+        self.auto_fix_tree.delete(*self.auto_fix_tree.get_children())
+        self._auto_fix_rows = []
+        project = self.project
+        if project is None or not project.is_done("analyze"):
+            self.auto_fix_status.config(text=tr("Analyze the tracks first, then run Band Analysis."))
+            return
+        from analysis_store import get_store
+        store = get_store()
+        approved = project.data.get("auto_fixes") or {}
+        for track in (project.set_list_tracks() or project.tracks):
+            path = track["file_path"]
+            report = store.get(path, "bands")
+            if report is None:
+                continue
+            for correction in resonance_corrections(report):
+                item = dict(track=path, correction=correction)
+                chosen = any(all(abs(float(c.get(k, -1)) - float(correction[k])) < 0.05
+                                 for k in ("freq_hz", "gain_db", "q"))
+                             for c in approved.get(path, []))
+                self._auto_fix_rows.append(item)
+                label = tr("cut {gain:.1f} dB at {freq:.1f} Hz, Q {q:.1f} (detected {share:.0f}% of the time)",
+                           gain=correction["gain_db"], freq=correction["freq_hz"], q=correction["q"],
+                           share=correction.get("persistence", 0) * 100)
+                state = tr("Validated") if chosen else tr("Listen, then validate")
+                self.auto_fix_tree.insert("", "end", iid=str(len(self._auto_fix_rows) - 1),
+                                          values=(track.get("filename", os.path.basename(path)), label, state))
+        if not self._auto_fix_rows:
+            self.auto_fix_status.config(text=tr("No applicable EQ cuts found. Re-run Band Analysis if it has not been run on the original tracks."))
+        else:
+            self.auto_fix_status.config(text=tr("Validated cuts are saved with the project and included in the next Pre-master Set."))
+
+    def _selected_auto_fix(self):
+        selected = self.auto_fix_tree.selection()
+        index = int(selected[0]) if selected else -1
+        return self._auto_fix_rows[index] if 0 <= index < len(self._auto_fix_rows) else None
+
+    def _selected_premaster_result(self, path):
+        pm = (self.project.data.get("premaster") or {}) if self.project else {}
+        return next((result for result in pm.get("results", [])
+                     if _path_key(result.get("input", "")) == _path_key(path)
+                     and result.get("output") and os.path.isfile(result["output"])), None)
+
+    def _load_auto_fix_spectral(self, item):
+        self._cancel_auto_fix_spectral_task()
+        self._auto_fix_spectral_sequence += 1
+        sequence = self._auto_fix_spectral_sequence
+        path = item["track"]
+        result = self._selected_premaster_result(path)
+        if result is None:
+            self._auto_fix_spectral_cache.clear()
+            self._clear_frame(self.auto_fix_spectral_frame,
+                              tr("Run Pre-master Set to compare the original with its rendered copy."))
+            return
+        key = tuple((p, os.path.getsize(p), os.stat(p).st_mtime_ns) for p in (path, result["output"]))
+        cached = self._auto_fix_spectral_cache.get(key)
+        if cached:
+            self._show_auto_fix_spectral(sequence, result, *cached)
+            return
+        self._auto_fix_spectral_cache.clear()
+        self._clear_frame(self.auto_fix_spectral_frame)
+        ttk.Label(self.auto_fix_spectral_frame, text=tr("Analysing complete tracks…"),
+                  foreground=MUTED).pack(anchor="w", padx=6, pady=4)
+        def work(task):
+            try:
+                from analysis_store import AUDIO_ANALYSIS_LOCK
+                with AUDIO_ANALYSIS_LOCK:
+                    before = analyze_spectrum(path, check=task.check)
+                    after = analyze_spectrum(result["output"], check=task.check)
+                task.check()
+                self.root.after(0, self._show_auto_fix_spectral, sequence, result, before, after)
+            except Exception as exc:
+                task.fail(tr("Could not compare tracks: {error}", error=exc))
+                self.root.after(0, self._auto_fix_spectral_failed, sequence, str(exc))
+        self._auto_fix_spectral_task = self._start_task(
+            tr("Compare original and pre-master"), work,
+            on_stopped=lambda: self._auto_fix_spectral_stopped(sequence))
+
+    def _cancel_auto_fix_spectral_task(self):
+        task = self._auto_fix_spectral_task
+        if task is not None and task.state == "running":
+            task.cancel()
+        self._auto_fix_spectral_task = None
+
+    def _show_auto_fix_spectral(self, sequence, result, before, after):
+        if sequence != self._auto_fix_spectral_sequence or not self._auto_fix_tab_visible():
+            return
+        key = tuple((p, os.path.getsize(p), os.stat(p).st_mtime_ns) for p in
+                    (result["input"], result["output"]))
+        self._auto_fix_spectral_cache = {key: (before, after)}
+        self._clear_frame(self.auto_fix_spectral_frame)
+        actions = result.get("actions") or {}
+        self._show_figure(self.auto_fix_spectral_frame, charts.premaster_spectral_comparison(
+            before, after, actions.get("gain_db"), (result.get("before") or {}).get("lufs"),
+            (result.get("after") or {}).get("lufs")))
+
+    def _auto_fix_spectral_failed(self, sequence, error):
+        if sequence == self._auto_fix_spectral_sequence:
+            self._clear_frame(self.auto_fix_spectral_frame,
+                              tr("Could not compare tracks: {error}", error=error))
+
+    def _auto_fix_spectral_stopped(self, sequence):
+        if sequence == self._auto_fix_spectral_sequence:
+            self._clear_frame(self.auto_fix_spectral_frame, tr("Spectral comparison stopped."))
+
+    def _preview_auto_fix_matched(self):
+        item = self._selected_auto_fix()
+        if item is None:
+            return
+        result = self._selected_premaster_result(item["track"])
+        if result is None:
+            self.auto_fix_status.config(text=tr("Run Pre-master Set to listen to the rendered copy."))
+            return
+        if self._auto_fix_rendering:
+            return
+        path, copy_path = item["track"], result["output"]
+        comparison = self._auto_fix_matched_toggle
+        self._auto_fix_matched_toggle = not comparison
+        self._stop_auto_fix_playback()
+        self._auto_fix_sequence += 1
+        sequence = self._auto_fix_sequence
+        self._auto_fix_rendering = True
+        output = os.path.join(dynamix_home(), "tmp", f"auto_fix_ab_{sequence % 2}.wav")
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        start = float(self.auto_fix_position_var.get())
+        self._auto_fix_anchor_position = start
+
+        def work(task):
+            try:
+                actual_start, actual_duration, gain = render_matched_preview_segment(
+                    path, copy_path, output, start, 30.0, comparison=comparison)
+                task.check()
+                self.root.after(0, self._auto_fix_matched_ready, sequence, output, actual_start,
+                                actual_duration, item, comparison, gain)
+            except Exception as exc:
+                task.fail(tr("Could not prepare matched A/B preview: {error}", error=exc))
+                self.root.after(0, setattr, self, "_auto_fix_rendering", False)
+                self.root.after(0, self.auto_fix_status.config,
+                                {"text": tr("Could not prepare matched A/B preview: {error}", error=exc)})
+        self._start_task(tr("Prepare matched A/B preview"), work,
+                         on_stopped=lambda: setattr(self, "_auto_fix_rendering", False))
+
+    def _auto_fix_matched_ready(self, sequence, output, start, duration, item, comparison, gain):
+        self._auto_fix_rendering = False
+        if sequence != self._auto_fix_sequence or not self._auto_fix_tab_visible():
+            return
+        try:
+            self._auto_fix_player.play_once(output)
+        except Exception as exc:
+            self._report_error(tr("Cannot play the listening preview: {error}", error=exc), exc)
+            return
+        label = tr("B · pre-master copy, compensation {gain:+.1f} dB", gain=gain) if comparison else tr("A · original, no compensation")
+        self.auto_fix_status.config(text=label)
+        self._auto_fix_play = {"started": time.monotonic(), "start": start, "duration": duration,
+                               "track_duration": getattr(self, "_auto_fix_track_duration", duration), "token": None}
+        self._tick_auto_fix_playhead()
+
+    def _auto_fix_selected_changed(self):
+        self._stop_auto_fix_playback()
+        item = self._selected_auto_fix()
+        if item is None:
+            self._cancel_auto_fix_spectral_task()
+            self._auto_fix_spectral_sequence += 1
+            self._auto_fix_spectral_cache.clear()
+            self._clear_frame(self.auto_fix_spectral_frame,
+                              tr("Select a correction to compare the original and pre-master."))
+            self.auto_fix_position_scale.configure(to=0.0)
+            self.auto_fix_position_label.config(text=tr("Select a correction to listen"))
+            return
+        self._auto_fix_matched_toggle = False
+        try:
+            duration = float(sf.info(item["track"]).duration)
+        except Exception:
+            duration = 0.0
+        self._auto_fix_track_duration = duration
+        self._auto_fix_anchor_position = 0.0
+        self.auto_fix_position_scale.configure(to=max(0.0, duration - 30.0))
+        self.auto_fix_position_var.set(0.0)
+        self._update_auto_fix_position_label(0.0, duration)
+        self._load_auto_fix_spectral(item)
+
+    def _update_auto_fix_position_label(self, position, duration):
+        def clock(seconds):
+            return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
+        self.auto_fix_position_label.config(text=f"{clock(position)} / {clock(duration)}")
+
+    def _auto_fix_position_released(self, _event=None):
+        self._auto_fix_dragging = False
+        if self._selected_auto_fix() is not None:
+            self._preview_auto_fix(anchor=True)
+
+    def _auto_fix_mode_changed(self, _event=None):
+        self._stop_auto_fix_playback()
+        position = self._auto_fix_anchor_position
+        self.auto_fix_position_var.set(position)
+        self._update_auto_fix_position_label(position, getattr(self, "_auto_fix_track_duration", position))
+
+    def _save_auto_fix_selection(self, approve):
+        item = self._selected_auto_fix()
+        if item is None or self.project is None:
+            return
+        project = self.project
+        path = item["track"]
+        correction = item["correction"]
+        fixes = project.data.setdefault("auto_fixes", {})
+        current = list(fixes.get(path, []))
+        current = [c for c in current if abs(float(c.get("freq_hz", -1)) - correction["freq_hz"]) >= 0.1]
+        if approve:
+            current.append({k: correction[k] for k in ("freq_hz", "gain_db", "q")})
+        if current:
+            fixes[path] = current
+        else:
+            fixes.pop(path, None)
+        project.invalidate_from("premaster")
+        project.data["premaster"] = None
+        self._save_project()
+        self._render_auto_fixes()
+        self._render_premaster()
+        self._refresh_fx_tab()
+        self.update_status(tr("Validated corrections changed; run Pre-master Set to update its copies."))
+
+    def _approve_auto_fix(self):
+        item = self._selected_auto_fix()
+        if item is None:
+            return
+        token = self._auto_fix_token(item)
+        if token not in self._auto_fix_auditioned:
+            messagebox.showinfo(tr("Listen first"), tr("Listen to the EQ proposal before validating it."), parent=self.root)
+            return
+        if not messagebox.askyesno(tr("Confirm correction"),
+                                   tr("You have listened to this EQ proposal and want it included in the pre-master?"),
+                                   parent=self.root):
+            return
+        self._save_auto_fix_selection(True)
+
+    def _unapprove_auto_fix(self):
+        if self._selected_auto_fix() is not None:
+            self._save_auto_fix_selection(False)
+
+    def _preview_auto_fix(self, anchor=True):
+        item = self._selected_auto_fix()
+        if item is None:
+            return
+        if self._auto_fix_rendering:
+            return
+        project = self.project
+        path = item["track"]
+        mode = self._auto_fix_mode_codes.get(self.auto_fix_mode_var.get(), "original")
+        from analysis_store import get_store
+        current = resonance_corrections(get_store().get(path, "bands") or {})
+        chosen = [c for c in project.data.get("auto_fixes", {}).get(path, [])
+                  if any(all(abs(float(c[k]) - float(candidate[k])) < 0.05 for k in ("freq_hz", "gain_db", "q"))
+                         for candidate in current)]
+        corrections = []
+        if mode.endswith("_fix"):
+            corrections = list(chosen)
+            if not any(all(abs(float(c.get(k, -1)) - float(item["correction"][k])) < 0.05
+                            for k in ("freq_hz", "gain_db", "q")) for c in corrections):
+                corrections.append({k: item["correction"][k] for k in ("freq_hz", "gain_db", "q")})
+        premaster = mode.startswith("premaster")
+        self._stop_auto_fix_playback()
+        self._auto_fix_sequence += 1
+        sequence = self._auto_fix_sequence
+        self._auto_fix_rendering = True
+        preview_dir = os.path.join(dynamix_home(), "tmp")
+        os.makedirs(preview_dir, exist_ok=True)
+        output = os.path.join(preview_dir, f"auto_fix_preview_{sequence % 2}.wav")
+        tracks = [t["file_path"] for t in (project.set_list_tracks() or project.tracks)]
+        target_lufs = float(self.premaster_lufs_var.get())
+        tone = bool(self.premaster_tone_var.get())
+        phase = bool(self.premaster_phase_var.get())
+        mono_hz = float(self.mono_bass_hz_var.get()) if bool(self.mono_bass_var.get()) else 0.0
+        start = float(self.auto_fix_position_var.get())
+        if anchor:
+            self._auto_fix_anchor_position = start
+        duration = 30.0
+
+        def work(task):
+            try:
+                report = None
+                tone_target = None
+                if premaster:
+                    reports = check_files(tracks) if tone else [analyze_mastering_cached(path)]
+                    report = next((r for r in reports if r.get("file_path") == path), None)
+                    if report is None or "error" in report:
+                        raise ValueError(tr("Mastering analysis is not available for this track."))
+                    tone_target = playlist_tone_target(reports) if tone else None
+                actual_start, actual_duration = render_preview_segment(
+                    path, output, start, duration, premaster=premaster, target_lufs=target_lufs,
+                    tone_target=tone_target, repair_phase=phase, mono_bass_hz=mono_hz,
+                    eq_corrections=corrections, report=report)
+                task.check()
+                self.root.after(0, self._auto_fix_preview_ready, sequence, output, actual_start,
+                                actual_duration, item, mode)
+            except Exception as exc:
+                self.root.after(0, setattr, self, "_auto_fix_rendering", False)
+                self._task_failed(task, tr("Could not create listening preview: {error}", error=exc), exc)
+        self._start_task(tr("Prepare listening preview"), work,
+                         on_stopped=lambda: setattr(self, "_auto_fix_rendering", False))
+
+    def _auto_fix_preview_ready(self, sequence, output, start, duration, item, mode):
+        self._auto_fix_rendering = False
+        if sequence != self._auto_fix_sequence or not self._auto_fix_tab_visible():
+            return
+        try:
+            self._auto_fix_player.play_once(output)
+        except Exception as exc:
+            self._report_error(tr("Cannot play the listening preview: {error}", error=exc), exc)
+            return
+        self._auto_fix_play = {"started": time.monotonic(), "start": start, "duration": duration,
+                               "track_duration": getattr(self, "_auto_fix_track_duration", duration),
+                               "token": self._auto_fix_token(item) if mode.endswith("_fix") else None}
+        self._tick_auto_fix_playhead()
+
+    def _tick_auto_fix_playhead(self):
+        self._auto_fix_timer = None
+        play = self._auto_fix_play
+        if play is None:
+            return
+        elapsed = min(play["duration"], max(0.0, time.monotonic() - play["started"]))
+        position = play["start"] + elapsed
+        if not self._auto_fix_dragging:
+            self.auto_fix_position_var.set(min(position, max(0.0, play["track_duration"] - 30.0)))
+        self._update_auto_fix_position_label(position, play["track_duration"])
+        if elapsed >= play["duration"]:
+            if play.get("token"):
+                token = play["token"]
+                self._auto_fix_auditioned.add(token)
+                for index, item in enumerate(self._auto_fix_rows):
+                    if self._auto_fix_token(item) == token:
+                        self.auto_fix_tree.set(str(index), "Status", tr("Listened; ready to validate"))
+                        break
+            self._stop_auto_fix_playback(increment=False)
+            return
+        self._auto_fix_timer = self.root.after(100, self._tick_auto_fix_playhead)
+
+    def _stop_auto_fix_playback(self, increment=True):
+        if increment:
+            self._auto_fix_sequence += 1
+        self._auto_fix_player.stop()
+        self._auto_fix_play = None
+        if self._auto_fix_timer is not None:
+            try:
+                self.root.after_cancel(self._auto_fix_timer)
+            except tk.TclError:
+                pass
+            self._auto_fix_timer = None
+
+    def _auto_fix_tab_visible(self):
+        try:
+            return (self.notebook.select() == str(self.set_builder_frame)
+                    and self.set_notebook.select() == str(self.auto_fixes_frame))
+        except tk.TclError:
+            return False
+
+    @staticmethod
+    def _auto_fix_token(item):
+        correction = item["correction"]
+        return (item["track"], float(correction["freq_hz"]), float(correction["gain_db"]), float(correction["q"]))
     
     def on_track_selected(self, tree=None):
         tree = tree or self.set_tree
@@ -1752,11 +2296,9 @@ class SetBuilderMixin:
             return
         profile = None
         planner = self.transition_planner
-        if planner:
-            for p in planner.profiles:
-                if p.get("file_path") == track.get("file_path"):
-                    profile = p
-                    break
+        profiles = planner.profiles if planner else ((self.project.data.get("transitions") or {}).get("tracks") or [])
+        track_path = _path_key(track.get("file_path", ""))
+        profile = next((p for p in profiles if _path_key(p.get("file_path", "")) == track_path), None)
         if profile is None:
             profile = dict(track)
         median = None
@@ -1766,14 +2308,16 @@ class SetBuilderMixin:
                 median = playlist_tone_target(reports)
         # which file to analyse: by default the one the set plays (the pre-mastered copy when it is used)
         original = track.get("file_path")
-        copy_path = self.project._premaster_outputs().get(original) if self.project else None
-        plays_copy = bool(copy_path) and self.project.premaster_map().get(original) == copy_path
+        outputs = self.project._premaster_outputs() if self.project else {}
+        copy_path = next((out for src, out in outputs.items() if _path_key(src) == _path_key(original)), None)
+        playing = self.project.premaster_map() if self.project else {}
+        plays_copy = bool(copy_path) and any(_path_key(src) == _path_key(original) and out == copy_path
+                                             for src, out in playing.items())
         choice = getattr(self, "_track_source_choice", None)
         source = choice if copy_path and choice in ("original", "premaster") else ("premaster" if plays_copy else "original")
         path = copy_path if source == "premaster" else original
         self._clear_frame(self.track_frame)
         self._track_source_header(original, copy_path, source, plays_copy)
-        self._track_cue_editor(profile)
         bpm = float(track.get("bpm") or 0) or None
         key = profile.get("key")
         need_mastering = source == "premaster" or (profile.get("mastering") or {}).get("lufs") is None
@@ -1785,12 +2329,16 @@ class SetBuilderMixin:
             else tr("Analysing {file}: bands, low-mid masking and resonances ...", file=os.path.basename(path))),
                                 foreground=MUTED)
         placeholder.pack(anchor="w", padx=20, pady=8)
-        request = self._band_request = (original, source)
+        request = self._band_request = (original, source, time.monotonic_ns())
 
         def work():
             try:
-                mastering = analyze_mastering_cached(path) if need_mastering else None
-                report = analyze_bands_cached(path, bpm=bpm)
+                from analysis_store import AUDIO_ANALYSIS_LOCK
+                with AUDIO_ANALYSIS_LOCK:
+                    if self._band_request != request:
+                        return  # drop obsolete selections before they allocate full-track analysis buffers
+                    mastering = analyze_mastering_cached(path) if need_mastering else None
+                    report = analyze_bands_cached(path, bpm=bpm)
             except Exception as exc:
                 message = tr("Analysis of {file} failed: {error}", file=os.path.basename(path), error=exc)  # `exc` is deleted before the callback runs
                 self.root.after(0, lambda: placeholder.winfo_exists() and placeholder.config(text=message))
@@ -1809,26 +2357,6 @@ class SetBuilderMixin:
             self.root.after(0, show)
         threading.Thread(target=work, daemon=True).start()
 
-    def _track_cue_editor(self, profile):
-        if (not self.project or not self.project.is_done("setlist") or not self.transition_planner or
-                not any(p.get("file_path") == profile.get("file_path") for p in self.transition_planner.profiles)):
-            return
-        frame = ttk.LabelFrame(self.track_frame, text=tr("Adjust transition cues (seconds)"))
-        frame.pack(fill=tk.X, padx=8, pady=6)
-        fields = (("intro_start", tr("Track starts at (s):")), ("intro_end", tr("Intro ends at (s):")),
-                  ("outro_start", tr("Outro starts at (s):")), ("outro_end", tr("Track ends at (s):")))
-        shown = self.project.with_a_end_markers([profile])[0]
-        variables = {}
-        for i, (key, label) in enumerate(fields):
-            column, row = i % 2, i // 2
-            ttk.Label(frame, text=label).grid(row=row, column=column * 2, sticky="w", padx=(6, 2), pady=3)
-            variable = tk.StringVar(value=f"{float(shown.get(key, 0.0)):.2f}")
-            ttk.Entry(frame, textvariable=variable, width=9).grid(row=row, column=column * 2 + 1, sticky="w", padx=(0, 8))
-            variables[key] = variable
-        ttk.Button(frame, text=tr("Apply cue changes"),
-                   command=lambda p=profile, v=variables: self._save_transition_cues(p, v)).grid(
-                       row=2, column=0, columnspan=4, sticky="e", padx=6, pady=4)
-
     def _save_transition_cues(self, profile, variables):
         try:
             cues = {key: float(variable.get()) for key, variable in variables.items()}
@@ -1840,6 +2368,11 @@ class SetBuilderMixin:
         if not all(math.isfinite(value) and 0 <= value <= duration for value in ordered) or not (
                 cues["intro_start"] < cues["intro_end"] <= cues["outro_start"] < cues["outro_end"]):
             messagebox.showwarning(tr("Warning"), tr("Cue positions must be ordered within the track duration."), parent=self.root)
+            return
+        if self.transition_planner is None:
+            self.transition_planner = self._planner_from_project()
+        if self.transition_planner is None:
+            messagebox.showwarning(tr("Warning"), tr("Plan transitions before editing cue positions."), parent=self.root)
             return
         profiles = [dict(p) for p in self.transition_planner.profiles]
         index = next((i for i, p in enumerate(profiles) if p.get("file_path") == profile.get("file_path")), None)
@@ -1854,6 +2387,7 @@ class SetBuilderMixin:
         self.transition_planner = self.transition_planner.for_cues(profiles)
         self.project.set_transitions(self.transition_planner.to_dict())
         self._save_project()
+        self._refresh_transition_cues_tab()
         self._render_overview()
         self._refresh_fx_tab()
         self._write_sheet_files()

@@ -24,7 +24,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from audio_utils import AudioAnalyzer, energy_compatibility_score, key_compatibility_score
-from analysis_store import get_store
+from analysis_store import AUDIO_ANALYSIS_LOCK, get_store
 from i18n import N_, tr, tr_text
 
 
@@ -135,7 +135,8 @@ class TransitionPlanner:
             if cached is not None:
                 cached['from_cache'] = True
                 return cached
-        profile = self._compute_profile(track)
+        with AUDIO_ANALYSIS_LOCK:
+            profile = self._compute_profile(track)
         if store:
             store.put(path, self._cache_kind(), profile)
         profile['from_cache'] = False
